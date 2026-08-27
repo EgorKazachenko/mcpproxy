@@ -216,3 +216,53 @@ per-recipe политики в нашем колбэке, а не в конфи�
 
 **Чего проба не покрывает:** SOCKS-путь (сырой TCP) до `filterRequest` не доходит; HTTPS без
 `tlsTerminate` — тоже. Обе границы закрыты решениями D11 и D12.
+
+---
+
+# Пробы третьего круга — проверка находок ревью раунда 2
+
+## П8. Атрибуция на TLS-терминированном пути — БЛОКЕР ПОДТВЕРЖДЁН
+
+```
+INVOC-HTTP   exit=0 out="200"
+INVOC-HTTPS  exit=0 out="200"
+--- filterRequest увидел ---
+{"url":"http://example.com/","hasProxyAuth":true,"headers":["accept","host","proxy-authorization","proxy-connection","user-agent"]}
+{"url":"https://example.com/","hasProxyAuth":false,"headers":["accept","host","user-agent"]}
+```
+
+**На HTTPS `proxy-authorization` отсутствует.** Клиент шлёт его на `CONNECT`, а не внутрь туннеля,
+и терминированный путь строит `Request` из заголовков внутреннего запроса. Значит `commandId`
+внутри `filterRequest` для HTTPS недоступен, и D11 в первой редакции — принуждение per-recipe
+политики в колбэке — **не работает для того единственного протокола, который нужен S5**.
+
+## П9. `updateConfig` как альтернатива — РАБОТАЕТ
+
+```
+=== HTTPS под updateConfig ===
+allow=[example.com] → https://example.com      exit=0  out="200"
+allow=[example.org] → https://example.com      exit=56 out="000"
+allow=[]           → https://example.com       exit=56 out="000"
+
+--- сетевые нарушения ---
+  deny network-outbound example.com:443 (host is not on the allow list) | Yg==
+  deny network-outbound example.com:443 (host is not on the allow list) | Yw==
+```
+
+`Yg==` и `Yw==` — base64 от `b` и `c`, то есть от `commandId` соответствующих вызовов.
+
+**`updateConfig` принуждает HTTPS per-invocation и атрибутирует нарушения правильно.** Это
+основание пересмотренного D11: принуждение переезжает в `updateConfig` под семафором, а
+`filterRequest` остаётся телеметрией. Отвергать эту альтернативу скобкой в Ф8, как делала первая
+редакция плана, было ошибкой.
+
+**Чего проба не покрывает:** нога с сырым TCP (`nc`) вернула `rc=0` в обоих случаях и потому
+неинформативна — `nc` не ходит через прокси-переменные, а его код возврата не доказывает
+установленное соединение. Поведение SOCKS-пути под `updateConfig` остаётся непроверенным и
+помечено `ASSUMED`.
+
+**Побочное следствие, которое чинит baseline.** Под семафором 1 исполняется ровно один вызов,
+значит всё, что видит `filterRequest`, принадлежит ему по построению — атрибуция байт становится
+бесплатной. И режим `none` может держать `allowedDomains: ['*']` на время своего вызова, не
+открывая сеть остальным: это делает `evil.io` из S5 достижимым в baseline, чего первая редакция
+D11 не давала.
