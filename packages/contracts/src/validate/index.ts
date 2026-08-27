@@ -1,10 +1,9 @@
-import { readFileSync } from 'node:fs';
-import type { ErrorObject, ValidateFunction } from 'ajv';
-import { Ajv2020 } from 'ajv/dist/2020.js';
+import type { ErrorObject } from 'ajv';
 import type { Document, LineCounter } from 'yaml';
 import type { Manifest } from '../manifest.generated.js';
 import type { Diagnostic, ManifestSource, ParseManifestResult, PatternMatcher } from '../types.js';
 import { matcherKey } from '../types.js';
+import { manifestValidator } from './ajv.js';
 import { compilePattern } from './regex.js';
 import { parseYaml } from './yaml.js';
 
@@ -12,26 +11,6 @@ import { parseYaml } from './yaml.js';
  * Единственная публичная точка загрузки манифеста (R4). Скомпилированный валидатор ajv
  * наружу не экспортируется: потребитель, получивший его, свободен выключить любую проверку.
  */
-
-// Схема читается из публикуемого файла, а не вшивается сборкой: потребитель, редактор и
-// демон обязаны видеть один и тот же артефакт. Путь одинаково резолвится и из `dist/validate`,
-// и из `src/validate` — в обоих случаях это `<пакет>/schema`.
-const SCHEMA_URL = new URL('../../schema/mcpproxy.schema.json', import.meta.url);
-
-let compiled: ValidateFunction | null = null;
-
-function manifestValidator(): ValidateFunction {
-  if (compiled === null) {
-    const schema: unknown = JSON.parse(readFileSync(SCHEMA_URL, 'utf8'));
-    // `discriminator: true` сводит союз из пяти веток к одной диагностике вместо восьми (Ф5).
-    // `strictRequired: false` обязателен рядом с ним: иначе strict-режим отказывается
-    // компилировать схему, в которой тег объявлен через `const`.
-    // Импорт `Ajv2020` — именованный: дефолтный не конструируется под NodeNext (Ф4).
-    const ajv = new Ajv2020({ allErrors: true, discriminator: true, strict: true, strictRequired: false });
-    compiled = ajv.compile(schema as object);
-  }
-  return compiled;
-}
 
 const NUMERIC = /^(0|[1-9][0-9]*)$/;
 
