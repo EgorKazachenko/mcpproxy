@@ -1,4 +1,12 @@
-import { asRecipeName, canonicalizeJcs, matcherKey, type Param, type PatternMatcher, type Recipe } from '@mcpproxy/contracts';
+import {
+  asRecipeName,
+  canonicalizeJcs,
+  DESCRIPTION_MAX_LENGTH,
+  matcherKey,
+  type Param,
+  type PatternMatcher,
+  type Recipe,
+} from '@mcpproxy/contracts';
 import { describe, expect, it } from 'vitest';
 import { codePointLength, DENIALS_MAX, VALUE_MAX_CODE_POINTS } from './denial.js';
 import { validateParams } from './params.js';
@@ -246,14 +254,62 @@ describe('validateParams — потолок на список отказов (R3
 
     expect(result.denials).toHaveLength(DENIALS_MAX + 1);
     expect(result.denials.at(-1)?.code).toBe('denials-truncated');
-    expect(result.denials.at(-1)?.reason).toContain(String(DENIALS_MAX + 50));
+    // Три числа, а не одно: по общему счёту нельзя отличить «сто тысяч мусорных ключей» от
+    // «сто тысяч мусорных плюс один настоящий отказ», а именно это и надо знать по записи.
+    const reason = result.denials.at(-1)?.reason ?? '';
+    expect(reason).toContain(`всего ${DENIALS_MAX + 50}`);
+    expect(reason).toContain(`показаны первые ${DENIALS_MAX}`);
+    expect(reason).toContain('не показаны ещё 50');
   });
 
-  it('имя параметра из запроса усечено', () => {
+  it('отказы по ОБЪЯВЛЕННЫМ параметрам не вытесняются неизвестными ключами', () => {
+    // Атакующий, контролирующий сокет (И6), добивает запрос мусорными ключами. Вердикт
+    // «отвергнут» от порядка не зависит, а предмет разбора — зависит: собери мы неизвестные
+    // первыми, единственный отказ, называющий параметр с полезной нагрузкой, вытеснялся бы.
+    const many: Record<string, unknown> = { pattern: 'ZZbad; x' };
+    for (let i = 0; i < DENIALS_MAX + 50; i += 1) many[`k${String(i).padStart(4, '0')}`] = 1;
+
+    const result = validateParams(all, many);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.denials[0].code).toBe('pattern-mismatch');
+    expect(result.denials[0].paramName).toBe('pattern');
+  });
+
+  it('имя параметра из запроса усечено — по РЕАЛЬНОЙ границе, а не по номинальной', () => {
+    // Прежнее утверждение (`<= VALUE_MAX_CODE_POINTS`) было вакуумным: фактический потолок
+    // ставит `sanitizeDescription` на `DESCRIPTION_MAX_LENGTH = 1024`, поэтому трейс
+    // оставался зелёным при ПОЛНОСТЬЮ удалённой отсечке. Утверждается та граница, которая
+    // существует; отсечка по единицам UTF-16 при этом нужна не ради неё, а ради того, чтобы
+    // стомегабайтный ключ вообще доехал до санитайзера, а не уронил процесс.
     const key = 'k'.repeat(VALUE_MAX_CODE_POINTS * 2);
     const result = validateParams(all, { pattern: 'ok', [key]: 1 });
     expect(result.ok).toBe(false);
     if (result.ok) return;
-    expect(codePointLength(result.denials[0].paramName ?? '')).toBeLessThanOrEqual(VALUE_MAX_CODE_POINTS);
+    expect(codePointLength(result.denials[0].paramName ?? '')).toBe(DESCRIPTION_MAX_LENGTH);
+  });
+
+  it('гигантский ключ и гигантское значение отвергаются, не разворачиваясь по дороге', () => {
+    // Утверждается и КОД, и время. Код — потому что «не упало» не отличает отказ от тихого
+    // пропуска. Время — потому что дефект был ресурсным: прежняя отсечка имени
+    // (`[...name].slice(…)`) на 32 млн единиц стоила 70.6 мс и сотни мегабайт кучи, а на ста
+    // мегабайтах роняла процесс фатальным OOM до всякого отказа. Замерено после правки:
+    // 0.40 мс на значении и 0.06 мс на ключе, то есть порог 25 мс лежит вшестьдесят раз выше
+    // исправной реализации и втрое ниже прежней.
+    const huge = 'a'.repeat(32_000_000);
+
+    const timed = (params: Readonly<Record<string, unknown>>): { codes: readonly string[]; ms: number } => {
+      const started = process.hrtime.bigint();
+      const codes = codesOf(validateParams(all, params));
+      return { codes, ms: Number(process.hrtime.bigint() - started) / 1e6 };
+    };
+
+    const asValue = timed({ pattern: 'ok', file: huge });
+    expect(asValue.codes).toEqual(['value-oversized']);
+    expect(asValue.ms).toBeLessThan(25);
+
+    const asKey = timed({ pattern: 'ok', [huge]: 1 });
+    expect(asKey.codes).toEqual(['unknown-param']);
+    expect(asKey.ms).toBeLessThan(25);
   });
 });

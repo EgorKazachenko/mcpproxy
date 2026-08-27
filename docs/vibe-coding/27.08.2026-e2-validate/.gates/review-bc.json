@@ -1,0 +1,12 @@
+{
+  "gate": "review-bc",
+  "status": "pass",
+  "exit_code": 0,
+  "codeTree": "cad3c3b200ab35ab59b8fd1a8afd3caf9eca76fb",
+  "codeDirty": false,
+  "headSha": "6524623d56f64385757b700fed691f74e2599108",
+  "startedAt": "2026-08-27T23:24:47.472Z",
+  "command": "node .claude/skills/vibe-code-developing-v2/scripts/review-verify.mjs --kind backward-compat --feature docs/vibe-coding/27.08.2026-e2-validate",
+  "evidencePath": null,
+  "artifacts": []
+}

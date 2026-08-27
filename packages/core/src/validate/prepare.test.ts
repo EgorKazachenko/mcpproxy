@@ -50,9 +50,16 @@ describe('prepareRecipe — собственная перепроверка ин
       'два слота в одном элементе argv — бросок случился бы на третьей стадии',
       recipeOf({ params: { f: { type: 'path', root: './logs', argv: ['--x={}{}'] } } }),
     ],
+    // Инвариантов, которые код держит, шесть, а таблица обещала «по вектору на КАЖДЫЙ» —
+    // и два вектора отсутствовали: снятие проверки слота в `cwd` не красило ничего.
+    ['слот в cwd — подстановки туда нет вовсе', recipeOf({ cwd: './{}' })],
+    [
+      'слот в argv boolean-параметра: подстановки нет, значит скобки уедут литералом',
+      recipeOf({ params: { f: { type: 'boolean', argv: ['--f={}'] } } }),
+    ],
   ];
 
-  it('каждый из четырёх нарушенных инвариантов даёт ok: false', () => {
+  it('каждый из шести нарушенных инвариантов даёт ok: false', () => {
     for (const [label, recipe] of vectors) {
       expect(prepareRecipe(NAME, recipe, matchersFor(), DIR).ok, label).toBe(false);
     }
@@ -87,6 +94,31 @@ describe('prepareRecipe — канонизируемость строк реце
   it('одиночный суррогат в значении enum — тоже', () => {
     const recipe = recipeOf({ params: { m: { type: 'enum', values: [`a${LONE_HIGH}`] } } });
     expect(prepareRecipe(NAME, recipe, matchersFor(), DIR).ok).toBe(false);
+  });
+
+  it('одиночный суррогат в cwd, в элементе argv и в root — тоже', () => {
+    // Три из семи точек гейта R28 не фальсифицировались ничем: снятие их всех оставляло
+    // 97/97 зелёных, а зонд показывал разрешённый вызов, чьи `cwd` и `argv[1]` несут
+    // одиночный суррогат, — то есть `canonicalizeJcs` бросил бы на записи события, ровно
+    // тот сценарий, ради которого R28 написан. (`argsHash` его не ловит: он считается
+    // только по `params`, отсюда и ощущение покрытия.)
+    const vectors: ReadonlyArray<readonly [string, Recipe]> = [
+      ['суррогат в cwd', recipeOf({ cwd: `./wo${LONE_HIGH}rk` })],
+      [
+        'суррогат в элементе argv',
+        recipeOf({ params: { f: { type: 'path', root: './logs', argv: [`--file=${LONE_HIGH}{}`] } } }),
+      ],
+      ['суррогат в root', recipeOf({ params: { f: { type: 'path', root: `./lo${LONE_HIGH}gs` } } })],
+    ];
+    for (const [label, recipe] of vectors) {
+      expect(prepareRecipe(NAME, recipe, matchersFor(), DIR).ok, label).toBe(false);
+    }
+  });
+
+  it('одиночный суррогат в КАТАЛОГЕ МАНИФЕСТА — тоже: он вбирается в cwd', () => {
+    // Четвёртый источник строк R28. `cwd` уезжает наружу и становится `AuditEvent.cwd`,
+    // а `chainHash` хэширует событие целиком.
+    expect(prepareRecipe(NAME, recipeOf({}), matchersFor(), `/home/u/pr${LONE_HIGH}oj`).ok).toBe(false);
   });
 
   it('одиночный суррогат в имени рецепта — тоже', () => {

@@ -44,6 +44,10 @@ export const VALUE_MAX_CODE_POINTS = 4096;
  * Потолок на длину списка отказов (R30а). Значение выбрано так, чтобы человек в модалке мог
  * их прочитать: список длиннее уже не диагностика, а стена текста. `IpcRequest` потолка
  * размера не несёт, а полный контроль над сокетом входит в модель угроз (И6).
+ *
+ * При усечении список получает `DENIALS_MAX + 1` элемент: тридцать два отказа плюс
+ * суммирующий `denials-truncated`. Маркер не входит в потолок намеренно — иначе факт
+ * усечения вытеснял бы одну из строк, ради которых потолок и существует.
  */
 export const DENIALS_MAX = 32;
 
@@ -123,13 +127,47 @@ export interface Denial {
  */
 const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
 
+/** Приписывается к причине, когда зачистка изменила текст: молчаливая потеря — сама по себе дефект. */
+const SCRUBBED_MARK = ' [зачистка изменила текст]';
+
+/** Ставится вместо имени, которое зачистка съела целиком: `''` не должно путаться с `null`. */
+const NAME_ERASED = '<имя вырезано зачисткой>';
+
 /**
  * Две зачистки подряд, и обе обязательны, потому что каждая закрывает то, что пропускает
  * другая (R27, замерено в Ф13): `sanitizeDescription` вырезает `Cc`/`Cf` и ANSI, но
  * одиночные суррогаты оставляет; собственная вырезает суррогаты, но не `Cf`.
+ *
+ * `sanitizeDescription` — санитайзер СВОБОДНОГО ТЕКСТА, и делает он больше, чем вырезает:
+ * схлопывает `\r\n\t\v\f` и повторные пробелы в один, обрезает края и режет результат по
+ * `DESCRIPTION_MAX_LENGTH` = 1024 кодовых точек. Для причины отказа это наблюдаемо и вредно:
+ * замерено, что законное имя файла `/root/a  b\tc.log` приезжает как `/root/a b c.log` —
+ * путь, которого на диске нет, — а причина из двух длинных путей режется ровно на 1024, и
+ * хвост с `root` пропадает без следа. Заменить санитайзер нельзя: R27 требует именно его.
+ * Поэтому потеря перестаёт быть молчаливой.
  */
-function scrub(text: string): string {
+function scrubbed(text: string): string {
   return sanitizeDescription(text).text.replace(LONE_SURROGATE, '');
+}
+
+/** Причина: изменённый текст помечается, чтобы искажённый путь не читался как факт. */
+function scrubReason(text: string): string {
+  const clean = scrubbed(text);
+  return clean === text ? clean : `${clean}${SCRUBBED_MARK}`;
+}
+
+/**
+ * Имя параметра: сначала дешёвая отсечка по единицам UTF-16, потом зачистка.
+ *
+ * Отсечка обязана стоять ПЕРВОЙ и работать по единицам, а не по кодовым точкам: ключ запроса
+ * ничем не ограничен (R30а), а разворот стомегабайтного ключа в массив кодовых точек убивает
+ * процесс раньше, чем что-либо успевает его усечь. Кодовых точек всегда не больше, чем
+ * единиц, поэтому срез по единицам — корректная верхняя граница.
+ */
+function scrubName(name: string): string {
+  const clamped = name.length > VALUE_MAX_CODE_POINTS ? name.slice(0, VALUE_MAX_CODE_POINTS) : name;
+  const clean = scrubbed(clamped);
+  return clean === '' ? NAME_ERASED : clean;
 }
 
 /**
@@ -151,8 +189,8 @@ export function denial(input: {
   return {
     stage: input.stage,
     code: input.code,
-    paramName: input.paramName === null ? null : scrub(input.paramName),
-    reason: scrub(input.reason),
+    paramName: input.paramName === null ? null : scrubName(input.paramName),
+    reason: scrubReason(input.reason),
   };
 }
 
@@ -179,7 +217,44 @@ export function isCanonicalizable(value: string): boolean {
   return true;
 }
 
-/** Длина в кодовых точках, а не в единицах UTF-16: для эмодзи это 1 против 2 (Ф11). */
+/**
+ * Длина в кодовых точках, а не в единицах UTF-16: для эмодзи это 1 против 2 (Ф11).
+ *
+ * Разворачивает строку целиком, поэтому зовётся ТОЛЬКО там, где длина уже ограничена —
+ * после того, как `codePointLengthAtMost` пропустил значение. На недоверенном входе вместо
+ * неё стоит ограниченный счётчик: см. его комментарий.
+ */
 export function codePointLength(value: string): number {
   return [...value].length;
+}
+
+/**
+ * «Кодовых точек не больше `max`?» — с ограниченной работой и без единой аллокации.
+ *
+ * Существует потому, что гейт, введённый ПРОТИВ гигантских значений, не может позволить себе
+ * их разворачивать. Замерено на этом дереве: `[...value].length` на строке в 16 млн единиц —
+ * 30.6 мс и +122 МБ кучи, на 100 млн — фатальный OOM процесса, который `try/catch` не ловит,
+ * то есть вызов не получает отказа, а демон исчезает вместе с незаписанным решением. Вход
+ * достижим по И6: `IpcRequest` потолка размера не несёт, а у `PathParam` нет ни `pattern`,
+ * ни `maxLength`, так что до этой проверки не стоит ни одной другой.
+ *
+ * Две дешёвые отсечки точны, потому что кодовых точек всегда `≥ length / 2` и `≤ length`.
+ * За ними цикл, который обрывается на `max + 1`-й точке, то есть смотрит не более
+ * `2 * (max + 1)` единиц независимо от длины входа.
+ */
+export function codePointLengthAtMost(value: string, max: number): boolean {
+  if (value.length <= max) return true;
+  if (value.length > max * 2) return false;
+
+  let count = 0;
+  for (let i = 0; i < value.length; i += 1) {
+    const code = value.charCodeAt(i);
+    if (code >= 0xd800 && code <= 0xdbff && i + 1 < value.length) {
+      const next = value.charCodeAt(i + 1);
+      if (next >= 0xdc00 && next <= 0xdfff) i += 1;
+    }
+    count += 1;
+    if (count > max) return false;
+  }
+  return true;
 }

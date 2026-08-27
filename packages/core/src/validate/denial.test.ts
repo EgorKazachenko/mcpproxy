@@ -2,11 +2,14 @@ import { canonicalizeJcs } from '@mcpproxy/contracts';
 import { describe, expect, it } from 'vitest';
 import {
   codePointLength,
+  codePointLengthAtMost,
   DENIAL_CODES,
   DENIAL_STAGES,
+  DENIALS_MAX,
   denial,
   E2_STAGES,
   isCanonicalizable,
+  VALUE_MAX_CODE_POINTS,
   type DenialCode,
   type DenialStage,
   type E2Stage,
@@ -122,6 +125,16 @@ describe('константы формы', () => {
     expect((DENIAL_STAGES as readonly string[]).includes('build_argv')).toBe(false);
   });
 
+  it('потолки ограничивают, а не только называются', () => {
+    // Независимая граница, а не пересказ константы: без неё оба потолка поднимаются до
+    // величины, при которой они перестают что-либо ограничивать, и сюита остаётся зелёной —
+    // проверено мутацией (`DENIALS_MAX = 100000`, `VALUE_MAX_CODE_POINTS = 8000000`).
+    // Числа справа взяты из мотивов R30/R30а: список должен читаться человеком в модалке,
+    // а значение — не доезжать мегабайтом до realpath, argv, argsHash и записи аудита.
+    expect(DENIALS_MAX).toBeLessThanOrEqual(64);
+    expect(VALUE_MAX_CODE_POINTS).toBeLessThanOrEqual(1 << 16);
+  });
+
   it('не содержит дублей кодов', () => {
     expect(new Set(DENIAL_CODES).size).toBe(DENIAL_CODES.length);
   });
@@ -131,6 +144,71 @@ describe('константы формы', () => {
     // манифеста в символах, при подсчёте по `length` оказался бы вдвое строже.
     expect(codePointLength('a\u{1F600}b')).toBe(3);
     expect('a\u{1F600}b'.length).toBe(4);
+  });
+});
+
+describe('codePointLengthAtMost — ограниченный счётчик', () => {
+  it('совпадает с точным счётом на границах', () => {
+    const cases: ReadonlyArray<readonly [string, number]> = [
+      ['', 4],
+      ['abcd', 4],
+      ['abcde', 4],
+      ['\u{1F600}\u{1F600}\u{1F600}\u{1F600}', 4],
+      ['\u{1F600}\u{1F600}\u{1F600}\u{1F600}\u{1F600}', 4],
+      [`${LONE_HIGH}${LONE_HIGH}${LONE_HIGH}${LONE_HIGH}${LONE_HIGH}`, 4],
+      ['a\u{1F600}b', 3],
+    ];
+    for (const [value, max] of cases) {
+      expect(codePointLengthAtMost(value, max), JSON.stringify(value)).toBe(codePointLength(value) <= max);
+    }
+  });
+
+  it('не разворачивает вход — и это утверждается временем, потому что ответ у обеих реализаций один', () => {
+    // Единственный трейс в сюите, где предмет — РЕСУРС, а не результат: точный счёт через
+    // `[...value]` даёт тот же ответ, поэтому функциональным утверждением дефект неотличим.
+    // Замерено на этом дереве (32 млн единиц UTF-16, node 22, macOS arm64):
+    // ограниченный счётчик — 0.0006 мс, `[...value].length` — 112 мс и сотни мегабайт кучи;
+    // на ста миллионах — фатальный OOM, который `try/catch` не ловит, то есть вызов не
+    // получает отказа вовсе. Порог 25 мс лежит вчетверо ниже дефекта и в сорок тысяч раз
+    // выше исправной реализации — запас в обе стороны, а не подогнанное число.
+    const huge = 'a'.repeat(32_000_000);
+    const started = process.hrtime.bigint();
+    const verdict = codePointLengthAtMost(huge, VALUE_MAX_CODE_POINTS);
+    const elapsedMs = Number(process.hrtime.bigint() - started) / 1e6;
+
+    expect(verdict).toBe(false);
+    expect(elapsedMs).toBeLessThan(25);
+  });
+});
+
+describe('scrub — потеря не бывает молчаливой', () => {
+  it('изменённая зачисткой причина помечается', () => {
+    // `sanitizeDescription` — санитайзер свободного текста: он схлопывает пробелы и режет по
+    // 1024 кодовым точкам. Замерено: `/root/a  b\tc.log` приезжает как `/root/a b c.log` —
+    // путь, которого на диске нет. Пометка отличает искажённую строку от факта.
+    const distorted = denial({
+      stage: 'resolve_paths',
+      code: 'path-escapes-root',
+      paramName: 'file',
+      reason: '/root/a  b\tc.log',
+    });
+    expect(distorted.reason).toContain('зачистка изменила текст');
+
+    const intact = denial({
+      stage: 'validate',
+      code: 'wrong-type',
+      paramName: 'p',
+      reason: 'ожидалась строка (type: string)',
+    });
+    expect(intact.reason).toBe('ожидалась строка (type: string)');
+  });
+
+  it('имя, съеденное зачисткой целиком, не превращается в пустую строку', () => {
+    // `''` — третье, неописанное состояние: `null` по контракту значит «претензия к самому
+    // запросу», и потребитель, рисующий `paramName ?? 'запрос'`, показал бы пустую метку.
+    const erased = denial({ stage: 'validate', code: 'unknown-param', paramName: ZWSP + ZWSP, reason: 'ключ не объявлен' });
+    expect(erased.paramName).not.toBe('');
+    expect(erased.paramName).not.toBeNull();
   });
 });
 

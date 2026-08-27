@@ -127,6 +127,13 @@ describe('сорс-скан: конструктор регулярных выр�
     expect(CONSTRUCTOR_CALL.test(withoutComments('const r = new RegExp("x");'))).toBe(true);
     expect(CONSTRUCTOR_CALL.test(withoutComments('// не вызываем new RegExp здесь'))).toBe(false);
     expect(CONSTRUCTOR_CALL.test(withoutComments('/** тут про new RegExp */'))).toBe(false);
+
+    // И третье, честное: срезалка не знает о строковых литералах, поэтому `//` внутри строки
+    // съедает хвост её строки. Утверждение фиксирует ГРАНИЦУ инструмента, а не притворяется,
+    // что её нет: контроль, обещающий больше, чем даёт, — сам по себе дефект гейта. Для
+    // модулей `validate/**` это безвредно (URL со `//` в них нет), а появится — сорс-скан
+    // ослабнет молча, и вот тогда этот трейс придётся чинить вместе с ним.
+    expect(withoutComments("const u = 'a//b'; const r = new RegExp('x');")).toBe("const u = 'a");
   });
 
   it('ни один модуль validate не вызывает конструктор — только литеральные регулярки', () => {
@@ -146,6 +153,8 @@ void _twoArguments;
 
 // `PreparedRecipe` не несёт поля `sandbox` вовсе — третий член R22 вакуумен по построению:
 // подставить в профиль нечего и неоткуда.
-type PreparedExtraKeys = Exclude<keyof PreparedRecipe, 'recipeName' | 'params' | 'cwd' | 'exec'>;
+// `symbol` в списке исключений — это бренд формы, чеканящийся только в `prepareRecipe`;
+// строковый ключ (например `sandbox`) он не пропускает, а ради чего утверждение и стоит.
+type PreparedExtraKeys = Exclude<keyof PreparedRecipe, 'recipeName' | 'params' | 'cwd' | 'exec' | symbol>;
 const _preparedClosed: [PreparedExtraKeys] extends [never] ? true : PreparedExtraKeys = true;
 void _preparedClosed;

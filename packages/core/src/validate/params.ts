@@ -1,5 +1,6 @@
 import {
   codePointLength,
+  codePointLengthAtMost,
   denial,
   DENIALS_MAX,
   isCanonicalizable,
@@ -32,13 +33,19 @@ const fail = (code: DenialCode, reason: string): Check => ({ ok: false, code, re
  * Гейты, общие для всех строковых типов. Стоят **внутри** функции своего типа, после её
  * проверки `typeof` и до её ограничений (R28, источник 1; R30).
  *
- * Порядок несущий: длина раньше канонизируемости — иначе строка в сто мегабайт целиком
- * сканируется на суррогаты, прежде чем быть отвергнутой за размер. Обе раньше `pattern` —
- * это и есть закрытие Ф12: `^.{0,64}$` законный паттерн, пропускающий одиночный суррогат,
- * и вердикт не должен зависеть от того, насколько строг автор манифеста.
+ * Порядок несущий, и обоснование здесь замерено, а не выведено. Первой идёт длина, потому что
+ * она умеет ответить, НЕ ПРОЙДЯ по строке: `codePointLengthAtMost` смотрит не более
+ * `2 * (MAX + 1)` единиц UTF-16 независимо от размера входа. Прежняя формулировка этого
+ * комментария утверждала обратное — что дорогая проверка тут канонизируемость, — и была
+ * неверна: `isCanonicalizable` идёт по строке одним `charCodeAt` без аллокаций, а `[...value]`,
+ * которым длина считалась, разворачивал недоверенную строку в массив и на ста мегабайтах
+ * ронял процесс фатальным OOM раньше, чем потолок успевал отказать.
+ *
+ * Обе — раньше `pattern`, и это закрытие Ф12: `^.{0,64}$` законный паттерн, пропускающий
+ * одиночный суррогат, и вердикт не должен зависеть от того, насколько строг автор манифеста.
  */
 function checkStringGates(value: string): Check | null {
-  if (codePointLength(value) > VALUE_MAX_CODE_POINTS) {
+  if (!codePointLengthAtMost(value, VALUE_MAX_CODE_POINTS)) {
     return fail('value-oversized', `строка длиннее потолка в ${VALUE_MAX_CODE_POINTS} кодовых точек`);
   }
   if (!isCanonicalizable(value)) {
@@ -123,9 +130,6 @@ function checkValue(param: PreparedParam, value: unknown): Check {
   }
 }
 
-/** Усечение имени из запроса: имена манифеста ограничены схемой, ключи запроса — нет (R30а). */
-const clampName = (name: string): string => [...name].slice(0, VALUE_MAX_CODE_POINTS).join('');
-
 export function validateParams(prepared: PreparedRecipe, params: Readonly<Record<string, unknown>>): ValidateParamsResult {
   // Гейт формы контейнера, до всего остального (R29). Замерено: `Object.keys(null)` бросает
   // `TypeError` (Ф13), а крэш на границе доверия — это отказ без следа в аудите.
@@ -141,26 +145,13 @@ export function validateParams(prepared: PreparedRecipe, params: Readonly<Record
 
   const denials: Denial[] = [];
   const declared = new Set(prepared.params.map((one) => one.name));
-
-  // Отсортировано по имени: иначе порядок списка задаёт атакующий порядком ключей в своём
-  // JSON, а этот порядок доезжает до `denyReason` и внутрь `chain.self`.
-  const unknown = Object.keys(params)
-    .filter((key) => !declared.has(key))
-    .sort();
-
-  for (const key of unknown) {
-    denials.push(
-      denial({
-        stage: 'validate',
-        code: 'unknown-param',
-        paramName: clampName(key),
-        reason: 'ключ не объявлен в рецепте',
-      }),
-    );
-  }
-
   const values = new Map<string, ParamValue>();
 
+  // Отказы по ОБЪЯВЛЕННЫМ параметрам собираются ПЕРВЫМИ, и это не стиль. Их число ограничено
+  // манифестом, а число неизвестных ключей — нет: собирая неизвестные первыми, мы отдавали бы
+  // атакующему, полностью контролирующему сокет (И6), право вытеснить из усечённого списка
+  // единственный отказ, называющий параметр с полезной нагрузкой. Вердикт «отвергнут» от
+  // порядка не зависел бы, а предмет разбора — исчезал.
   for (const param of prepared.params) {
     // `Object.hasOwn`, а не `params[name] !== undefined`: иначе `constructor` из запроса
     // читался бы с прототипа (R6). Схема запрещает `__proto__` в именах МАНИФЕСТА, но не в
@@ -183,6 +174,26 @@ export function validateParams(prepared: PreparedRecipe, params: Readonly<Record
     denials.push(denial({ stage: 'validate', code: checked.code, paramName: param.name, reason: checked.reason }));
   }
 
+  // Отсортировано по имени: иначе порядок списка задаёт атакующий порядком ключей в своём
+  // JSON, а этот порядок доезжает до `denyReason` и внутрь `chain.self`.
+  const unknown = Object.keys(params)
+    .filter((key) => !declared.has(key))
+    .sort();
+
+  // Цикл обрывается на потолке, а не срезается после (R30а). Потолок, ограничивающий вывод,
+  // но не работу, — не потолок: замерено, что двадцать тысяч неизвестных ключей давали 313 мс
+  // построения отказов, каждый через две зачистки, ради тридцати двух строк на выходе. Это
+  // шестикратное превышение оверхед-бюджета ≤50 мс p95 на стадии, которая всё равно откажет.
+  let shown = 0;
+  for (const key of unknown) {
+    if (denials.length >= DENIALS_MAX) break;
+    denials.push(
+      denial({ stage: 'validate', code: 'unknown-param', paramName: key, reason: 'ключ не объявлен в рецепте' }),
+    );
+    shown += 1;
+  }
+  const omitted = unknown.length - shown;
+
   if (denials.length === 0) {
     // Двойной каст: одинарный отвергается как недостаточно перекрывающийся. Чеканка бренда
     // происходит ровно здесь и на выходе `resolvePaths` — оба места названы, чтобы касты не
@@ -190,21 +201,21 @@ export function validateParams(prepared: PreparedRecipe, params: Readonly<Record
     return { ok: true, values: values as unknown as ValidatedValues };
   }
 
-  // Потолок на сам список (R30а). Код собственный, а не переиспользованный `unknown-param`:
-  // иначе двусторонняя перепись не смогла бы отличить «усечение произошло» от «был один
-  // неизвестный ключ», и потолок стал бы непроверяемым.
-  const capped =
-    denials.length > DENIALS_MAX
-      ? [
-          ...denials.slice(0, DENIALS_MAX),
-          denial({
-            stage: 'validate',
-            code: 'denials-truncated',
-            paramName: null,
-            reason: `список отказов усечён: всего ${denials.length}, показаны первые ${DENIALS_MAX}`,
-          }),
-        ]
-      : denials;
+  // Маркер усечения (R30а). Код собственный, а не переиспользованный `unknown-param`: иначе
+  // двусторонняя перепись не смогла бы отличить «усечение произошло» от «был один неизвестный
+  // ключ», и потолок стал бы непроверяемым. В причине — не только общее число, но и то, что
+  // именно съедено: по одному числу нельзя отличить «сто тысяч мусорных ключей» от «сто тысяч
+  // мусорных плюс один настоящий отказ».
+  if (omitted > 0) {
+    denials.push(
+      denial({
+        stage: 'validate',
+        code: 'denials-truncated',
+        paramName: null,
+        reason: `список отказов усечён: всего ${denials.length + omitted}, показаны первые ${denials.length}, не показаны ещё ${omitted} с кодом unknown-param`,
+      }),
+    );
+  }
 
-  return { ok: false, denials: capped as [Denial, ...Denial[]] };
+  return { ok: false, denials: denials as [Denial, ...Denial[]] };
 }

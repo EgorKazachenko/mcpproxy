@@ -66,6 +66,15 @@ describe('validateCall — измерение стадий (R23)', () => {
       expect(Number.isInteger(timing.durationUs), timing.stage).toBe(true);
       expect(timing.durationUs, timing.stage).toBeGreaterThanOrEqual(0);
     }
+
+    // Позитивный контроль: без него `durationUs: 0` константой проходит оба утверждения
+    // выше, то есть измерение можно выкинуть целиком при 97/97 зелёных. `resolve_paths`
+    // делает два `realpath`; замерено 200 прогонов — минимум 26 мкс, ноль не встретился ни
+    // разу. Утверждается «больше нуля», а не величина: величина флакает под нагрузкой.
+    const byStage = (stage: string): number =>
+      result.timings.find((one) => one.stage === stage)?.durationUs ?? -1;
+    expect(byStage('resolve_paths')).toBeGreaterThan(0);
+    expect(result.timings.reduce((sum, one) => sum + one.durationUs, 0)).toBeGreaterThan(0);
   });
 });
 

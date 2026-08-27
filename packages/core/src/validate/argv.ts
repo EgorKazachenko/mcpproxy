@@ -1,5 +1,5 @@
 import type { ResolvedValues } from './denial.js';
-import type { PreparedRecipe } from './prepare.js';
+import { ARGV_SLOT, type PreparedRecipe } from './prepare.js';
 
 /**
  * Стадия `build_argv`. Тотальна: всё, что могло не пройти, до этой стадии не дошло — поэтому
@@ -8,8 +8,6 @@ import type { PreparedRecipe } from './prepare.js';
  * Конкатенации строки команды не происходит нигде: инъекция убивается конструкцией, а не
  * проверкой (И1, И2).
  */
-
-const SLOT = '{}';
 
 /**
  * Строковое представление значения — ЯВНОЙ функцией, а не `String(value)`.
@@ -34,11 +32,11 @@ function argvText(value: string | number): string {
  * проявляется на законном имени, а не только как вектор атаки.
  */
 function substitute(template: string, text: string): string {
-  const parts = template.split(SLOT);
+  const parts = template.split(ARGV_SLOT);
   if (parts.length > 2) {
     // Избыточная страховка, и она обязана быть НЕДОСТИЖИМОЙ: счёт слотов стоит в
     // `prepareRecipe`, потому что там есть форма отказа, а здесь её нет.
-    throw new Error(`шаблон argv содержит слот ${SLOT} больше одного раза`);
+    throw new Error(`шаблон argv содержит слот ${ARGV_SLOT} больше одного раза`);
   }
   return parts.join(text);
 }
@@ -67,7 +65,7 @@ export function buildArgv(prepared: PreparedRecipe, values: ResolvedValues): rea
       // Каждый элемент шаблона — ОТДЕЛЬНЫЙ элемент результата (R20). Для `path` в карте лежит
       // результат `realpath`: задача резолва вернула ровно одну карту и заменила значение в
       // ней, так что второго источника, из которого можно было бы взять сырую строку, нет.
-      argv.push(template.includes(SLOT) ? substitute(template, argvText(value)) : template);
+      argv.push(template.includes(ARGV_SLOT) ? substitute(template, argvText(value)) : template);
     }
   }
 

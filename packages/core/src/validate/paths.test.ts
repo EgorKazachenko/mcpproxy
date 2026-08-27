@@ -94,9 +94,26 @@ describe('resolvePaths — confinement ловит то, чего не видит
     expect(codesOf(run({ file: '../logs-evil/a' }))).toEqual(['path-escapes-root']);
   });
 
-  it('сам корень — не файл под корнем', () => {
-    // Пустая строка резолвится в сам `root` (Ф10), и это ловит проверка `rel !== ''`.
-    expect(codesOf(run({ file: '' }))).toEqual(['path-escapes-root']);
+  it('сам корень — не файл под корнем, и причина говорит именно это', () => {
+    // Пустая строка резолвится в сам `root` (Ф10), и это ловит ветка `root-itself`.
+    const result = run({ file: '' });
+    expect(codesOf(result)).toEqual(['path-escapes-root']);
+    if (result.ok) return;
+    // Общая формулировка давала «резолвнутый путь X лежит вне root: X» — один и тот же путь
+    // по обе стороны от «лежит вне», что читается как дефект проверки, а не как «вы передали
+    // каталог вместо файла».
+    expect(result.denials[0].reason).toContain('на сам корень');
+    expect(result.denials[0].reason).not.toContain('лежит вне');
+  });
+
+  it('родительский каталог корня без хвоста не проходит границу', () => {
+    // Клауза `rel === '..'` не покрывалась ни одним вектором: её снятие оставляло 97/97
+    // зелёных, а зонд показывал `ok` и argv с каталогом манифеста целиком. Векторы рядом
+    // покрывают `''`, соседа по префиксу и `../secret.txt` — и ровно пропускали «на один
+    // уровень вверх без хвоста».
+    for (const value of ['..', '../']) {
+      expect(codesOf(run({ file: value })), value).toEqual(['path-escapes-root']);
+    }
   });
 });
 
@@ -107,6 +124,80 @@ describe('resolvePaths — корень резолвится сам (R14)', () =
     const result = run({ file: 'a.log' });
     expect(result.ok).toBe(true);
     expect(valueOf(result)).toBe(realpathSync(join(lexRoot, 'a.log')));
+  });
+});
+
+describe('resolvePaths — корень резолвится на КАЖДЫЙ вызов, а не кэшируется', () => {
+  it('подмена корня после подготовки видна немедленно', () => {
+    // Цена решения («один сисколл на параметр») наблюдаема только так: под кэширующей
+    // мутацией подмена остаётся невидимой, и сюита при этом полностью зелёная.
+    // Фикстура своя, чтобы не портить общий корень соседним `it`.
+    const local = mkdtempSync(join(tmpdir(), 'e2-swap-'));
+    try {
+      const logs = join(local, 'logs');
+      const other = join(local, 'other');
+      mkdirSync(logs);
+      mkdirSync(other);
+      writeFileSync(join(logs, 'a.log'), 'x');
+      writeFileSync(join(other, 'b.log'), 'x');
+
+      const recipe: Recipe = {
+        description: 'о',
+        exec: ['/usr/bin/wc'],
+        params: { file: { type: 'path', root: logs, argv: ['{}'] } },
+      };
+      const built = prepareRecipe(NAME, recipe, NO_MATCHERS, local);
+      expect(built.ok).toBe(true);
+      if (!built.ok) return;
+
+      const call = (value: string): readonly string[] => {
+        const validated = validateParams(built.prepared, { file: value });
+        if (!validated.ok) throw new Error('validate');
+        const resolved = resolvePaths(built.prepared, validated.values);
+        return resolved.ok ? [] : resolved.denials.map((one) => one.code);
+      };
+
+      expect(call('a.log')).toEqual([]);
+      expect(call('b.log')).toEqual(['path-not-found']);
+
+      // Корень подменён на симлинк ПОСЛЕ подготовки — ровно то, что кэш сделал бы невидимым.
+      rmSync(logs, { recursive: true });
+      symlinkSync(other, logs);
+
+      expect(call('a.log')).toEqual(['path-not-found']);
+      expect(call('b.log')).toEqual([]);
+    } finally {
+      rmSync(local, { recursive: true, force: true });
+    }
+  });
+
+  it('нерезолвимый корень называет errno и сам корень', () => {
+    // Голый `catch {}` стирал различие между `ENOENT`, `ELOOP`, `EACCES` и `ENOTDIR` — то
+    // есть подмена корня, ради обнаружения которой заплачен сисколл, была в следе неотличима
+    // от опечатки в конфиге.
+    const local = mkdtempSync(join(tmpdir(), 'e2-noroot-'));
+    try {
+      const logs = join(local, 'logs');
+      mkdirSync(logs);
+      const recipe: Recipe = { description: 'о', exec: ['/usr/bin/wc'], params: { file: { type: 'path', root: logs } } };
+      const built = prepareRecipe(NAME, recipe, NO_MATCHERS, local);
+      expect(built.ok).toBe(true);
+      if (!built.ok) return;
+
+      rmSync(logs, { recursive: true });
+      const validated = validateParams(built.prepared, { file: 'a.log' });
+      expect(validated.ok).toBe(true);
+      if (!validated.ok) return;
+      const resolved = resolvePaths(built.prepared, validated.values);
+
+      expect(resolved.ok).toBe(false);
+      if (resolved.ok) return;
+      expect(resolved.denials[0].code).toBe('path-unusable');
+      expect(resolved.denials[0].reason).toContain('ENOENT');
+      expect(resolved.denials[0].reason).toContain(logs);
+    } finally {
+      rmSync(local, { recursive: true, force: true });
+    }
   });
 });
 

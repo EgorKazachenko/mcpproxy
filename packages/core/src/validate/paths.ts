@@ -23,17 +23,28 @@ export type ResolvePathsResult =
   | { ok: false; denials: readonly [Denial, ...Denial[]] };
 
 /**
+ * Три исхода, а не два. `root-itself` отделён от `outside` потому, что отказ обязан объяснять
+ * себя: при `rel === ''` общая формулировка давала текст «резолвнутый путь X лежит вне
+ * root: X» — один и тот же путь по обе стороны от «лежит вне», что читается как дефект
+ * проверки, а не как «вы передали каталог вместо файла». Замерено на `file: '.'`.
+ */
+type Confinement = 'inside' | 'root-itself' | 'outside';
+
+/**
  * Предикат confinement (R15). Строится на `path.relative`, а не на `startsWith`: голый
  * `startsWith` считает `/logs-evil/a` лежащим внутри `/logs` (Ф3).
  *
- * `rel !== '..'` стоит отдельно от `startsWith('..' + sep)` по той же причине, по которой она
- * стоит в `checkRootConfinement` (`packages/contracts/src/validate/refine.ts:223`): каталог
- * `..cache` даёт `relative` = `..cache`, и голый `startsWith('..')` объявил бы законный
- * подкаталог выходом за пределы. Пустой `rel` — это сам корень, а не файл под корнем.
+ * `rel === '..'` проверяется отдельно от `startsWith('..' + sep)` по той же причине, по
+ * которой она стоит в `checkRootConfinement` (`packages/contracts/src/validate/refine.ts:223`):
+ * каталог `..cache` даёт `relative` = `..cache`, и голый `startsWith('..')` объявил бы законный
+ * подкаталог выходом за пределы. Обратная сторона той же клаузы — значение ровно `..`, то есть
+ * родительский каталог корня без хвоста: без неё он проходит границу целиком.
  */
-function isConfined(root: string, candidate: string): boolean {
+function confinementOf(root: string, candidate: string): Confinement {
   const rel = relative(root, candidate);
-  return rel !== '' && rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel);
+  if (rel === '') return 'root-itself';
+  if (rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) return 'outside';
+  return 'inside';
 }
 
 /** Ловится `error.code`, а не текст сообщения: текст не заморожен и локализуется. */
@@ -71,13 +82,21 @@ export function resolvePaths(prepared: PreparedRecipe, values: ValidatedValues):
     let realRoot: string;
     try {
       realRoot = realpathSync(param.root);
-    } catch {
+    } catch (error) {
+      // Ошибка СВЯЗЫВАЕТСЯ, а её код доезжает до причины. Голый `catch {}` здесь стирал
+      // различие между четырьмя разными авариями — `ENOENT` (корня нет), `ELOOP` (корень
+      // подменён на петлю симлинков), `EACCES` (потерян доступ) и `ENOTDIR` (на месте
+      // каталога оказался файл), — и это била ровно по тому, ради чего `realpath` корня
+      // делается на каждый вызов: подмена корня обнаруживалась и становилась в следе
+      // неотличима от опечатки в конфиге. `param.root` — данные манифеста, а не значение
+      // параметра, и R25 разрешает его называть.
+      const code = errorCode(error);
       denials.push(
         denial({
           stage: 'resolve_paths',
           code: 'path-unusable',
           paramName: param.name,
-          reason: 'корень параметра не резолвится',
+          reason: `корень параметра не резолвится (${code ?? 'без кода'}): ${param.root}`,
         }),
       );
       continue;
@@ -92,7 +111,7 @@ export function resolvePaths(prepared: PreparedRecipe, values: ValidatedValues):
     // `path-escapes-root`, а не `path-not-found`, — и оракул существования схлопывается там,
     // где его дешевле всего убрать.
     const candidate = resolve(realRoot, value);
-    const preOk = isConfined(realRoot, candidate);
+    const preOk = confinementOf(realRoot, candidate) === 'inside';
 
     // Шаг 4. `realpath` кандидата — НЕЗАВИСИМО от `preOk`.
     let resolved: string;
@@ -113,19 +132,17 @@ export function resolvePaths(prepared: PreparedRecipe, values: ValidatedValues):
 
     // Шаг 5. Предикат над результатом `realpath` (R13). ЕДИНСТВЕННОЕ место, где вызов
     // отвергается по границе, и единственное, которое ловит симлинк.
-    if (!isConfined(realRoot, resolved)) {
+    const verdict = confinementOf(realRoot, resolved);
+    if (verdict !== 'inside') {
       // Резолвнутый путь показывается — этого требует сценарий S4, где зал должен увидеть,
       // куда вызов на самом деле указывал (R26). Осознанное исключение из R25; строка
       // санитизируется конструктором `denial`, потому что `realpath` возвращает имя файла
       // дословно, включая bidi-override (Ф13).
-      denials.push(
-        denial({
-          stage: 'resolve_paths',
-          code: 'path-escapes-root',
-          paramName: param.name,
-          reason: `резолвнутый путь ${resolved} лежит вне root: ${realRoot}`,
-        }),
-      );
+      const reason =
+        verdict === 'root-itself'
+          ? `значение указывает на сам корень, а не на файл под ним: ${realRoot}`
+          : `резолвнутый путь ${resolved} лежит вне root: ${realRoot}`;
+      denials.push(denial({ stage: 'resolve_paths', code: 'path-escapes-root', paramName: param.name, reason }));
       continue;
     }
 

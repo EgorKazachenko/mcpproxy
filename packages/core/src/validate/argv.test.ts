@@ -66,12 +66,14 @@ describe('buildArgv — в exec не подставляется ничего (R2
   it('слот в exec возвращается дословно', () => {
     // `prepareRecipe` такой рецепт отвергает, поэтому `PreparedRecipe` здесь собран руками:
     // трейс проверяет поведение `buildArgv` на нарушенном входе, а не чужой инвариант.
-    const hostile: PreparedRecipe = {
+    // Каст здесь — И ЕСТЬ предмет трейса: `PreparedRecipe` брендирован, и собрать его мимо
+    // `prepareRecipe` можно только явно объявив, что правило обходится намеренно.
+    const hostile = {
       recipeName: NAME,
       params: [{ kind: 'enum', name: 's', required: false, argv: ['--s={}'], values: ['v'] }],
       cwd: DIR,
       exec: ['sh', '-c', '{}'],
-    };
+    } as unknown as PreparedRecipe;
     const values = new Map([['s', 'v']]) as unknown as ResolvedValues;
 
     const argv = buildArgv(hostile, values);
