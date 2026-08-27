@@ -263,6 +263,7 @@ __metadata:
   dependencies:
     "@anthropic-ai/sandbox-runtime": "npm:^0.0.74"
     "@mcpproxy/contracts": "workspace:*"
+    vitest: "npm:^3"
   languageName: unknown
   linkType: soft
 
