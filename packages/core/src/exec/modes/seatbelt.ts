@@ -130,7 +130,7 @@ export async function runInMode(
   };
   const effective = request.effective;
 
-  await srt.initialize(baseSrtConfig());
+  await srt.ensureInitialized(baseSrtConfig());
 
   // Стадия 1 — окружение. Событие несёт только ИМЕНА (R25): форма `AuditEvent.env` это и
   // позволяет, а значения не покидают процесс демона.
@@ -200,6 +200,7 @@ export async function runInMode(
 }
 
 export function createSeatbeltSandbox(): Sandbox {
+  srt.retain();
   const behaviour: ModeBehaviour = {
     mode: MODE,
     // В `seatbelt` прокси-переменные вшиты srt прямо в строку команды (факт Ф7:
@@ -226,6 +227,20 @@ export function createSeatbeltSandbox(): Sandbox {
   return {
     mode: MODE,
     run: (request, onViolation, onEvent) => runInMode(behaviour, request, onViolation, onEvent),
-    dispose: () => srt.dispose(),
+    dispose: onceDispose(),
+  };
+}
+
+/**
+ * Своя ссылка отпускается **один раз**, сколько бы раз ни позвали `dispose()`. Иначе одна
+ * песочница, освобождённая дважды, увела бы счётчик ниже нуля и утащила бы за собой чужой
+ * прокси — а прокси один на демон.
+ */
+export function onceDispose(): () => Promise<void> {
+  let released = false;
+  return async () => {
+    if (released) return;
+    released = true;
+    await srt.dispose();
   };
 }

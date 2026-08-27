@@ -135,6 +135,15 @@ class Semaphore {
 
 export class SrtManagerError extends Error {}
 
+/**
+ * Текст один на все точки отказа: после `dispose()` вызов идёт со старым конфигом и
+ * `getProxyPort() === undefined`, то есть прокси-переменные не эмитятся вовсе — сеть
+ * оказывается тихо **открыта** в `none` и тихо **мертва** в `seatbelt` (R50).
+ */
+const DISPOSED_MESSAGE =
+  'песочница уже освобождена: любой run() после dispose() запрещён, потому что reset() у srt ' +
+  'чистит initializationPromise, но не config, и повторный initialize — тихий no-op (R50)';
+
 class SrtSingleton {
   private initPromise: Promise<void> | undefined;
   private baseConfig: SandboxRuntimeConfig | undefined;
@@ -168,9 +177,21 @@ class SrtSingleton {
   /** Телеметрия из `filterRequest`: запросы, которые прокси пропустил (R26). */
   private readonly telemetry: TelemetryRequest[] = [];
 
-  async initialize(baseConfig: SandboxRuntimeConfig): Promise<void> {
-    if (this.disposed) throw new SrtManagerError('песочница уже освобождена: run() после dispose() запрещён (R50)');
+  /**
+   * Ссылка берётся при создании песочницы, а не при вызове.
+   *
+   * Считать вызовы было бы дефектом, а не стилем: `run()` зовёт `ensureInitialized`, поэтому
+   * счётчик рос бы на каждом прогоне, `dispose()` уменьшал бы его на единицу и до нуля не
+   * доходил бы никогда — флаг R50 не выставлялся бы, а `SandboxManager.reset()` не звался бы
+   * вовсе. Тесты при этом остались бы зелёными: они просто не увидели бы отказа.
+   */
+  retain(): void {
+    if (this.disposed) throw new SrtManagerError(DISPOSED_MESSAGE);
     this.refs += 1;
+  }
+
+  async ensureInitialized(baseConfig: SandboxRuntimeConfig): Promise<void> {
+    if (this.disposed) throw new SrtManagerError(DISPOSED_MESSAGE);
     if (this.initPromise !== undefined) return this.initPromise;
 
     this.baseConfig = baseConfig;
@@ -269,7 +290,7 @@ class SrtSingleton {
    * заведён.
    */
   async withNetworkPolicy<T>(options: WithPolicyOptions<T>): Promise<InvocationResult<T>> {
-    if (this.disposed) throw new SrtManagerError('песочница уже освобождена: run() после dispose() запрещён (R50)');
+    if (this.disposed) throw new SrtManagerError(DISPOSED_MESSAGE);
     if (this.poisoned !== undefined) throw new SrtManagerError(this.poisoned);
 
     const base = this.baseConfig;

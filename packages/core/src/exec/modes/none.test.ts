@@ -182,6 +182,40 @@ describe.skipIf(!IS_MACOS)('режим none — наблюдающий baseline'
     );
     expect(closed.outcome.policyHash).toBe(open.outcome.policyHash);
   });
+  /**
+   * Последний тест набора намеренно: он отпускает **последнюю** ссылку и выставляет
+   * терминальный флаг, после которого любой `run()` бросает (R50).
+   *
+   * `reset()` у srt глобален, чистит `initializationPromise`, но не `config`, а `initialize`
+   * возвращается сразу при выставленном промисе. Значит вызов после освобождения идёт со
+   * старым конфигом и `getProxyPort() === undefined`: прокси-переменные не эмитятся вовсе,
+   * и сеть оказывается тихо ОТКРЫТА в `none` и тихо МЕРТВА в `seatbelt`.
+   *
+   * Ссылки считаются по песочницам, а не по вызовам: `run()` зовёт `ensureInitialized`, и
+   * счётчик по вызовам не дошёл бы до нуля никогда — флаг не выставился бы, а это
+   * утверждение осталось бы зелёным, ничего не проверив. Вторая песочница здесь именно за
+   * тем, чтобы счёт был наблюдаем: пока жива она, флага нет.
+   */
+  it('флаг ставится на ПОСЛЕДНЕЙ ссылке, и после него любой run бросает (R50)', async () => {
+    const second = createNoneSandbox();
+    const request = {
+      recipeName: asRecipeName('baseline'),
+      command: ['/bin/sh', '-c', 'echo hi'] as const,
+      recipeCwd: fixture,
+      effective: normalizeRecipe(CLOSED, DEFAULTS).effective,
+      commandId: newCommandId(),
+    };
+
+    // Одна из двух ссылок отпущена — песочница ещё жива.
+    await sandbox.dispose();
+    await expect(second.run(request, () => undefined)).resolves.toMatchObject({ termination: 'exited' });
+
+    await second.dispose();
+    await expect(second.run(request, () => undefined)).rejects.toThrow(/dispose/);
+    // Флаг процессный, а не объектный: новая песочница тоже не поднимется.
+    expect(() => createNoneSandbox()).toThrow(/dispose/);
+  });
+
 });
 
 describe('parseEnvPairs', () => {

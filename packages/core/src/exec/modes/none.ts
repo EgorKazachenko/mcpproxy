@@ -5,7 +5,7 @@ import {
 import type { SandboxMode } from '@mcpproxy/contracts';
 import { srt } from '../srt-manager.js';
 import type { ExecRequest, Sandbox } from '../sandbox.js';
-import { runInMode } from './seatbelt.js';
+import { onceDispose, runInMode } from './seatbelt.js';
 import type { ModeBehaviour } from './seatbelt.js';
 
 /**
@@ -64,6 +64,7 @@ export function parseEnvPairs(pairs: readonly string[]): NodeJS.ProcessEnv {
 }
 
 export function createNoneSandbox(): Sandbox {
+  srt.retain();
   const behaviour: ModeBehaviour = {
     mode: MODE,
     injectedEnv: proxyEnvFor,
@@ -85,6 +86,6 @@ export function createNoneSandbox(): Sandbox {
   return {
     mode: MODE,
     run: (request, onViolation, onEvent) => runInMode(behaviour, request, onViolation, onEvent),
-    dispose: () => srt.dispose(),
+    dispose: onceDispose(),
   };
 }
