@@ -119,7 +119,7 @@ E6, приложение только читает. Единственная з�
 | P1. Необязательное поле события отсутствует как ключ | `sed -n '14,20p' packages/contracts/src/event.ts` | `**Необязательное поле отсутствует как ключ**, а не присутствует со значением `null`.` (`packages/contracts/src/event.ts:16`) | все фикстуры трейса; рендер команды; рендер стадий | фикстура не пишет ключ; рендер ветвится по наличию ключа, а не по истинности значения |
 | P2. `violation` может повторяться в одном вызове | `grep -n "может повторяться" packages/contracts/src/domain.ts` | `/** Порядок в таймлайне. `violation` может повторяться. */` (`packages/contracts/src/domain.ts:27`) | свёрнутая полоса групп; список стадий | группа красится по худшему из повторов, а не по первому |
 | P3. `destructiveHint` и `idempotentHint` значимы только при `readOnlyHint == false` | `sed -n '36,40p' packages/contracts/src/annotations.ts` | `// Оговорка спеки: `destructiveHint` и `idempotentHint` значимы только при` (`packages/contracts/src/annotations.ts:37`) | policy viewer, бейджи аннотаций | при `readOnlyHint: true` оба бейджа рисуются неприменимыми |
-| P4. Объект из недоверенного содержимого проносит прототип через `contextBridge` | адвайзори GHSA-ff2p-hmqr-hxm4, проверено разведкой | «objects copied across the contextBridge boundary from untrusted content could carry an attacker-influenced prototype … despite context isolation being enabled» | оба входящих сообщения рендерера | разбор схемой на объект с нулевым прототипом; `Object.hasOwn` вместо чтения свойств |
+| P4. Объект из недоверенного содержимого проносит прототип через `contextBridge` | `grep -n "CVE-2026-70610" docs/vibe-coding/27.08.2026-e7-ui/research.md` | `**CVE-2026-70610 (Moderate, 5.4)**: копирование объектов через `contextBridge` учитывало` (`docs/vibe-coding/27.08.2026-e7-ui/research.md:428`) | оба входящих сообщения рендерера | разбор схемой на объект с нулевым прототипом; `Object.hasOwn` вместо чтения свойств |
 | P5. `sandbox: none` красится опасным всегда | `grep -n "красится опасным" packages/design/README.md` | `- **`sandbox: none` красится опасным всегда**, включая баннер `.unsandboxed-banner`.` (`packages/design/README.md:89`) | баннер; бейдж режима в строке; стадия `build_profile` | все три получают роль `danger`, включая стадию, которая «успешно» ничего не применила |
 | P6. И8 требует четырёх флагов и жёсткого CSP | `sed -n '98,102p' docs/02-architecture.md` | `` `contextIsolation: true`, `sandbox: true`, `nodeIntegration: false`, жёсткий CSP.`` (`docs/02-architecture.md:100`) | фабрика настроек окна; оба окна — главное и окно апрува | одна фабрика на оба окна, тест читает результат фабрики |
 
@@ -189,12 +189,19 @@ origin в сборке на `loadFile()` не проверяет ничего, �
 `#FF1B2D`. Ниже порога AA для 14px. Следствие: кнопка «Разрешить» красится `.btn-primary`,
 и это совпадает с правилом, записанным в `packages/design/src/palette.ts:17`.
 
+**F8. Playwright в репозитории уже есть, и разведка на этот счёт устарела.**
+`research.md` писался до его установки и утверждает обратное. Проверено: `playwright` стоит
+в корневых `devDependencies`, а `e2e/browser/shot-mockup.mjs` существует и работает — им
+сняты состояния макета для дизайн-ревью. Записано здесь, чтобы следующий читатель не
+перепроверял это заново.
+
 **F5. `--text-tertiary` даёт 4.01:1 на `--bg-surface` в тёмной теме.** Посчитано там же.
 Следствие: данные (длительности, время, хэши) не живут на этом токене.
 
-**F6. `ASSUMED` — точное имя файла preload при принудительном CJS.** Разведка оставила это
-открытым и сказала, что вопрос закрывается запуском за десять минут. Task 1 закрывает его
-первой сборкой и записывает результат сюда же. Ревьюерам атаковать это первым.
+**F6. `ASSUMED` — нужен ли `entryFileNames` поверх `format: 'cjs'`.** Разведка заключает,
+что одного `format` достаточно; я закрепляю расширение вторым параметром, потому что его
+выводит поле `"type": "module"`, а рассуждение — не проба. Расхождение закрывается первой
+сборкой Task 1, и до неё факт остаётся допущением. Ревьюерам атаковать это первым.
 
 **F7. `ASSUMED` — виртуализация таймлайна не нужна.** Арифметика: 13 стадий на вызов,
 демо-трейс порядка десятков вызовов. Порог не измерен, потому что мерить нечего до первой
@@ -208,7 +215,9 @@ origin в сборке на `loadFile()` не проверяет ничего, �
 
 | Полезная нагрузка | Производит | Вариант канала | Потребляет | Источник |
 |---|---|---|---|---|
-| `ChainedEvent` | `src/main/player.ts` | `UiEvent` · `trace-event` | `src/shared/call.ts` → `CallList`, `CallDetail` | `fixtures/trace-seatbelt.jsonl`, `fixtures/trace-none.jsonl` |
+| `ChainedEvent` | `src/main/player.ts` | `UiEvent` · `trace-event` | `src/shared/call.ts` → `CallList`, `CallDetail` | `fixtures/demo.jsonl` — оба прогона S5 в одном логе |
+| Запись лога аудита | `src/main/chain.ts` | `UiEvent` · `audit-window` | `AuditView.tsx` | окно записей вокруг `brokenAt` либо хвоста |
+| Параметры вызова и происхождение argv | `src/main/player.ts` | `UiEvent` · `trace-event` рядом с событием | `CallDetail.tsx` | `fixtures/sidecar.json` — **в контракте этих полей нет**, см. ниже |
 | `PlayerState` | `src/main/player.ts` | `UiEvent` · `player-state` | `Chrome.tsx` — кнопка паузы и позиция | состояние проигрывателя |
 | `ChainVerification` + счётчик | `src/main/chain.ts` | `UiEvent` · `chain` | `AuditView.tsx` через `shared/chainBadge.ts` | пересчёт по загруженному трейсу |
 | `PolicyRow[]` | `src/main/policy.ts` | `UiEvent` · `policy` | `PolicyView.tsx` через `registers.ts` | `fixtures/policy.json` |
@@ -218,6 +227,19 @@ origin в сборке на `loadFile()` не проверяет ничего, �
 | `ApprovalVerdict` | `ApprovalWindow.tsx` | `UiRequest` · `approval-verdict` | `src/main/approvals.ts` | ввод человека |
 | `PlayerCommand` | `Chrome.tsx` | `UiRequest` · `player-command` | `src/main/player.ts` | ввод человека |
 | запрос экспорта | `AuditView.tsx` | `UiRequest` · `export-log` | `src/main/export.ts` | — |
+
+**Разрыв контракта, который таблица обнажила и который E7 закрыть не может.** Панель
+деталей показывает параметры вызова и подсвечивает, что из argv пришло от модели. Ни того,
+ни другого в `AuditEvent` нет: параметры живут в `IpcRequest.params`
+(`packages/contracts/src/ipc.ts:72`), который событие намеренно не несёт, а происхождения
+элементов argv не несёт никто. Токен для подтверждения (`R41`) — та же история:
+`ApprovalRequest` поля с ним не имеет.
+
+Пока E7 работает на моках, это закрывается сайдкаром `fixtures/sidecar.json`, и так и
+записано в таблице. Но **для настоящей системы это дыра в замороженном контракте**, и
+закрыть её может только владелец: либо событие получает поля происхождения, либо панель
+деталей теряет подсветку и строку параметров, либо правило выбора токена сводится к
+вычислимому из `ApprovalRequest` (например, последний элемент argv). Здесь это не решается.
 
 Три следствия, которые из таблицы видны сразу и которых план не имел:
 
@@ -272,8 +294,9 @@ export function webPreferencesFor(role: WindowRole, preload: string): Electron.W
 }
 ```
 
-`spellcheck: false` — не косметика. Проверка орфографии включена по умолчанию и тянет
-словари **из главного процесса по сети**, то есть мимо CSP рендерера. Окно апрува по `R41`
+`spellcheck: false` — не косметика, но обоснование помечено `ASSUMED`: в разведке его нет,
+это моё утверждение. Проверка орфографии включена по умолчанию и, насколько мне известно,
+тянет словари **из главного процесса по сети**, то есть мимо CSP рендерера. Окно апрува по `R41`
 содержит текстовое поле, в которое человек набирает опасный токен, — это ровно то место,
 где оно бы сработало. Чек-лист приватности спеки утверждает, что данные машину не покидают;
 пока `spellcheck` по умолчанию включён, это утверждение ложно.
@@ -284,35 +307,42 @@ export function webPreferencesFor(role: WindowRole, preload: string): Electron.W
 
 **Шаги.**
 
-1. `yarn workspace @mcpproxy/desktop add -D electron electron-vite electron-builder` и
+1. **`@mcpproxy/contracts` и `@mcpproxy/design` собираются внутрь main и preload, а не
+   выносятся во внешние.** Разведка называет это решением с наибольшим рычагом: упаковщик
+   тогда никогда не идёт по симлинку `workspace:*`, и целый класс багов «electron-builder
+   плюс yarn workspaces» исчезает по построению. Упаковка — предмет E9, но выбор бандлинга
+   это конфиг Task 1, и E9 дёшево его не переиграет. Версии закрепляются теми, что назвала
+   разведка: `electron-vite@5`, `electron-builder@^26.15.6`, Vite на `7.3.6`, Electron 43.
+2. `yarn workspace @mcpproxy/desktop add -D electron electron-vite electron-builder` и
    `add react react-dom`. Версии закрепить точно: разведка нашла, что Electron 42 и выше
-   больше не скачивает бинарь на установке, поэтому после установки нужен явный
-   шаг доустановки бинаря, иначе `electron-vite` падает с `Error('Electron uninstall')`.
-   Точное имя команды — `ASSUMED`: разведка зафиксировала появление отдельного бина, но не
-   его вызов, и это закрывается первой установкой.
-2. `electron.vite.config.ts`: три сборки. В сборке preload задать
+   больше не скачивает бинарь на установке, поэтому после установки
+   нужен прогон бина `install-electron`, иначе `electron-vite` падает с
+   `Error('Electron uninstall')`.
+3. `electron.vite.config.ts`: три сборки. В сборке preload задать
    `build.rollupOptions.output.format` равным `cjs` **и `entryFileNames` равным
    `'[name].cjs'`**. Одного `format` мало: расширение определяет `entryFileNames`, а его
    `electron-vite` выводит из поля `"type": "module"` пакета, которое здесь остаётся ради
-   ESM в main. Файл `.mjs` с CJS-содержимым Electron грузит как ESM, а ESM-preload требует
+   ESM в main. **Это мой вывод, а не находка разведки** — она заключает, что `format: 'cjs'`
+   расширение уже даёт, и слова `entryFileNames` в ней нет. Пометка `ASSUMED` в F6 относится
+   именно к этому расхождению. Файл `.mjs` с CJS-содержимым Electron грузит как ESM, а ESM-preload требует
    `sandbox: false` — единственное, чем этот продукт торговать не может. Расширение
    закрепляется конструкцией, а не наблюдается после сборки. В `build.target` задать цель
    явно — таблица версий `electron-vite` кончается на Electron 39 и промах молча отдаёт
    последнюю запись, то есть `chrome108`.
-3. Разделить tsconfig: главный и preload остаются на `lib: ["ES2023"]`, рендерер добавляет
+4. Разделить tsconfig: главный и preload остаются на `lib: ["ES2023"]`, рендерер добавляет
    `DOM` и `DOM.Iterable`, `"jsx": "react-jsx"` и объявление модуля для
    `@mcpproxy/design/css` — при `moduleResolution: NodeNext` спецификатор CSS иначе не
    резолвится. Ссылки на `../contracts` и `../design`, живущие сегодня в
    `packages/desktop/tsconfig.json`, обязаны остаться в том под-конфиге, который
    компилирует TS, иначе граф проекта рвётся. Корневой конфиг пакета становится ссылочным.
-4. `window.ts` с фабрикой выше. Обе роли окна ходят через неё; путь к preload резолвится
+5. `window.ts` с фабрикой выше. Обе роли окна ходят через неё; путь к preload резолвится
    в `main/index.ts`, где Electron и так присутствует.
-5. `main/index.ts` создаёт главное окно из фабрики.
-6. Удалить заглушку `packages/desktop/src/index.ts`, снять её из `exports` пакета и задать
+6. `main/index.ts` создаёт главное окно из фабрики.
+7. Удалить заглушку `packages/desktop/src/index.ts`, снять её из `exports` пакета и задать
    `main` — точку входа собранного главного процесса. Каталог `fixtures/` попадает в сборку,
    а путь к нему резолвится от `app.getAppPath()`, а не относительно исходников: в
    упакованном виде исходников рядом нет.
-7. Переписать скрипты пакета: `build` — `electron-vite build`, `test` — `tsc -b && vitest run`
+8. Переписать скрипты пакета: `build` — `electron-vite build`, `test` — `tsc -b && vitest run`
    (префикс обязателен: корневой прогон идёт `-Ap`, без топологии, а тесты десктопа читают
    `dist` пакета `design`, который Task 5 меняет — так же защищается `contracts`),
    `typecheck` — `tsc -b --noEmit false --emitDeclarationOnly`, ровно как у соседних пакетов.
@@ -320,8 +350,8 @@ export function webPreferencesFor(role: WindowRole, preload: string): Electron.W
    права отключать эмит, а `contracts` и `design` его не отключают. Сегодня `build` это `tsc -b`, а `test` отсутствует
    вовсе, поэтому корневой `yarn build` собирал бы типы вместо приложения, а `yarn test`
    молча пропускал бы пакет — и проверки трёх задач оказались бы пусто-зелёными.
-8. Обновить раздел F6: расширение теперь закреплено `entryFileNames`, и факт перестаёт быть
-   `ASSUMED` по построению, а не по наблюдению.
+9. Обновить раздел F6 фактическим именем эмитированного файла: закрепление `entryFileNames`
+   расходится с выводом разведки, и до первой сборки расхождение остаётся `ASSUMED`.
 
 **Falsification:** утверждение — `expect(webPreferencesFor(role, '/p')).toEqual({ contextIsolation: true, sandbox: true, nodeIntegration: false, webSecurity: true, spellcheck: false, preload: '/p' })`,
 прогнанное `it.each` по обоим значениям `WindowRole`. Именно `toEqual`, а не `toMatchObject`:
@@ -422,6 +452,8 @@ export function cspFor(mode: 'development' | 'production', nonce: string): strin
 - Create: `packages/desktop/src/shared/result.ts`
 - Create: `packages/desktop/src/shared/parse.ts`
 - Create: `packages/desktop/src/shared/playerCommand.ts`
+- Create: `packages/desktop/src/shared/policyRow.ts`
+- Create: `packages/desktop/src/main/dispatch.ts`
 - Create: `packages/desktop/src/main/ipc.ts`
 - Modify: `packages/desktop/src/preload/index.ts`
 - Test: `packages/desktop/src/main/ipc.test.ts`
@@ -456,7 +488,8 @@ export type UiEvent =
   | { readonly kind: 'policy'; readonly rows: readonly PolicyRow[] }
   | { readonly kind: 'lock-diff'; readonly diff: LockDiff | null }
   | { readonly kind: 'approval-request'; readonly request: ApprovalRequest }
-  | { readonly kind: 'approval-closed'; readonly requestId: RequestId };
+  | { readonly kind: 'approval-closed'; readonly requestId: RequestId }
+  | { readonly kind: 'trace-reset'; readonly track: TrackId };
 ```
 
 Направление main→renderer до этой ревизии типа не имело вовсе, хотя по нему ходят шесть
@@ -464,6 +497,10 @@ export type UiEvent =
 цепочки, строки политики, дифф lock и запросы апрува. Тот же диагноз, который план поставил
 экспорту — «механизма не существовало», — относился и к ним, просто менее заметно: не
 хватало не канала, а формы.
+
+`trace-reset` отправляется первым после `reset` и `select-track`: обе команды делают
+накопленный рендерером массив событий недействительным, и без явного сообщения рендереру
+пришлось бы **выводить** сброс из гонки `player-state` с событиями новой дорожки.
 
 `UiEvent` объявлен здесь же, в `shared/`, и импортируется обеими сторонами через
 `import type`.
@@ -609,17 +646,24 @@ export function parsePlayerCommand(payload: unknown): Result<PlayerCommand>;
    конструкторами, а не приведением.
 3. `ipc.ts` — обёртка `guarded` и регистрация трёх обработчиков через неё: вердикт апрува,
    команда проигрывателя, запрос на экспорт лога.
-4. preload экспонирует один замороженный объект с именованными методами — `sendVerdict`,
+4. **`dispatch.ts` — единственный владелец исходящего направления.** Он держит реестр окон и
+   отдаёт `send(target: 'main' | 'approval' | 'both', event: UiEvent)`; производители
+   получают его аргументом, как `createPlayer` получает `emit`. Без этого `webContents.send`
+   расползается по четырём модулям, а у `approval-request` два потребителя в двух разных
+   `webContents`, и кто из них что получает — нигде не сказано. Тест-страж шага 7
+   запрещает голый `webContents.send` вне `dispatch.ts` так же, как голый `ipcMain.handle`
+   вне `ipc.ts`.
+5. preload экспонирует один замороженный объект с именованными методами — `sendVerdict`,
    `sendCommand`, `requestExport`, `onEvent`. `ipcRenderer` наружу не отдаётся ни целиком,
    ни отдельным методом.
-5. **Входящее направление тоже сужается.** `ipcRenderer.on` отдаёт слушателю
+6. **Входящее направление тоже сужается.** `ipcRenderer.on` отдаёт слушателю
    `IpcRendererEvent`, несущий `sender` и `ports`; preload обязан его отбросить и передать
    рендереру только полезную нагрузку. Иначе весь хардненинг исходящего направления
    обходится с другой стороны моста. Это и есть тот набор методов, который проверяет
    Task 15, шаг 3.
-6. Обработчики возвращают `Result`, а не бросают: через `ipcMain.handle` наружу проходит
+7. Обработчики возвращают `Result`, а не бросают: через `ipcMain.handle` наружу проходит
    только свойство `message`, а `contextBridge` срезает пользовательские поля `Error`.
-7. Тест-страж запрещает голые `ipcMain.handle` и `ipcMain.on`: читает исходники `src/main`
+8. Тест-страж запрещает голые `ipcMain.handle` и `webContents.send` и `ipcMain.on`: читает исходники `src/main`
    и падает на вызове вне `ipc.ts`. Обеспечение структурное, а не линтерное — единственный
    плагин с таким правилом имеет одного мейнтейнера и в своей же документации признаёт, что
    проверяет факт защиты, а не её корректность.
@@ -667,8 +711,9 @@ export function parsePlayerCommand(payload: unknown): Result<PlayerCommand>;
 - Create: `packages/desktop/src/main/trace.ts`
 - Modify: `packages/desktop/src/main/index.ts`
 - Modify: `packages/desktop/src/main/ipc.ts`
-- Create: `packages/desktop/fixtures/trace-seatbelt.jsonl`
-- Create: `packages/desktop/fixtures/trace-none.jsonl`
+- Create: `packages/desktop/fixtures/demo.jsonl`
+- Create: `packages/desktop/fixtures/demo-forged.jsonl`
+- Create: `packages/desktop/fixtures/sidecar.json`
 - Create: `packages/desktop/fixtures/policy.json`
 - Create: `packages/desktop/fixtures/lockdiff.json`
 - Create: `packages/desktop/fixtures/approvals.json`
@@ -736,21 +781,26 @@ export interface Player {
 }
 
 export function createPlayer(
-  tracks: Readonly<Record<TrackId, readonly ChainedEvent[]>>,
+  events: readonly ChainedEvent[],
+  marks: Readonly<Record<TrackId, number>>,
   emit: (event: ChainedEvent) => void,
 ): Player;
 
 export function readTrace(text: string): Result<readonly ChainedEvent[]>;
 ```
 
+`PolicyRow` и `PolicyAxis` живут в `src/shared/policyRow.ts` по той же причине, по которой
+там же живёт `PlayerState`: на них ссылается `shared/channel.ts`, и объявление в рендерере
+означало бы, что канал импортирует из рендерера, а `main/policy.ts` — тоже. §9 это назвала,
+но задачи из неё выведены не были: перенесён был только `PlayerState`.
+
 `PlayerCommand`, `PlayerState` и `TrackId` объявлены в `src/shared/playerCommand.ts`
 (Task 3) и здесь только используются.
 
-Ключ — `TrackId`, а не `traceId` из контракта. Это принципиально: `traceId`
-(`packages/contracts/src/event.ts:71`) идентифицирует **вызов**, и `foldCalls` сворачивает
-по нему. Ключевать дорожки им означало бы либо слить seatbelt и none в один вызов из
-двадцати шести стадий, либо признать, что «тот же вызов» — риторика. Дорожка это запись
-прогона, вызовы внутри неё сохраняют свои `traceId`.
+`marks` — позиции начала каждого прогона в одном общем массиве, а не отдельные массивы.
+`TrackId` при этом не `traceId` из контракта: `traceId` (`packages/contracts/src/event.ts:71`)
+идентифицирует **вызов**, и `foldCalls` сворачивает по нему. Перемотка меняет позицию
+проигрывателя, а не содержимое списка.
 
 Приёмник событий — аргумент, а не спрятанный внутри модуля побочный эффект: иначе тип
 умалчивает, куда уходят события, и позиция оказывается сплавлена с транспортом в одном
@@ -769,9 +819,12 @@ export function readTrace(text: string): Result<readonly ChainedEvent[]>;
 3. Две дорожки трейса покрывают сценарии S1–S9. Формы полей берутся из
    `packages/contracts/src/event.ts:42`; ключ `argv` у вызова, остановленного на `lock_check`,
    **отсутствует**, а не приезжает пустым массивом.
-4. Хотя бы одно событие несёт `protocolVersion` старой ревизии: значение принадлежит сессии,
+4. Разбор терпим к незнакомому `schema`: `packages/contracts/src/event.ts:49` объявляет, что
+   читатель обязан отрисовать неизвестное значение как «форма новее меня», а не бросить.
+   Фикстура содержит одно такое событие, и тест это удерживает.
+5. Хотя бы одно событие несёт `protocolVersion` старой ревизии: значение принадлежит сессии,
    а не сборке, и UI не имеет права его захардкодить.
-5. `fixtures/policy.json` и `fixtures/lockdiff.json` — вторая пара фикстур, без которой
+6. `fixtures/policy.json` и `fixtures/lockdiff.json` — вторая пара фикстур, без которой
    два экрана не имеют источника данных. Policy viewer показывает колонку «обеспечено
    прокси», которой в `Tool` нет вовсе (`packages/contracts/src/tool.ts:16` — имя, схемы и
    аннотации, никаких осей песочницы и никакого тира). Права живут в нормализованном
@@ -784,20 +837,22 @@ export function readTrace(text: string): Result<readonly ChainedEvent[]>;
    `parseLockFile`, которые живут за входом `@mcpproxy/contracts/validate` и тянут `yaml`,
    `ajv` и нативный `re2`. Тащить это в приложение ради моков значит противоречить факту
    F1, чей смысл в том, что E7 обходится корневым входом.
-6. Проигрыватель создаётся в `main/index.ts` при запуске, а его команда регистрируется
+7. Проигрыватель создаётся в `main/index.ts` при запуске, а его команда регистрируется
    обработчиком в `ipc.ts`. Без этих двух правок проигрыватель существует как модуль и не
    работает как механизм.
-7. Дорожек две — `trace-seatbelt.jsonl` и `trace-none.jsonl`, — и переключатель режима
-   отправляет `{ kind: 'select-track' }`. Подмена выделенной строки выглядела бы так же, но
-   доказывала бы другое, а S5 держится ровно на том, что команда и её параметры одни и те
-   же. Макет подменяет выделение, потому что проигрывателя не имеет; `R58` требует, чтобы
-   приложение так не делало, и в приложении смена дорожки меняет весь список, панель
-   нарушений и счётчики — а не одну выделенную строку.
-8. **Генератор фикстур считает цепочку хэшей.** `chain.self` обязан удовлетворять
+8. **Трейс один, и оба прогона лежат в нём.** Переключатель режима отправляет
+   `{ kind: 'select-track' }`, и проигрыватель **перематывается** к началу выбранного
+   прогона — команда идёт через проигрыватель, как требует `R58`, но список при этом не
+   подменяется. Два файла ломали бы ровно то, ради чего S5 существует: макет рисует пару
+   соседними строками в четырёх секундах друг от друга, и шаг 1 Task 7 обосновывает бейдж
+   режима именно этой смежностью. Разведёнными по файлам они соседними не бывают,
+   `08-demo-scenarios.md` описывает один таймлайн, а цепочка хэшей распалась бы на две с
+   разными генезисами, и счётчик аудита потерял бы смысл.
+9. **Генератор фикстур считает цепочку хэшей.** `chain.self` обязан удовлетворять
    `chainHash(unchain(event), prev)`; написанные руками хэши сделали бы демо-трейс
    постоянно «разошедшимся» — на сцене. Скрипт берёт `chainHash` из
    `@mcpproxy/contracts/audit`, гоняется в сборке фикстур, и его вывод коммитится.
-9. **`main/policy.ts` читает `policy.json` и `lockdiff.json` и отправляет их варианты
+10. **`main/policy.ts` читает `policy.json` и `lockdiff.json` и отправляет их варианты
    канала**; **`main/approvals.ts` читает `approvals.json`**, отправляет `approval-request`
    и закрывает запрос по вердикту либо по отказу; **`main/export.ts`** обслуживает экспорт.
    Без этих трёх модулей четыре варианта `UiEvent` не имеют отправителя, а три фикстуры —
@@ -865,7 +920,11 @@ export function violationRole(type: ViolationType, action: 'denied' | 'allowed')
 3. Завести пакету скрипт `test` — сегодня его нет, и первый же тест пакета не запустился бы.
    Добавить `vitest` в его `devDependencies`.
 4. Добавить союз `CallOutcome` и подпись `outcomeLabel` по **всем пяти** его значениям: `blocked` → «Отбито», `passed` → «Прошло», `denied` → «Отказано»,
-   `awaiting` → «Ждёт подтверждения», `clean` → «Выполнено». Союз объявляется здесь, потому
+   `awaiting` → «Ждёт подтверждения», `clean` → «Выполнено», **`running` → «Выполняется»**.
+   Шестое значение обязательно: проигрыватель отдаёт события по одному, и `foldCalls.open`
+   прямо утверждает, что половина вызовов на экране всегда незакончена — а пятизначный союз
+   заставил бы подписать такой вызов «Выполнено» рядом с бейджем «разрешено». В макете
+   состояния «в полёте» нет ни одного, поэтому дизайн-ревью его не видело. Союз объявляется здесь, потому
    что `desktop` зависит от `design`, а не наоборот, и второе его объявление в рендерере
    стало бы вторым источником одного значения. Покрыть два значения из пяти
    означало бы, что остальные три всё равно чеканятся в рендерере — то есть правило,
@@ -1132,9 +1191,7 @@ export function stagePresence(call: Call): ReadonlyArray<{ stage: Stage; present
 **Interfaces.**
 
 ```ts
-import type { NormalizedRecipe, RiskTier, Tool } from '@mcpproxy/contracts';
-
-export type PolicyAxis = 'network' | 'write' | 'read';
+import type { PolicyAxis, PolicyRow } from '../../shared/policyRow.js';
 
 export interface Register {
   readonly axis: PolicyAxis;
@@ -1142,12 +1199,6 @@ export interface Register {
   readonly enforced: string;
   readonly diverges: boolean;
   readonly defaulted: boolean;
-}
-
-export interface PolicyRow {
-  readonly tool: Tool;
-  readonly effective: NormalizedRecipe;
-  readonly tier: RiskTier;
 }
 
 export function registers(row: PolicyRow): Readonly<Record<PolicyAxis, Register>>;
@@ -1198,6 +1249,7 @@ export function registers(row: PolicyRow): Readonly<Record<PolicyAxis, Register>
 **Files:**
 - Create: `packages/desktop/src/main/chain.ts`
 - Create: `packages/desktop/src/shared/chainBadge.ts`
+- Modify: `packages/desktop/src/main/index.ts`
 - Create: `packages/desktop/src/renderer/audit/AuditView.tsx`
 - Modify: `packages/desktop/src/renderer/App.tsx`
 - Modify: `packages/desktop/src/main/ipc.ts`
@@ -1206,7 +1258,9 @@ export function registers(row: PolicyRow): Readonly<Record<PolicyAxis, Register>
 **Шаги.**
 
 1. `chain.ts` в main вызывает `verifyChain` из входа `@mcpproxy/contracts/audit` и отдаёт
-   в рендерер готовый `ChainVerification`. Функция тянет `node:crypto`, которому в
+   в рендерер готовый `ChainVerification` через `dispatch`. Создаётся в `main/index.ts` при
+   запуске и пересчитывается при смене дорожки: без этой правки модуль остался бы островом,
+   а `R14` и `R32`–`R35` — без единого пути исполнения. Функция тянет `node:crypto`, которому в
    песочничном бандле рендерера места нет.
 2. Бейдж **называет механизм и якорь, а не выносит вердикт**: «самосогласована · N записей ·
    без внешнего якоря». Слово «tamper-proof» не употребляется нигде.
@@ -1217,10 +1271,15 @@ export function registers(row: PolicyRow): Readonly<Record<PolicyAxis, Register>
 5. При разрыве список якорится к точке разрыва и показывает её саму. Записи выше отделены
    штриховкой и подписью «утверждать нельзя» — «непроверяемое» и «подделанное» это разные
    утверждения.
-6. **Список аудита рисует окно, а не весь лог.** Виртуализация не нужна таймлайну, где
-   вызовов десятки, но лог — это тысячи записей, и факт F7 про него молчал. Окно якорится
-   либо на `brokenAt`, либо на хвост.
-7. **Экспорт JSONL — третий канал, а не строка из двух слов.** Кнопка живёт в рендерере, а
+6. **Список аудита рисует окно, а не весь лог**, и это окно — отдельная полезная нагрузка
+   со своим вариантом канала, а не побочный эффект. Оно якорится либо на `brokenAt`, либо на
+   хвост. Счётчик записей берётся из длины лога, а не из макетного литерала.
+7. **Состояние «цепочка разошлась» получает источник.** `demo-forged.jsonl` — копия трейса с
+   одной правленой записью; без него состояние `audit-broken`, ради которого написано `R34`,
+   в запущенном приложении недостижимо, и сверка состояний с макетом его не покроет.
+   `brokenAt` — индекс с нуля (`packages/contracts/src/audit/chain.ts:67`), а макет нумерует
+   записи с единицы; `chainBadge` переводит одно в другое явно.
+8. **Экспорт JSONL — третий канал, а не строка из двух слов.** Кнопка живёт в рендерере, а
    запись файла возможна только в main, поэтому появляется обработчик `export-log` с
    `dialog.showSaveDialog` в main. Архитектурная строка «ровно два сообщения» и шаг 3
    Task 3 правятся на три: они были написаны раньше, чем экспорт получил механизм, и
@@ -1297,14 +1356,16 @@ export function diffSlots(diff: LockDiff): ReadonlyArray<SlotView>;
 
 **Шаги.**
 
-1. Четыре раздельных слота: добавлено, удалено, изменено, изменены значения по умолчанию.
+1. Модалка берёт `--shadow-modal` и слой `--z-overlay`. Оба токена дизайн-система объявляет
+   и до сих пор ни один потребитель их не брал; этот экран — первый.
+2. Четыре раздельных слота: добавлено, удалено, изменено, изменены значения по умолчанию.
    Одна правка `defaults` не должна размножаться по всем рецептам.
-2. Пустые слоты показываются явно, а не скрываются: отсутствие изменений — тоже сведение.
-3. Дифф целиком, без усечения. Усечение здесь равносильно обману.
-4. Дифф красится нейтрально, маркерами. Зелёное «прошло штатно» на строке, из-за которой
+3. Пустые слоты показываются явно, а не скрываются: отсутствие изменений — тоже сведение.
+4. Дифф целиком, без усечения. Усечение здесь равносильно обману.
+5. Дифф красится нейтрально, маркерами. Зелёное «прошло штатно» на строке, из-за которой
    рецепт и заблокирован, — прямая ложь.
-5. Основное действие — «Оставить запрет». Безопасный исход не может быть вторичным.
-6. Это **не** окно апрува: дрейф lock не риск-тир, и поверхности не смешиваются.
+6. Основное действие — «Оставить запрет». Безопасный исход не может быть вторичным.
+7. Это **не** окно апрува: дрейф lock не риск-тир, и поверхности не смешиваются.
 
 **Falsification:** утверждение — `expect(diffSlots(defaultsOnlyDiff).find((s) => s.slot === 'changed')?.rows).toHaveLength(0)`
 при непустом слоте `defaults`. Схлопнуть правку значений по умолчанию в изменения рецептов
@@ -1376,9 +1437,13 @@ export function confirmState(challenge: ConfirmChallenge): {
 7. Вердикт несёт и `requestId`, и `sessionId` (`packages/contracts/src/approval.ts:73`).
    Без `requestId` сообщение из рендерера может одобрить не тот ожидающий вызов, который
    человеку показали.
-8. **Отказ по умолчанию — код, а не декларация.** Если окно создать не удалось, main сам
-   синтезирует `decision: 'denied'` и закрывает запрос. Прежняя формулировка повторяла
-   требование вместо того, чтобы его реализовать.
+8. **Отказ по умолчанию — код, а не декларация, и покрывает два разных случая.** Первый:
+   окно создать не удалось — main синтезирует `decision: 'denied'` и закрывает запрос.
+   Второй: **headless-режим**, когда UI нет вовсе. `docs/adr/0005-dual-channel-approvals.md:35`
+   объявляет его отдельно — «Headless-режим (CI, нет UI) = **deny** по умолчанию», — и это
+   не то же самое, что упавшее окно: там авария, здесь штатный режим запуска. План три
+   раунда не упоминал слово headless ни разу, тогда как под CI приложение будет гоняться
+   смоуком из Task 15, то есть непокрытый путь — ровно тот, в который входит тестовый стенд.
 9. **Обработчик вердикта требует тождества окна.** Оба окна грузятся с одного origin, делят
    один preload и один канал, поэтому проверки origin недостаточно: скомпрометированный
    рендерер главного окна отправил бы вердикт, неотличимый от нажатия человека. Обработчик
@@ -1499,8 +1564,9 @@ export function confirmState(challenge: ConfirmChallenge): {
    спека Playwright-раннера: `@playwright/test` в зависимостях нет, а файл `*.spec.ts` по
    умолчанию подхватился бы `vitest run` и сломал бы прогон каждого пакета. Файл лежит под
    `src/e2e/`, и в `packages/desktop/vitest.config.ts` (заводится в Task 1) добавляется
-   отдельный проект, чтобы юниты и смоук гонялись раздельно. `es-module-lexer` добавляется
-   в `devDependencies` пакета — шаг 6 им пользуется, а сегодня его в десктопе нет.
+   отдельный проект, чтобы юниты и смоук гонялись раздельно. Смоук исключается из обычного
+   `vitest run`, а не только выделяется в проект: иначе каждая «Проверка» начиная с этой
+   задачи запускала бы Electron.
 2. **`R2` доказывается структурно, а не пробником.** Пробник изнутри страницы
    (`typeof require === 'undefined'` и соседи) здесь не работает: при `contextIsolation: true`
    и `nodeIntegration: false` этих глобалей в главном мире нет **независимо от `sandbox`**,
@@ -1526,10 +1592,14 @@ export function confirmState(challenge: ConfirmChallenge): {
 5. Настоящий origin `app://bundle` принимается: единственный юнит `senderRejection`
    сравнивает константу с самой собой, то есть тавтологичен, и открытый хвост факта F2
    закрывается только здесь.
-6. Отсутствие `node:crypto`, `ajv` и `re2` в бандле рендерера проверяется **обходом графа
-   импортов через `es-module-lexer`**, как это уже делает тест зависимостей в пакете контрактов.
-   Поиск подстроки давал бы и ложные срабатывания на строке в уцелевшем комментарии, и
-   пропуски на переписанном бандлером спецификаторе.
+6. Отсутствие `node:crypto`, `ajv` и `re2` проверяется обходом графа импортов по **эмиту
+   `tsc` для проекта рендерера** — там `import type` уже стёрт, а относительные импорты ещё
+   не схлопнуты. Ни исходники, ни готовый бандл на этот вопрос не отвечают: `es-module-lexer`
+   по `.ts` не отличает `import type` от значимого импорта (он лексер JS, и тест
+   зависимостей в контрактах ровно поэтому падает на `.d.ts` в регулярное выражение), а
+   Rollup к моменту бандла встраивает случайно значимый импорт `verifyChain` внутрь, не
+   оставив ни одного специфаера — то есть обе проверки вернули бы зелёное на той самой
+   регрессии, которую ловят.
 7. Вердикт, отправленный из главного окна, отклоняется кодом `sender-window`, а из окна
    апрува — принимается.
 8. Шутер `e2e/browser/shot-mockup.mjs` получает режим URL: сегодня он принимает путь и
@@ -1592,9 +1662,9 @@ export function confirmState(challenge: ConfirmChallenge): {
 | `R33` | Task 11, шаг 3 — «чеклист … включая ту, которая **не** выполнялась» |
 | `R34` | Task 11, шаги 4 и 5 — ветвление по `ok`, якорение к точке разрыва |
 | `R35` | **Task 11, шаг 7** — третий канал `export-log` с `dialog.showSaveDialog` в main. Прежняя строка «Экспорт JSONL» механизма не называла, а архитектура плана в тот момент разрешала только два сообщения |
-| `R36` | Task 12, шаг 3 — «Дифф целиком, без усечения» |
+| `R36` | Task 12, шаг 4 — «Дифф целиком, без усечения» |
 | `R37` | Task 12, `Interfaces` — `diffSlots`, четыре слота всегда |
-| `R38` | Task 12, шаг 6 — «Это **не** окно апрува» |
+| `R38` | Task 12, шаг 7 — «Это **не** окно апрува» |
 | `R39` | Task 13, шаг 1 — «Отдельный `BrowserWindow` через ту же фабрику» |
 | `R40` | Task 13, шаг 3 — «Команда — в основном тексте, не за раскрытием» |
 | `R41` | Task 13, шаг 4 — «Отказ мгновенный — набор нужен только чтобы разрешить» |
@@ -1614,6 +1684,6 @@ export function confirmState(challenge: ConfirmChallenge): {
 | `R55` | Task 1 (флаги фабрики), Task 3 (граница IPC), Task 4 (отсутствие `argv`), Task 5 (роль при `allowed`), Task 11 (`brokenAt: 0`), Task 15 (флаги созданного окна). Требование перечисляет шесть областей, и несут его шесть задач, а не две |
 | `R56` | Закрыто до плана в части падения на ошибке страницы и вождения по контракту состояний; Task 15, шаг 8 добавляет режим URL, которого у шутера сегодня нет |
 | `R57` | Task 13, шаг 10 и Task 6, шаг 3 — инбокс отдельной поверхностью и пятым разделом навигации; состояния `approvals-default` и `approvals-empty` добавлены в макет |
-| `R58` | Task 4, шаг 7 — две дорожки трейса и команда `select-track`, которой у проигрывателя до этой ревизии не было |
+| `R58` | Task 4, шаг 8 — две дорожки трейса и команда `select-track`, которой у проигрывателя до этой ревизии не было |
 | `R59` | Task 13, таблица из трёх строк: ширина гранта — один выбор из трёх, потому что произведение двух осей союз не выражает и в пяти сочетаниях из шести выдало бы грант шире показанного |
 | `R60` | Task 14, шаг 2 — относительный срок в S8 и вердиктная формулировка бейджа в S9 |
