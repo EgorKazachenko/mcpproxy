@@ -1,0 +1,198 @@
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { describe, expect, it } from 'vitest';
+import type { ManifestSource } from '../types.js';
+import { branchChecks } from './branch-checks.js';
+import { parseManifest } from './index.js';
+
+// Путь намеренно глубокий: из `/proj` выражение `../..` резолвится в корень файловой системы,
+// и правило «не выходить за каталог манифеста» оказалось бы неотличимо от правила «не `/`».
+const SOURCE: ManifestSource = { path: '/home/u/proj/mcpproxy.yaml' };
+
+const HEAD = `version: 1
+defaults:
+  timeout: 120s
+  output: { maxBytes: 65536, redact: true }
+  env: { allow: ["PATH"] }
+  sandbox:
+    read: { deny: ["~/.ssh"], allow: ["."] }
+tools:
+`;
+
+const load = (recipeBody: string) => parseManifest(`${HEAD}${recipeBody}`, SOURCE);
+
+const messagesOf = (result: ReturnType<typeof load>): string[] =>
+  result.ok ? [] : result.diagnostics.map((one) => one.message);
+
+describe('правило 1 — confinement для root', () => {
+  it('принимает относительный root вниз от манифеста', () => {
+    expect(load(`  x:
+    description: "x"
+    exec: ["./s.sh"]
+    params: { file: { type: path, root: "./logs" } }
+`).ok).toBe(true);
+  });
+
+  it('отвергает root: "/"', () => {
+    const result = load(`  x:
+    description: "x"
+    exec: ["./s.sh"]
+    params: { file: { type: path, root: "/" } }
+`);
+    expect(result.ok).toBe(false);
+    expect(messagesOf(result).join()).toContain('не ограничивает ничего');
+  });
+
+  it('отвергает выход вверх по дереву', () => {
+    const result = load(`  x:
+    description: "x"
+    exec: ["./s.sh"]
+    params: { file: { type: path, root: "../.." } }
+`);
+    expect(result.ok).toBe(false);
+    expect(messagesOf(result).join()).toContain('за каталог манифеста');
+  });
+});
+
+describe('правило 2 — форма exec[0]', () => {
+  it('принимает голое имя, абсолютный путь и путь вниз от манифеста', () => {
+    for (const binary of ['pnpm', '/usr/bin/make', './scripts/publish.sh']) {
+      expect(load(`  x:
+    description: "x"
+    exec: ["${binary}"]
+`).ok).toBe(true);
+    }
+  });
+
+  it('отвергает метасимвол оболочки', () => {
+    const result = load(`  x:
+    description: "x"
+    exec: ["sh -c 'id' ; rm -rf /"]
+`);
+    expect(result.ok).toBe(false);
+    expect(messagesOf(result).join()).toContain('метасимвол оболочки');
+  });
+
+  it('отвергает выход вверх по дереву в exec[0]', () => {
+    const result = load(`  x:
+    description: "x"
+    exec: ["../../bin/sh"]
+`);
+    expect(result.ok).toBe(false);
+    expect(messagesOf(result).join()).toContain('абсолютным путём');
+  });
+});
+
+describe('правило 3 — слот {} в элементе argv', () => {
+  it('принимает один слот', () => {
+    expect(load(`  x:
+    description: "x"
+    exec: ["./s.sh"]
+    params: { tag: { type: string, pattern: "^v.+$", argv: ["--tag", "{}"] } }
+`).ok).toBe(true);
+  });
+
+  it('отвергает два слота в одном элементе', () => {
+    const result = load(`  x:
+    description: "x"
+    exec: ["./s.sh"]
+    params: { tag: { type: string, pattern: "^v.+$", argv: ["--from={}--to={}"] } }
+`);
+    expect(result.ok).toBe(false);
+    expect(messagesOf(result).join()).toContain('не более одного раза');
+  });
+});
+
+describe('правило 4 — параметр не подставляется в exec, cwd и профиль', () => {
+  it('отвергает слот в exec[0]', () => {
+    // И1/И2, атаки A1/A4 на границе загрузки: иначе недоверенное значение выбирает бинарь.
+    const result = load(`  x:
+    description: "x"
+    exec: ["./run-{}.sh"]
+`);
+    expect(result.ok).toBe(false);
+    expect(messagesOf(result).join()).toContain('подставляться в exec');
+  });
+
+  it('отвергает слот в cwd', () => {
+    const result = load(`  x:
+    description: "x"
+    exec: ["./s.sh"]
+    cwd: "./{}"
+`);
+    expect(result.ok).toBe(false);
+    expect(messagesOf(result).join()).toContain('подставляться в cwd');
+  });
+
+  it('отвергает слот в профиле песочницы', () => {
+    const result = load(`  x:
+    description: "x"
+    exec: ["./s.sh"]
+    sandbox: { write: { allow: ["./out/{}"] } }
+`);
+    expect(result.ok).toBe(false);
+    expect(messagesOf(result).join()).toContain('профиль песочницы');
+  });
+});
+
+describe('правило 5 — pattern компилируется движком RE2', () => {
+  it('отвергает паттерн, которого RE2 не принимает', () => {
+    const result = load(`  x:
+    description: "x"
+    exec: ["./s.sh"]
+    params: { p: { type: string, pattern: "^(?=.*a)b$" } }
+`);
+    expect(result.ok).toBe(false);
+    expect(messagesOf(result).join()).toContain('RE2');
+  });
+});
+
+describe('правило 6 — рецептный deny не может быть пустым', () => {
+  it('отвергает read.deny: []', () => {
+    // Единственная синтаксическая форма, которой рецепт выражает намерение снять запрет.
+    // При объединяющем слиянии она — тихий no-op; при слиянии заменой стёрла бы ~/.ssh,
+    // ~/.aws и ~/.config/gh (атака A10). Правило делает намерение ошибкой загрузки.
+    const result = load(`  x:
+    description: "x"
+    exec: ["./s.sh"]
+    sandbox: { read: { deny: [] } }
+`);
+    expect(result.ok).toBe(false);
+    expect(messagesOf(result).join()).toContain('снять запрет');
+  });
+
+  it('принимает дополнительный непустой deny', () => {
+    expect(load(`  x:
+    description: "x"
+    exec: ["./s.sh"]
+    sandbox: { read: { deny: ["/etc/shadow"] } }
+`).ok).toBe(true);
+  });
+
+  it('пустой allow остаётся законным — это «обнулить», а не «снять запрет»', () => {
+    expect(load(`  x:
+    description: "x"
+    exec: ["./s.sh"]
+    sandbox: { network: { allow: [] } }
+`).ok).toBe(true);
+  });
+});
+
+describe('таблица «ветка ↔ проверка» (R6)', () => {
+  const schemaPath = fileURLToPath(new URL('../../schema/mcpproxy.schema.json', import.meta.url));
+  const schema = JSON.parse(readFileSync(schemaPath, 'utf8')) as { $defs: Record<string, unknown> };
+
+  it('покрывает каждую ветку схемы и не выдумывает лишних', () => {
+    // Сравнение множеств, а не массивов: `toEqual` на массивах краснело бы на безобидной
+    // перестановке, и первый же пострадавший «починил» бы гейт через .sort(), заодно
+    // молча превратив его в не-проверку.
+    expect(new Set(Object.keys(branchChecks))).toEqual(new Set(Object.keys(schema.$defs)));
+  });
+
+  it('называет разницу в обе стороны, когда она есть', () => {
+    const declared = new Set(Object.keys(branchChecks));
+    const actual = new Set(Object.keys(schema.$defs));
+    expect([...actual].filter((one) => !declared.has(one))).toEqual([]);
+    expect([...declared].filter((one) => !actual.has(one))).toEqual([]);
+  });
+});

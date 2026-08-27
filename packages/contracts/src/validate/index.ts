@@ -4,7 +4,9 @@ import type { Manifest } from '../manifest.generated.js';
 import type { Diagnostic, ManifestSource, ParseManifestResult, PatternMatcher } from '../types.js';
 import { matcherKey } from '../types.js';
 import { manifestValidator } from './ajv.js';
+import { diagnosticAt, pointerOf, positionOf, segmentsOf } from './locate.js';
 import { compilePattern } from './regex.js';
+import { refine } from './refine.js';
 import { parseYaml } from './yaml.js';
 
 /**
@@ -12,36 +14,13 @@ import { parseYaml } from './yaml.js';
  * наружу не экспортируется: потребитель, получивший его, свободен выключить любую проверку.
  */
 
-const NUMERIC = /^(0|[1-9][0-9]*)$/;
-
-/** `/tools/run_tests/params/pattern` → сегменты пути для `doc.getIn`. */
-function segmentsOf(instancePath: string): Array<string | number> {
-  if (instancePath === '') return [];
-  return instancePath
-    .slice(1)
-    .split('/')
-    .map((raw) => raw.replaceAll('~1', '/').replaceAll('~0', '~'))
-    .map((segment) => (NUMERIC.test(segment) ? Number(segment) : segment));
-}
-
-const pointerOf = (segments: ReadonlyArray<string | number>): string => segments.join('.');
-
-/** Координаты узла в исходном тексте. Узел не найден — начало документа, а не выдуманная строка. */
-function positionOf(
-  doc: Document,
-  lineCounter: LineCounter,
-  segments: ReadonlyArray<string | number>,
-): { line: number; column: number } {
-  const node: unknown = segments.length === 0 ? doc.contents : doc.getIn(segments, true);
-  const range = (node as { range?: [number, number, number] } | null)?.range;
-  if (range === undefined) return { line: 1, column: 1 };
-  const pos = lineCounter.linePos(range[0]);
-  return { line: pos.line, column: pos.col };
-}
-
 function diagnose(error: ErrorObject, doc: Document, lineCounter: LineCounter): Diagnostic {
   const segments = segmentsOf(error.instancePath);
-  return { pointer: pointerOf(segments), ...positionOf(doc, lineCounter, segments), message: error.message ?? error.keyword };
+  return {
+    pointer: pointerOf(segments),
+    ...positionOf(doc, lineCounter, segments),
+    message: error.message ?? error.keyword,
+  };
 }
 
 /**
@@ -61,15 +40,17 @@ function buildMatchers(
   for (const [recipeName, recipe] of Object.entries(manifest.tools)) {
     for (const [paramName, param] of Object.entries(recipe.params ?? {})) {
       if (param.type !== 'string') continue;
-      const result = compilePattern(param.pattern);
-      const segments = ['tools', recipeName, 'params', paramName, 'pattern'];
-      if (result.ok) matchers.set(matcherKey(recipeName, paramName), result.matcher);
+      const compiled = compilePattern(param.pattern);
+      if (compiled.ok) matchers.set(matcherKey(recipeName, paramName), compiled.matcher);
       else {
-        diagnostics.push({
-          pointer: pointerOf(segments),
-          ...positionOf(doc, lineCounter, segments),
-          message: `pattern не компилируется движком RE2: ${result.reason}`,
-        });
+        diagnostics.push(
+          diagnosticAt(
+            doc,
+            lineCounter,
+            ['tools', recipeName, 'params', paramName, 'pattern'],
+            `pattern не компилируется движком RE2: ${compiled.reason}`,
+          ),
+        );
       }
     }
   }
@@ -89,6 +70,7 @@ export function parseManifest(yamlText: string, source: ManifestSource): ParseMa
 
   const manifest = parsed.data as Manifest;
   const { matchers, diagnostics } = buildMatchers(manifest, parsed.doc, parsed.lineCounter);
+  diagnostics.push(...refine(manifest, source, parsed.doc, parsed.lineCounter));
   if (diagnostics.length > 0) return { ok: false, diagnostics };
 
   return { ok: true, manifest, matchers };
