@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { Ajv2020 } from 'ajv/dist/2020.js';
 import { describe, expect, it } from 'vitest';
-import { durationToMs } from './lock.js';
+import { DURATION_MAX_MS, durationToMs } from './lock.js';
 
 const packageRoot = fileURLToPath(new URL('..', import.meta.url));
 const schemaPath = `${packageRoot}schema/mcpproxy.schema.json`;
@@ -64,12 +64,15 @@ describe('схема манифеста', () => {
     const defs = schema.$defs as Record<string, { pattern?: string } | undefined>;
     const pattern = defs.Duration?.pattern;
     if (pattern === undefined) throw new Error('ветка Duration исчезла из схемы');
-    // Граница пиннится ровно на девяти цифрах: с `{1,19}` прежняя тройка утверждений
-    // оставалась зелёной, а `timeoutMs` доходил до 3.6·10²⁵.
-    expect(new RegExp(pattern).test(`${'9'.repeat(9)}s`)).toBe(true);
-    expect(new RegExp(pattern).test(`${'9'.repeat(10)}s`)).toBe(false);
+    // Граница пиннится соседними входами: с `{1,19}` прежние утверждения оставались
+    // зелёными, а `timeoutMs` доходил до 3.6·10²⁵. Предел здесь — санитарный, от строк
+    // длиной в сотни цифр; исполнимость таймаута проверяет `checkDuration` по значению.
+    expect(new RegExp(pattern).test(`${'9'.repeat(10)}s`)).toBe(true);
+    expect(new RegExp(pattern).test(`${'9'.repeat(11)}s`)).toBe(false);
     expect(new RegExp(pattern).test(`${'9'.repeat(400)}s`)).toBe(false);
     expect(new RegExp(pattern).test('120s')).toBe(true);
+    // Константа границы обязана быть выразимой — иначе её нечем достичь из манифеста.
+    expect(new RegExp(pattern).test(`${DURATION_MAX_MS}ms`)).toBe(true);
   });
 
   it('паттерн Duration и durationToMs согласованы — связку держит тест, а не совпадение', () => {
@@ -81,11 +84,15 @@ describe('схема манифеста', () => {
     const pattern = defs.Duration?.pattern;
     if (pattern === undefined) throw new Error('ветка Duration исчезла из схемы');
     const re = new RegExp(pattern);
-    for (const value of ['1ms', '120s', '2m', '24h', '999999999h', '0ms']) {
+    // Входы подобраны так, чтобы разделять КАЖДОЕ измерение связки по отдельности: форму,
+    // единицу и предел цифр. Пока последнего в списке не было, стороны уже разошлись —
+    // `durationToMs('9999999999s')` разбирался, а схема ту же строку отвергала, — и тест,
+    // поставленный ровно ради «не разойдись», оставался зелёным.
+    for (const value of ['1ms', '120s', '2m', '24h', '9999999999s', '9999999999h', '0ms']) {
       expect(re.test(value), value).toBe(true);
       expect(() => durationToMs(value), value).not.toThrow();
     }
-    for (const value of ['120', '120sec', 's', '1.5s', '-1s', '', '1d']) {
+    for (const value of ['120', '120sec', 's', '1.5s', '-1s', '', '1d', '99999999999s']) {
       expect(re.test(value), value).toBe(false);
       expect(() => durationToMs(value), value).toThrow(TypeError);
     }

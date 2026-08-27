@@ -77,7 +77,9 @@ describe('формы подтверждения', () => {
     // относительный TTL в вердикте выражать нечем.
     expect(Number.isNaN(Date.parse(verdict.expiresAt ?? ''))).toBe(false);
     expect(verdict.expiresAt).toMatch(/Z$|[+-]\d{2}:\d{2}$/);
-    expect(verdict.expiresAt).not.toMatch(/^\d+(ms|s|m|h)$/);
+    // Исполнимая пара к строке ниже: относительный TTL этой формой невыразим не потому, что
+    // так написано в литерале теста, а потому что экспортёр его не принимает.
+    expect(() => isoToUnixNano('600s')).toThrow(TypeError);
     // И то же время, поданное экспортёру, — законная метка, а не отвергаемая форма:
     // связь между двумя замороженными формами держится тестом, а не совпадением.
     expect(() => isoToUnixNano(verdict.expiresAt ?? '')).not.toThrow();

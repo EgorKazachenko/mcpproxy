@@ -1,4 +1,4 @@
-import { RECIPE_NAME_PATTERN, RESERVED_RECIPE_NAMES } from '../ipc.js';
+import { isRecipeName } from '../ipc.js';
 import { canonicalizeJcs } from '../jcs.js';
 import type { LockEntry, LockFile, NormalizedDefaults, NormalizedRecipe } from '../lock.js';
 import { sanitizeDescription } from '../tool.js';
@@ -121,9 +121,7 @@ function checkEntry(name: string, value: unknown, report: (pointer: string, mess
   // Имя записи проверяется той же парой, что и `asRecipeName`: иначе lock несёт имя, которое
   // загрузчик манифеста отвергает, `diffLock` кладёт его в `removed`, и человеку показывают
   // «удалён рецепт `__proto__`», которого никогда не существовало.
-  if (!RECIPE_NAME_PATTERN.test(name) || (RESERVED_RECIPE_NAMES as readonly string[]).includes(name)) {
-    report(pointer, `не имя рецепта: ${name}`);
-  }
+  if (!isRecipeName(name)) report(pointer, `не имя рецепта: ${name}`);
   if (!isRecord(value)) {
     report(pointer, 'запись lock обязана быть объектом');
     return;

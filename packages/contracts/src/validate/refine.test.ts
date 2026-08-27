@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import type { ManifestSource } from '../types.js';
+import { DURATION_MAX_MS } from '../lock.js';
 import { branchChecks, CHECK_IDS } from './branch-checks.js';
 import { parseManifest } from './index.js';
 
@@ -235,7 +236,9 @@ tools:
 `;
 
   it('отвергает длительность выше максимума таймера — схема её пропускает', () => {
-    expect(new RegExp('^[0-9]{1,9}(ms|s|m|h)$').test('999999999h')).toBe(true);
+    // Что схема вход пропустила, доказывает сама диагностика: она про таймер платформы, а не
+    // про несовпадение паттерна. Литеральной копии паттерна здесь не место — сдвинется
+    // схема, и копия продолжит утверждать регулярку, которой в схеме уже нет.
     const result = parseManifest(withTimeout('999999999h'), SOURCE);
     expect(result.ok).toBe(false);
     expect(messagesOf(result).join('\n')).toContain('таймера платформы');
@@ -251,9 +254,9 @@ tools:
     expect(messagesOf(result).join('\n')).toContain('таймера платформы');
   });
 
-  it('граница пиннится соседними входами', () => {
-    // В миллисекундах максимум платформы (2147483647) — десять цифр, а схема даёт девять,
-    // поэтому граница берётся в секундах, где обе стороны выразимы.
+  it('граница пиннится соседними входами — ровно на константе', () => {
+    expect(parseManifest(withTimeout(`${DURATION_MAX_MS}ms`), SOURCE).ok).toBe(true);
+    expect(parseManifest(withTimeout(`${DURATION_MAX_MS + 1}ms`), SOURCE).ok).toBe(false);
     expect(parseManifest(withTimeout('2147483s'), SOURCE).ok).toBe(true);
     expect(parseManifest(withTimeout('2147484s'), SOURCE).ok).toBe(false);
   });
@@ -314,6 +317,10 @@ describe('текст диагностики безопасен для отрис
       p: { type: string, pattern: "[a-${ESC}[31m${BIDI}" }
 `);
     expect(result.ok).toBe(false);
+    // Контроль: диагностика пришла ИМЕННО от компилятора паттернов. Без него кейс зеленеет,
+    // если яд начнёт отбиваться раньше — скажем, `pattern` получит в схеме `$ref: SafeText`, —
+    // и отрицание станет утверждением ни о чём.
+    expect(unsafe(result)).toContain('RE2');
     expect(unsafe(result)).not.toContain(ESC);
     expect(unsafe(result)).not.toContain(BIDI);
   });
@@ -323,6 +330,7 @@ describe('текст диагностики безопасен для отрис
     // хватает одной синтаксической ошибки.
     const result = parseManifest(`version: 1\ndefaults: !${ESC}[31m${BIDI}IGNORE foo\n`, SOURCE);
     expect(result.ok).toBe(false);
+    expect(unsafe(result)).toContain('MISSING_CHAR');
     expect(unsafe(result)).not.toContain(ESC);
     expect(unsafe(result)).not.toContain(BIDI);
   });
@@ -353,6 +361,9 @@ describe('текст диагностики безопасен для отрис
     env: { allow: ["PATH", "A${ESC}[31mB"] }
 `);
     expect(result.ok).toBe(false);
+    // Имя доехало до сообщения — но уже без ESC. Без этой строки кейс зеленел бы и в случае,
+    // когда имя не доезжает вовсе.
+    expect(unsafe(result)).toContain('AB');
     expect(unsafe(result)).not.toContain(ESC);
   });
 });

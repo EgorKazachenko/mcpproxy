@@ -80,16 +80,36 @@ describe('parseLockFile', () => {
     const deep = (n: number): unknown => JSON.parse('{"a":'.repeat(n) + '1' + '}'.repeat(n));
     const loneSurrogate = JSON.parse('{"x": "\\ud800"}') as unknown;
 
-    const crafted: Array<[string, unknown]> = [
-      ['snapshot.own глубокий', { ...CURRENT, tools: { publish_release: { ...CURRENT.tools.publish_release, snapshot: { own: deep(300), effective: {} } } } }],
-      ['defaults глубокий', { ...CURRENT, defaults: deep(300) }],
-      ['defaults с одиночным суррогатом', { ...CURRENT, defaults: loneSurrogate }],
-      ['snapshot.own с одиночным суррогатом', { ...CURRENT, tools: { publish_release: { ...CURRENT.tools.publish_release, snapshot: { own: loneSurrogate, effective: {} } } } }],
+    // Утверждается ПРИЧИНА, а не только `ok: false`. Иначе завтрашнее структурное требование
+    // к `snapshot.own` начнёт ронять все четыре входа по себе, цикл останется зелёным, и
+    // защиту от `TypeError` можно будет снять незаметно.
+    const crafted: Array<[string, unknown, string]> = [
+      // Входы валидны ПО ФОРМЕ и ядовиты для канонизатора — иначе их отбивала бы проверка
+      // формы, и кейс доказывал бы не ту защиту. Глубина прячется там, где форма её не
+      // ограничивает: в элементе `params` и в лишнем ключе `defaults`.
+      [
+        'snapshot.own глубокий',
+        { ...CURRENT, tools: { publish_release: { ...CURRENT.tools.publish_release, snapshot: { own: { ...normalized.own, params: [deep(300)] }, effective: CURRENT.defaults } } } },
+        'собственный блок не канонизируется: вложенность глубже',
+      ],
+      ['defaults глубокий', { ...CURRENT, defaults: { ...CURRENT.defaults, extra: deep(300) } }, 'defaults не канонизируется: вложенность глубже'],
+      [
+        'defaults с одиночным суррогатом',
+        { ...CURRENT, defaults: { ...CURRENT.defaults, env: { allow: [JSON.parse('"\\ud800"')] } } },
+        'defaults не канонизируется: строка содержит одиночный суррогат',
+      ],
+      [
+        'snapshot.own с одиночным суррогатом',
+        { ...CURRENT, tools: { publish_release: { ...CURRENT.tools.publish_release, snapshot: { own: { ...normalized.own, description: JSON.parse('"\\ud800"') }, effective: CURRENT.defaults } } } },
+        'собственный блок не канонизируется: строка содержит одиночный суррогат',
+      ],
     ];
 
-    for (const [label, lock] of crafted) {
+    for (const [label, lock, reason] of crafted) {
       const result = parseLockFile(JSON.stringify(lock));
       expect(result.ok, label).toBe(false);
+      if (result.ok) continue;
+      expect(result.diagnostics.map((one) => one.message).join('\n'), label).toContain(reason);
     }
   });
 
@@ -114,7 +134,10 @@ describe('parseLockFile', () => {
     const result = parseLockFile(JSON.stringify(lock));
     expect(result.ok).toBe(false);
     if (result.ok) return;
-    expect(result.diagnostics.map((one) => one.pointer).join('')).not.toContain(ESC);
+    const pointers = result.diagnostics.map((one) => one.pointer);
+    // Контроль: указатель под этим ключом вообще произведён — но уже без ESC.
+    expect(pointers).toContain('tools.ab');
+    expect(pointers.join('')).not.toContain(ESC);
   });
 
   it('форма defaults и effective проверяется, а не кастуется', () => {

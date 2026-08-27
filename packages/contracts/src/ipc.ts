@@ -27,12 +27,24 @@ export type RequestId = string & { readonly __brand: 'RequestId' };
  */
 export const RECIPE_NAME_PATTERN = /^[a-z][a-z0-9_]{0,63}$/;
 
-/** Вторая половина `propertyNames`. Значение заморожено вместе с паттерном. */
-export const RESERVED_RECIPE_NAMES = ['constructor', 'prototype', '__proto__'] as const;
+/**
+ * Вторая половина `propertyNames`. Значение заморожено вместе с паттерном.
+ *
+ * Тип — `readonly string[]`, а не кортеж литералов: кортеж заставлял бы каждого потребителя
+ * писать `(RESERVED_RECIPE_NAMES as readonly string[]).includes(name)`, и в этом дереве такой
+ * каст появился дважды прежде, чем список успел замёрзнуть. Значение при этом остаётся в
+ * снапшоте поверхности, потому что объявлено `as const` до расширения типа.
+ */
+export const RESERVED_RECIPE_NAMES: readonly string[] = ['constructor', 'prototype', '__proto__'] as const;
+
+/** Единственная форма проверки имени. Обе половины `propertyNames`, и звать её проще, чем повторять. */
+export function isRecipeName(value: string): boolean {
+  return RECIPE_NAME_PATTERN.test(value) && !RESERVED_RECIPE_NAMES.includes(value);
+}
 
 export function asRecipeName(value: string): RecipeName {
   if (!RECIPE_NAME_PATTERN.test(value)) throw new TypeError(`не имя рецепта: ${value}`);
-  if ((RESERVED_RECIPE_NAMES as readonly string[]).includes(value)) {
+  if (RESERVED_RECIPE_NAMES.includes(value)) {
     throw new TypeError(`зарезервированное имя, не имя рецепта: ${value}`);
   }
   return value as RecipeName;

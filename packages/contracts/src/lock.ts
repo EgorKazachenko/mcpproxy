@@ -23,8 +23,14 @@ export const OUTPUT_MAX_BYTES_DEFAULT = 65_536;
  * Потолок длительности — максимум таймера платформы (`2^31 - 1` мс, ~24.8 суток).
  *
  * Граница не выдумана: **выше неё Node молча клампит таймаут к 1 мс**, то есть манифест,
- * просящий «никогда не прерывать», получал бы прерывание немедленно. Ограничения на длину
- * строки для этого мало: `999999999h` — девять цифр, законные по схеме, и 3.6·10¹⁵ мс.
+ * просящий «никогда не прерывать», получал бы прерывание немедленно.
+ *
+ * Значение — единственный арбитр, и предел цифр в схеме ему не замена. Пока схема резала по
+ * девяти цифрам, а константа по значению, между ними лежала полоса в 1.1 млрд мс:
+ * `2147483647ms` — ровно эта константа — отвергался схемой как «десять цифр», и человек
+ * получал диагностику про несовпадение паттерна вместо объяснения про таймер платформы, а
+ * сама константа не была достижима ни в одной единице. Десять цифр обе стороны и снимают
+ * полосу: всё, что выше, отбивает `checkDuration` — с той причиной, которая есть на самом деле.
  */
 export const DURATION_MAX_MS = 2_147_483_647;
 
@@ -34,7 +40,10 @@ export const DURATION_MAX_MS = 2_147_483_647;
  * жёсткий стоп на `lock_check` с диффом, в котором ничего не изменилось.
  */
 export function durationToMs(duration: string): number {
-  const match = /^([0-9]+)(ms|s|m|h)$/.exec(duration);
+  // Предел цифр тот же, что в схеме, и это не дубль ради симметрии: пока стороны расходились,
+  // `durationToMs('9999999999s')` разбирался без броска, а схема ту же строку отвергала — то
+  // есть «связка» существовала только на словах. Сверку держит тест в `schema.test.ts`.
+  const match = /^([0-9]{1,10})(ms|s|m|h)$/.exec(duration);
   if (match === null) throw new TypeError(`не длительность: ${duration}`);
   const unit = UNIT_MS[match[2] as string];
   // Не `?? 1`: регулярка выше уже сузила единицу до `ms|s|m|h`, то есть ветка недостижима,
@@ -227,13 +236,26 @@ export function normalizeRecipe(recipe: Recipe, defaults: Defaults): NormalizedR
         : { maxBytes: recipe.output.maxBytes ?? null, redact: recipe.output.redact ?? null },
   };
 
+  // Пол и потолок держатся и ЗДЕСЬ, а не только в `refine`. Правила живут в `./validate`, а
+  // слияние — в корневом входе, поэтому потребитель, собравший `Recipe` программно и позвавший
+  // `normalizeRecipe` напрямую, минует загрузчик вместе со всеми его диагностиками. Форма
+  // обязана быть безопасной сама по себе: рецепт сужает, но не ослабляет.
+  //
+  // Дайджестов это не двигает: `effective` не хэшируется по построению.
   const effective: NormalizedDefaults = {
     timeoutMs: own.timeoutMs ?? base.timeoutMs,
     output: {
-      maxBytes: own.output?.maxBytes ?? base.output.maxBytes,
-      redact: own.output?.redact ?? base.output.redact,
+      maxBytes:
+        own.output?.maxBytes == null
+          ? base.output.maxBytes
+          : base.output.maxBytes === null
+            ? own.output.maxBytes
+            : Math.min(own.output.maxBytes, base.output.maxBytes),
+      // Редакцию можно включить, но не снять: `false` рецепта против `true` базы — не выбор.
+      redact: (own.output?.redact ?? false) || base.output.redact,
     },
-    env: { allow: own.env?.allow ?? base.env.allow },
+    // Пересечение, а не замена: рецепт сужает allowlist окружения, но не вводит своего.
+    env: { allow: (own.env?.allow ?? base.env.allow).filter((one) => base.env.allow.includes(one)) },
     sandbox: {
       read: mergeAccess(base.sandbox.read, own.sandbox?.read ?? null),
       write: mergeAccess(base.sandbox.write, own.sandbox?.write ?? null),

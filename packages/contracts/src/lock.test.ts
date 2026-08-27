@@ -171,6 +171,42 @@ describe('молчание defaults.output', () => {
   });
 });
 
+describe('эффективный профиль безопасен сам по себе', () => {
+  // Правила пола и потолка живут в `./validate`, а слияние — здесь. Потребитель, собравший
+  // `Recipe` программно и позвавший `normalizeRecipe` напрямую, минует загрузчик вместе с
+  // диагностиками, поэтому форма обязана держать инвариант сама.
+  it('рецепт не снимает редакцию вывода', () => {
+    const recipe: Recipe = { ...PUBLISH, output: { redact: false } };
+    expect(normalizeRecipe(recipe, DEFAULTS).effective.output.redact).toBe(true);
+  });
+
+  it('но включить её, когда база молчит, — может', () => {
+    const base: Defaults = { ...DEFAULTS, output: { maxBytes: 65536, redact: false } };
+    const recipe: Recipe = { ...PUBLISH, output: { redact: true } };
+    expect(normalizeRecipe(recipe, base).effective.output.redact).toBe(true);
+    expect(normalizeRecipe(PUBLISH, base).effective.output.redact).toBe(false);
+  });
+
+  it('рецепт не поднимает потолок вывода, но опускает', () => {
+    const raised: Recipe = { ...PUBLISH, output: { maxBytes: 999_999 } };
+    expect(normalizeRecipe(raised, DEFAULTS).effective.output.maxBytes).toBe(65536);
+    const lowered: Recipe = { ...PUBLISH, output: { maxBytes: 1024 } };
+    expect(normalizeRecipe(lowered, DEFAULTS).effective.output.maxBytes).toBe(1024);
+  });
+
+  it('рецептный env.allow — пересечение с базой, а не замена', () => {
+    const recipe: Recipe = { ...PUBLISH, env: { allow: ['PATH', 'AWS_SECRET_ACCESS_KEY'] } };
+    expect(normalizeRecipe(recipe, DEFAULTS).effective.env.allow).toEqual(['PATH']);
+  });
+
+  it('собственный блок при этом хранит объявленное — хэш считается по нему', () => {
+    // `own` — то, что написал автор рецепта, и именно он хэшируется. Клампинг живёт в
+    // `effective`, иначе дифф lock показывал бы не то, что лежит в манифесте.
+    const recipe: Recipe = { ...PUBLISH, env: { allow: ['PATH', 'AWS_SECRET_ACCESS_KEY'] } };
+    expect(normalizeRecipe(recipe, DEFAULTS).own.env?.allow).toEqual(['PATH', 'AWS_SECRET_ACCESS_KEY']);
+  });
+});
+
 describe('manifestHash', () => {
   it('перестановка ключей tools: хэш не двигает', () => {
     const reordered = manifestOf({ publish_release: PUBLISH, analyze_logs: ANALYZE_LOGS });
