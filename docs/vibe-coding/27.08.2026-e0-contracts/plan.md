@@ -386,7 +386,7 @@ lookahead in OUR schema: THROW invalid perl operator: (?=
 (`packages/contracts/src/domain.ts:57`), и `design` строит по нему исчерпывающий
 `Readonly<Record<AnnotationKey, string>>` (`packages/design/src/semantic.ts:121`).
 
-**Falsification:** утверждение — `expect(deriveRiskTier({readOnlyHint: true, destructiveHint: true}, true)).toBe('low')`.
+**Falsification:** утверждение — `expect(deriveRiskTier({readOnlyHint: true, destructiveHint: true})).toBe('low')`.
 Убрать проверку `readOnlyHint === false` перед чтением `destructiveHint` → возвращается
 `high`, падает только этот кейс.
 
@@ -427,12 +427,14 @@ URL, и файл входит в снапшот поверхности Task 12 �
 выводом генератора, иначе закоммиченная копия молча разъезжается со схемой.
 
 **Verification:** `vitest run src/schema.test.ts` + валидация схемы по мета-схеме 2020-12.
+`ajv@8.20.0` добавляется здесь как **dev**-зависимость (в Task 4 он становится рантайм-зависимостью
+подпути `./validate`), иначе эта проверка на этом шаге последовательности не запускается.
 
 **Commit:** `E0: JSON Schema манифеста и кодогенерация типов`
 
 ### Task 4 — `parseManifest`: YAML, ajv, диагностика
 
-**Files:** `packages/contracts/src/types.ts` (Create), `packages/contracts/src/validate/index.ts` (Create), `packages/contracts/src/validate/yaml.ts` (Create), `packages/contracts/src/validate/parse.test.ts` (Create), `packages/contracts/src/deps.test.ts` (Create), `packages/contracts/package.json` (Modify)
+**Files:** `packages/contracts/src/types.ts` (Create), `packages/contracts/src/validate/index.ts` (Create), `packages/contracts/src/validate/yaml.ts` (Create), `packages/contracts/src/validate/parse.test.ts` (Create), `packages/contracts/src/deps.test.ts` (Create), `packages/contracts/src/index.ts` (Modify), `packages/contracts/package.json` (Modify)
 
 Именованные формы объявляются в **корневом** входе (`src/types.ts`), не в `./validate`:
 `ManifestSource = {path: string; maxBytes?: number}`,
@@ -444,8 +446,17 @@ URL, и файл входит в снапшот поверхности Task 12 �
 Матчеры едут **рядом** с манифестом, а не внутри него. `Manifest` генерируется из схемы с
 `additionalProperties: false`, поэтому носителем скомпилированного объекта быть не может; а если
 бы мог, `Recipe` перестал бы быть JSON-сериализуемым — и Task 9 подаёт именно `Recipe` в
-`canonicalizeJcs`. Ключ карты — точечный путь параметра (`tools.run_tests.params.pattern`),
-в том же формате, что `Diagnostic.path`.
+`canonicalizeJcs`.
+
+Ключ строится **функцией**, а не конкатенацией на стороне вызывающего: из корневого входа
+экспортируется `matcherKey(recipeName: string, paramName: string): string`. Иначе `get()`
+возвращает `undefined` и на «у параметра нет `pattern`», и на «ключ собран неправильно», а
+второй случай возвращает E2 ровно ту развилку, ради закрытия которой R29 и существует, —
+и запасной путь там `new RegExp`.
+
+Формат фиксируется на примере, который ничего не путает: `tools.publish_release.params.tag`.
+Пример `run_tests` для этого не годится — там параметр *называется* `pattern`, и путь
+`tools.run_tests.params.pattern` читается двояко.
 
 `parseManifest(yamlText: string, source: ManifestSource): ParseManifestResult`.
 Разбор `yaml@2.9.0` с `LineCounter`. Три меры сверх дефолтов (Ф3, Ф3-бис):
@@ -473,7 +484,9 @@ strictRequired: false})`, **именованный импорт** (Ф4). `instan
 **Verification:** `yarn workspace @mcpproxy/contracts build && vitest run src/validate/parse.test.ts src/deps.test.ts` — кейсы: валидный
 манифест; `string` без `pattern`; `path` без `root`; неизвестный `type`; дубль ключа;
 алиас-бомба; неизвестный тег; директива `%YAML 1.1`; размер ровно на лимите, на байт больше,
-на байт меньше (три значения §6).
+на байт меньше (три значения §6). Плюс тотальность карты:
+`expect(matchers.size).toBe(countStringParams(fixture))` — карта обязана покрывать все
+параметры с `pattern`, иначе промах неотличим от отсутствия.
 
 **Commit:** `E0: parseManifest — YAML, ajv, диагностика с координатами`
 
@@ -482,9 +495,11 @@ strictRequired: false})`, **именованный импорт** (Ф4). `instan
 **Files:** `packages/contracts/src/validate/regex.ts` (Create), `packages/contracts/src/validate/regex.test.ts` (Create), `packages/contracts/src/validate/index.ts` (Modify), `packages/contracts/src/types.ts` (Modify)
 
 Компиляция каждого `pattern` через `re2` на загрузке; отказ с причиной, если RE2 не
-принимает. Тот же движок передаётся в ajv через `code.regExp` — это нужно не для
-пользовательской строки (её ajv видит как данные), а для схем, которые E2 будет
-компилировать из параметров рецепта.
+принимает. Тот же движок передаётся в ajv через `code.regExp`. Обоснование именно такое, а
+не «для схем E2»: E2 компилирует свои схемы своим экземпляром Ajv, и опция, выставленная
+здесь, туда не долетает. Настоящих причин две — паритет движков, чтобы паттерн, принятый
+компиляцией RE2 выше, не был иначе отвергнут ajv, и защита в глубину на случай, когда схема
+начнёт компилировать паттерн из манифеста. Цена записана в Ф10, строка 3.
 
 **Главное:** через границу пакета едет не голая строка. `PatternMatcher {test(value: string): boolean}`
 объявляется в `src/types.ts` и возвращается в `ParseManifestResult.matchers` (Task 4), а не
@@ -522,8 +537,11 @@ JSON Schema не выражает эти пять правил, поэтому �
 **Falsification:** утверждение — `expect(parseManifest(execWithSlot, source).ok).toBe(false)`.
 Убрать правило 4 → манифест с `exec: ["./run-{}.sh"]` грузится, утверждение читает `true`
 и падает — это И1/И2 и атаки A1/A4 на границе загрузки. Второе утверждение —
-`expect(Object.keys(branchChecks)).toEqual(Object.keys(schema.$defs))`: добавить ветку в
-схему без записи в таблицу → множества расходятся и тест падает.
+`expect(new Set(Object.keys(branchChecks))).toEqual(new Set(Object.keys(schema.$defs)))`,
+с отчётом о разнице в обе стороны: добавить ветку в схему без записи в таблицу → тест падает
+и называет недостающую. Сравнение массивов через `toEqual` было бы чувствительно к порядку и
+краснело на безобидной перестановке — такой гейт первый же пострадавший «чинит» через `.sort()`,
+заодно молча превращая его в не-проверку.
 
 **Verification:** `vitest run src/validate/refine.test.ts` — по кейсу на каждое из пяти
 правил плюс сверка множеств веток.
@@ -537,12 +555,43 @@ JSON Schema не выражает эти пять правил, поэтому �
 `AuditEvent` — вложенный, ISO-время, строковые enum'ы, `stage: Stage` из `domain.ts:12`,
 **без поля `chain`** (его добавляет `ChainedEvent` в Task 8, см. §4).
 
+Набор полей перечисляется здесь целиком, а не «по `docs/07-contracts.md`»: Task 12 заменяет
+тот фрагмент дока ссылкой на этот тип, и без списка самый читаемый артефакт системы окажется
+заморожен ссылкой в никуда.
+
+```
+operation, toolName, traceId, spanId, parentSpanId, startTime, endTime, durationUs
+stage, verdict, denyReason
+recipe: { name, hash }
+argv, cwd
+env:      { allowed }
+sandbox:  { mode, profile, violations[] }
+risk:     { tier, annotations }
+approval: { channel, decision, scope, expiresAt, argsHash } | null
+exit:     { code, signal }
+output:   { bytes, truncated }
+redactions[]
+duration: { overheadMs }        // только на complete
+```
+
+Пер-стадийно необязательны `approval`, `exit`, `output`, `redactions`, `duration` —
+они появляются на своих стадиях.
+
 Рядом с ISO-временем стены — `durationUs: number`, монотонная длительность стадии из
 `process.hrtime.bigint()`, целым числом. Без неё оверхед, который публикуют S2 и
 09-metrics-and-eval (p50 9 мс при цели ≤50 мс p95), не выводится: метки,
 квантованные до миллисекунды, дают ошибку порядка самого измерения, а часы стены ещё и
-прыгают по NTP. На `complete` фиксируется правило
-`overheadMs = Σ durationUs стадий − длительность spawn→exit`.
+прыгают по NTP. На `complete` фиксируется правило по **непересекающемуся** множеству стадий:
+
+```
+overheadMs = round(Σ durationUs по стадиям ∉ {spawn, violation} / 1000)
+```
+
+`violation` исключается не для красоты: нарушений «может быть много»
+(`docs/07-contracts.md:186`), и они возникают **пока дочерний процесс работает**, то есть
+внутри окна `spawn`. Суммируя их наравне с остальными, мы бы прибавляли время, которое уже
+посчитано, и раздували ровно ту цифру, которую S2 показывает на экране, — а в S5, сценарии
+про песочницу, нарушений как раз много.
 
 `toOtlp` — `traceId`/`spanId` hex, числовой `kind`, `startTimeUnixNano`/`endTimeUnixNano`
 десятичными строками, атрибуты под именами из **Ф9** (`gen_ai.tool.name`,
@@ -560,7 +609,7 @@ JSON Schema не выражает эти пять правил, поэтому �
 
 ### Task 8 — JCS и хэш-цепочка
 
-**Files:** `packages/contracts/src/jcs.ts` (Create), `packages/contracts/src/jcs.test.ts` (Create), `packages/contracts/src/audit/chain.ts` (Create), `packages/contracts/src/audit/chain.test.ts` (Create), `packages/contracts/package.json` (Modify)
+**Files:** `packages/contracts/src/jcs.ts` (Create), `packages/contracts/src/jcs.test.ts` (Create), `packages/contracts/src/audit/chain.ts` (Create), `packages/contracts/src/audit/index.ts` (Create), `packages/contracts/src/audit/chain.test.ts` (Create), `packages/contracts/src/index.ts` (Modify), `packages/contracts/package.json` (Modify)
 
 `canonicalizeJcs` живёт в **корневом** входе (`src/jcs.ts`): у неё нет зависимостей,
 включая `node:crypto`. `./audit` берёт только то, что действительно требует `node:crypto`.
@@ -629,22 +678,51 @@ RFC 8785, в том числе числовой файл.
 
 ### Task 9 — lock: манифест целиком, дифф, снапшот
 
-**Files:** `packages/contracts/src/lock.ts` (Create), `packages/contracts/src/lock.test.ts` (Create)
+**Files:** `packages/contracts/src/lock.ts` (Create), `packages/contracts/src/lock.test.ts` (Create), `packages/contracts/src/index.ts` (Modify)
 
 `normalizeRecipe(recipe: Recipe, defaults: Defaults): NormalizedRecipe` — детерминированное
 представление (`exec`, `cwd`, схемы параметров, аннотации, `description`), хранящее **и
-собственный блок рецепта, и эффективный** профиль. Оба нужны: по эффективному считается хэш,
-по собственному строится атрибуция в диффе. Порядок параметров **сохраняется и входит в форму**:
-из него собирается argv, поэтому сортировка «для детерминизма» изменила бы команду, не изменив хэш.
+собственный блок рецепта (`own`), и эффективный (`effective`)** профиль. Порядок параметров
+**сохраняется и входит в форму**: из него собирается argv, поэтому сортировка «для
+детерминизма» изменила бы команду, не изменив хэш.
 
-**Правило слияния замораживается явным списком**, потому что, положив эффективный профиль в
-хэшируемую форму, план втянул его в контракт. `docs/07-contracts.md:20` даёт
-`defaults.sandbox.read: {deny: [...], allow: ["."]}`, а `analyze_logs` объявляет
-`read: {allow: ["./logs"]}` — замена по листу даёт `["./logs"]`, объединение оставляет весь
-проект читаемым. Это решение о blast radius (И4, A10), и без записанного правила E1 и E3
-выберут по-разному, а lock-хэш перестанет быть сравнимым между версиями демона. План фиксирует:
-по каким узлам замена, по каким объединение, и что означает явный пустой массив
-(`network: {allow: []}` — «обнулить», не «наследовать»).
+**Обе формулы замораживаются**, по образцу Task 8 — это третий дайджест пакета, и он тот
+самый, который `lock_check` считает на каждом вызове:
+
+```
+recipeHash   = sha256(utf8(canonicalizeJcs(normalized.own)))
+manifestHash = sha256(utf8(canonicalizeJcs(normalizeManifest(manifest))))
+```
+
+где `normalizeManifest` покрывает `version`, `defaults` и упорядоченную карту собственных
+блоков рецептов.
+
+Ключевое решение: **`effective` не хэшируется пер-рецепт.** Он лежит в `snapshot` ради диффа
+S7, и только. Иначе расширение `defaults.env.allow` меняло бы эффективный профиль всех
+четырёх рецептов, все четыре `recipeHash` разъезжались бы, `lock_check` докладывал бы `drifted` на
+каждом — и это прямо противоречило бы фальсификации ниже, которая требует `changed: []`.
+Дрейф `defaults` ловится `manifestHash` и атрибутируется в слот `defaults`, ровно один раз.
+
+**Правило слияния — таблица, а не пример.** `allow` и `deny` обязаны сливаться с
+противоположной полярностью, и это самое важное решение задачи: `docs/07-contracts.md:21`
+держит `~/.ssh`, `~/.aws`, `~/.config/gh` именно в `defaults.sandbox.read.deny`. Если бы
+`deny` заменялся по листу, рецепт со строкой `read: {deny: []}` стёр бы весь список
+учётных данных — И4 и атака A10, открытые правкой в две строки в файле, который модель
+угроз объявляет недоверенным.
+
+| Узел | Операция | Почему |
+|---|---|---|
+| `sandbox.*.allow` | замена по листу | рецепт сужает или расширяет свой blast radius осознанно |
+| `sandbox.*.deny` | **объединение**; рецепт не может сокращать | запрет из `defaults` неснимаем (И4, A10) |
+| `env.allow` | замена по листу | список переменных рецепт задаёт целиком |
+| `output.*`, `timeout` | замена | скаляры |
+| ключ отсутствует | наследуется из `defaults` | |
+| пустой массив в `allow` | «обнулить», не «наследовать» | `network: {allow: []}` — сеть закрыта |
+| пустой массив в `deny` | **ошибка загрузки** | единственный способ выразить «сними запрет», и он запрещён |
+
+Последняя строка — не документация, а проверка: Task 6 добавляет правило, что рецептный
+`deny` обязан быть надмножеством `defaults.deny`. Правило, которое только записано, E3
+и E1 реализуют по-разному, и lock-хэш перестанет быть сравнимым между сборками демона.
 
 `normalizeManifest(manifest)` и `manifestHash` в `LockFile` — потому что
 `defaults.env.allow: [..., "AWS_SECRET_ACCESS_KEY"]` или опустошённый `defaults.sandbox.read.deny`
@@ -688,7 +766,7 @@ changed: Array<{name, was, is}>}` — добавление и удаление �
 
 ### Task 10 — IPC, подтверждения, проекция в `Tool`, санитизация
 
-**Files:** `packages/contracts/src/ipc.ts` (Create), `packages/contracts/src/approval.ts` (Create), `packages/contracts/src/tool.ts` (Create), `packages/contracts/src/tool.test.ts` (Create), `packages/contracts/src/approval.test.ts` (Create)
+**Files:** `packages/contracts/src/ipc.ts` (Create), `packages/contracts/src/approval.ts` (Create), `packages/contracts/src/audit/args.ts` (Create), `packages/contracts/src/tool.ts` (Create), `packages/contracts/src/tool.test.ts` (Create), `packages/contracts/src/approval.test.ts` (Create), `packages/contracts/src/index.ts` (Modify)
 
 `IpcRequest = {recipeName: RecipeName; params: Readonly<Record<string, unknown>>; sessionId: SessionId}`
 — форма, в которой argv, путь к бинарю, `cwd` и профиль невыразимы. Поле называется
@@ -725,8 +803,8 @@ argsHash = sha256(utf8(canonicalizeJcs({ recipe: recipeName, params })))
 `sanitizeDescription(text: string): {text: string; removedRuns: number}` задаётся
 **структурно, а не блоклистом**: лимит длины, вырезание C0/C1, ANSI-escape, zero-width и
 bidi-override, схлопывание переводов строки. В контракте записывается, что результат
-*уменьшен*, а не *безопасен*. Применяется к **свободному тексту**, который эмитит `toTool`: описание рецепта, описания
-параметров, значения `enum`.
+*уменьшен*, а не *безопасен*. Применяется к **свободному тексту**, который эмитит `toTool`: описание рецепта и описания
+параметров. И только к ним.
 
 Имена рецептов и параметров через неё **не проходят**. Их безопасность обеспечивает
 `propertyNames` схемы (Task 3): имя, прошедшее загрузку, уже соответствует
@@ -735,14 +813,26 @@ bidi-override, схлопывание переводов строки. В кон
 затем не разрешит в рецепт. Тождественность имени становится утверждением, а не
 подразумевается.
 
+**Значения `enum` — тот же случай, и рассуждение переносится дословно.** Это не свободный
+текст, а ровно те строки, которые модель обязана прислать обратно: `docs/07-contracts.md:83`
+определяет валидацию как «значение из `values`». Вырезав из объявленного значения
+bidi-override, мы сделали бы инструмент невызываемым — модель не смогла бы прислать ничего,
+что пройдёт `validate`, и отказ выглядел бы как загадочное отклонение демоном собственного
+же объявленного enum'а. Поэтому `values` ограничивается **структурно, в схеме** (Task 3):
+паттерн, исключающий C0/C1, zero-width и bidi-диапазоны, — и отравленное значение становится
+ошибкой загрузки, а не тихо переписанным.
+
 **Falsification:** утверждение — `expect(toTool(poisoned).description).not.toContain('IGNORE PREVIOUS')`.
 Пропустить `sanitizeDescription` → строка доезжает до вывода и падает. Второе —
 `expect(toTool(r).name).toBe(r.name)`: имя обязано доехать байт в байт, иначе `tools/list`
-отдаёт модели неразрешимое имя. Третье, достижимое через `parseManifest` —
-`expect(toTool(poisonedEnum).inputSchema.properties.mode.enum[0]).not.toContain('\u202e')`:
-bidi-override в значении `enum`, куда схема пускает свободный текст. Четвёртое —
-`expect(applyVerdict(pending, verdictWithOtherRequestId)).toBe(null)`: убрать сверку
-`requestId` → вердикт применяется к чужому вызову.
+отдаёт модели неразрешимое имя. Третье — `expect(parseManifest(poisonedEnum, source).ok).toBe(false)`:
+bidi-override в значении `enum` обязан быть отвергнут **на загрузке**; ослабить паттерн
+`values` в схеме → манифест грузится, утверждение читает `true` и падает.
+
+Четвёртое — типовое, а не поведенческое: `ApprovalVerdict['requestId']` брендирован как
+`RequestId` и не присваивается из `SessionId`, а `ApprovalRequest` без `requestId` — ошибка
+компиляции. Сопоставлением вердикта с ожидающим вызовом занимается E5/E7; E0 объявляет форму,
+а не поведение (`spec.md`), поэтому функции сопоставления здесь не появляется.
 
 **Verification:** `vitest run src/tool.test.ts src/approval.test.ts`
 
@@ -792,7 +882,10 @@ bidi-override в значении `enum`, куда схема пускает с�
 | `docs/07-contracts.md:198`, `docs/02-architecture.md:75` | `{"recipe": "run_tests"}` | `recipeName` |
 | `docs/02-architecture.md:168` | семиполевая формула `entry_hash` | замороженная формула Task 8 |
 | ADR-0005:33 | «на 10 минут» (TTL) | абсолютный `expiresAt` |
-| ADR-0006:22 | нормализованное представление | + эффективный профиль и порядок параметров |
+| ADR-0006:22 | нормализованное представление | + `own`/`effective` и порядок параметров |
+| `docs/07-contracts.md:100` | таблица тиров без приоритета `readOnlyHint` | строка 3 §7: `readOnlyHint: true` перебивает `destructiveHint` |
+| `docs/07-contracts.md:105` | «fail-safe by construction» | граница R11: молчание повышает тир, явный хинт понижает |
+| `docs/08-demo-scenarios.md:208` | вторая копия семиполевой формулы `entry_hash` | замороженная формула Task 8 |
 
 Отдельно — сверка набора рецептов: `WORK.md`, `docs/07-contracts.md:25-76` и
 `docs/08-demo-scenarios.md:36` называют три разных набора. Приводятся к четырём из Task 11,
@@ -829,7 +922,7 @@ bidi-override в значении `enum`, куда схема пускает с�
 | R13 | Task 7: «`toOtlp` — `traceId`/`spanId` hex, числовой `kind`…» |
 | R14 | Task 7 Falsification: «проверяется **отсутствие** любого ключа с `_`» |
 | R15 | Task 8: «Замораживается предикат, а не только дайджест» + формула |
-| R16 | Task 9: «`normalizeRecipe(recipe: Recipe): NormalizedRecipe`» + порядок параметров |
+| R16 | Task 9: «`normalizeRecipe(recipe: Recipe, defaults: Defaults): NormalizedRecipe`» + порядок параметров + `LockEntry.snapshot` |
 | R17 | Task 10: «`IpcRequest = {recipeName; params; sessionId}`» |
 | R18 | Task 10: «проекция ревизии `2025-11-25` с опциональными `resultType`/`ttlMs`/`cacheScope`» |
 | R19 | Task 10: «`sanitizeDescription` задаётся структурно, а не блоклистом» |
