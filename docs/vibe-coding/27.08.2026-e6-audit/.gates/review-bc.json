@@ -1,12 +1,11 @@
 {
   "gate": "review-bc",
-  "status": "pass",
-  "exit_code": 0,
-  "codeTree": "7e8942d98b59ec84b5cc1e63373df1f8d22ccc2d",
+  "status": "waived",
+  "waived_by": "agent-recorded",
+  "reason": "core/src/audit/index.ts — баррель-реэкспорт по находке B2 этого же ревью, логики нет; граф под deps.test.ts, поверхность под снапшотом. Решение владельца 28.08.2026.",
+  "codeTree": "6071da77492af5703c6234aef07f8e1bcb8906be",
   "codeDirty": false,
-  "headSha": "2a1769153b5bc30e9ba8749a7a48962aa21d8336",
-  "startedAt": "2026-08-27T21:43:11.512Z",
-  "command": "node .claude/skills/vibe-code-developing-v2/scripts/review-verify.mjs --kind backward-compat --feature docs/vibe-coding/27.08.2026-e6-audit",
-  "evidencePath": null,
+  "headSha": "d64e0aaa85a553c857846f3902cdaf227c468cce",
+  "startedAt": "2026-08-27T22:07:35.846Z",
   "artifacts": []
 }
