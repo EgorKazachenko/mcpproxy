@@ -1,0 +1,154 @@
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { asRecipeName, type PatternMatcher, type Recipe } from '@mcpproxy/contracts';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import type { ResolvedValues } from './denial.js';
+import { buildArgv } from './argv.js';
+import { validateParams } from './params.js';
+import { resolvePaths } from './paths.js';
+import { prepareRecipe, type PreparedRecipe } from './prepare.js';
+
+const NAME = asRecipeName('run_tests');
+const DIR = '/home/u/proj';
+const NO_MATCHERS: ReadonlyMap<string, PatternMatcher> = new Map();
+
+function prepare(recipe: Recipe, matchers: ReadonlyMap<string, PatternMatcher> = NO_MATCHERS): PreparedRecipe {
+  const result = prepareRecipe(NAME, recipe, matchers, DIR);
+  if (!result.ok) throw new Error(`фикстура не подготовилась: ${result.problems.join('; ')}`);
+  return result.prepared;
+}
+
+/** Прогон всех трёх стадий: карты `ValidatedValues` и `ResolvedValues` чеканят только они. */
+function argvOf(prepared: PreparedRecipe, params: Readonly<Record<string, unknown>>): readonly string[] {
+  const validated = validateParams(prepared, params);
+  if (!validated.ok) throw new Error(`validate: ${validated.denials.map((one) => one.code).join()}`);
+  const resolved = resolvePaths(prepared, validated.values);
+  if (!resolved.ok) throw new Error(`resolve_paths: ${resolved.denials.map((one) => one.code).join()}`);
+  return buildArgv(prepared, resolved.values);
+}
+
+describe('buildArgv — значение отдельным элементом (R20)', () => {
+  const prepared = prepare({
+    description: 'о',
+    exec: ['/usr/bin/true'],
+    params: { s: { type: 'enum', values: ['a b'], argv: ['--flag', '{}'] } },
+  });
+
+  it('элементы шаблона не склеиваются в одну строку', () => {
+    // Утверждаются ОБА элемента по отдельности, а не `join(' ')`: склеенная строка и
+    // правильная пара дают одинаковый `join`, и трейс на нём не сработал бы ни при какой мутации.
+    const argv = argvOf(prepared, { s: 'a b' });
+    expect(argv).toHaveLength(3);
+    expect(argv.at(-2)).toBe('--flag');
+    expect(argv.at(-1)).toBe('a b');
+  });
+});
+
+describe('buildArgv — порядок объявления (R19)', () => {
+  it('обход идёт по объявлению, а не по алфавиту', () => {
+    // Алфавитный порядок ПРОТИВОПОЛОЖЕН порядку объявления, поэтому сортировка ключей не
+    // совпала бы случайно. Утверждается позиция каждого.
+    const prepared = prepare({
+      description: 'о',
+      exec: ['/usr/bin/true'],
+      params: {
+        zebra: { type: 'enum', values: ['z'], argv: ['--zebra={}'] },
+        alpha: { type: 'enum', values: ['a'], argv: ['--alpha={}'] },
+      },
+    });
+
+    expect(argvOf(prepared, { zebra: 'z', alpha: 'a' })).toEqual(['/usr/bin/true', '--zebra=z', '--alpha=a']);
+  });
+});
+
+describe('buildArgv — в exec не подставляется ничего (R22, И2)', () => {
+  it('слот в exec возвращается дословно', () => {
+    // `prepareRecipe` такой рецепт отвергает, поэтому `PreparedRecipe` здесь собран руками:
+    // трейс проверяет поведение `buildArgv` на нарушенном входе, а не чужой инвариант.
+    const hostile: PreparedRecipe = {
+      recipeName: NAME,
+      params: [{ kind: 'enum', name: 's', required: false, argv: ['--s={}'], values: ['v'] }],
+      cwd: DIR,
+      exec: ['sh', '-c', '{}'],
+    };
+    const values = new Map([['s', 'v']]) as unknown as ResolvedValues;
+
+    const argv = buildArgv(hostile, values);
+    expect(argv.slice(0, 3)).toEqual(['sh', '-c', '{}']);
+    expect(argv.at(-1)).toBe('--s=v');
+  });
+});
+
+describe('buildArgv — boolean раскрывается присутствием (R21)', () => {
+  const prepared = prepare({
+    description: 'о',
+    exec: ['/usr/bin/true'],
+    params: { verbose: { type: 'boolean', argv: ['--verbose'] } },
+  });
+
+  it('true добавляет элементы, false не добавляет ничего, отсутствие — тоже', () => {
+    expect(argvOf(prepared, { verbose: true })).toEqual(['/usr/bin/true', '--verbose']);
+    expect(argvOf(prepared, { verbose: false })).toEqual(['/usr/bin/true']);
+    expect(argvOf(prepared, {})).toEqual(['/usr/bin/true']);
+  });
+});
+
+describe('buildArgv — строковое представление числа', () => {
+  const prepared = prepare({
+    description: 'о',
+    exec: ['/usr/bin/true'],
+    params: { n: { type: 'number', argv: ['--n={}'] } },
+  });
+
+  it('целое не уезжает в экспоненциальную запись', () => {
+    // `String(1e21)` даёт `'1e+21'` (Ф13) — скрипт получил бы экспоненту вместо числа.
+    expect(String(1e21)).toBe('1e+21');
+    expect(argvOf(prepared, { n: 1e21 }).at(-1)).toBe('--n=1000000000000000000000');
+  });
+
+  it('-0 и дробное сохраняют кратчайшее round-trip-представление', () => {
+    expect(argvOf(prepared, { n: -0 }).at(-1)).toBe('--n=0');
+    expect(argvOf(prepared, { n: 0.1 + 0.2 }).at(-1)).toBe('--n=0.30000000000000004');
+  });
+});
+
+describe('buildArgv — подстановка не интерпретирует подставляемое (R20а)', () => {
+  let base = '';
+  let root = '';
+  let prepared: PreparedRecipe;
+
+  beforeAll(() => {
+    base = mkdtempSync(join(tmpdir(), 'e2-argv-'));
+    root = join(base, 'logs');
+    mkdirSync(root);
+    // Законные имена файлов: у `path`-параметра нет ни `pattern`, ни `maxLength`, так что
+    // `$` в имени не фильтрует никто. Дефект проявляется на ЗАКОННОМ имени, а не как вектор.
+    writeFileSync(join(root, "a$'b.log"), 'x');
+    writeFileSync(join(root, 'a$`b.log'), 'x');
+
+    prepared = prepare({
+      description: 'о',
+      exec: ['/usr/bin/wc'],
+      params: { file: { type: 'path', root, argv: ['--file={}'] } },
+    });
+  });
+
+  afterAll(() => {
+    rmSync(base, { recursive: true, force: true });
+  });
+
+  it("файл a$'b.log попадает в argv резолвнутым путём байт в байт", () => {
+    // С наивным `replace` argv несёт `ab.log` — другой и несуществующий путь (Ф17).
+    const argv = argvOf(prepared, { file: "a$'b.log" });
+    expect(argv.at(-1)).toBe(`--file=${realpathSync(join(root, "a$'b.log"))}`);
+  });
+
+  it('файл a$`b.log — тоже, и это ДРУГАЯ порча', () => {
+    // Наивная подстановка вклеивает в значение сам префикс `--file=`: `$\`` означает
+    // «текст до совпадения». Оба вектора нужны — трейс на одном пропустил бы другой.
+    const argv = argvOf(prepared, { file: 'a$`b.log' });
+    expect(argv.at(-1)).toBe(`--file=${realpathSync(join(root, 'a$`b.log'))}`);
+    expect(argv.at(-1)).not.toContain('--file=--file=');
+  });
+});
