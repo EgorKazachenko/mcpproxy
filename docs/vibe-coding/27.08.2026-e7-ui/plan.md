@@ -25,7 +25,8 @@ packages/desktop/
 ```
 
 Поток данных односторонний: main читает JSONL, отдаёт события в рендерер по одному каналу;
-рендерер отправляет обратно ровно два сообщения — вердикт апрува и команду проигрывателя.
+рендерер отправляет обратно три сообщения — вердикт апрува, команду проигрывателя и запрос
+на экспорт лога. Файл пишет main: у рендерера доступа к диску нет и не будет.
 
 ## Tech Stack
 
@@ -70,6 +71,13 @@ E6, приложение только читает. Единственная з�
 (`packages/design/src/semantic.ts:98`). Остальные попадания — `README.md:76`, бандл этого рана
 (`spec.md`, `research.md`, `mockup.html`) и таблица потребителей плана E0
 (`docs/vibe-coding/27.08.2026-e0-contracts/plan.md:95`), где зафиксировано «тестов нет вообще».
+
+**Параллельные ветки.** `WORK.md` запрещает пересечения по файлам между ветками волны 1.
+На момент планирования живы воркtree `v2/e1-policy`, `v2/e2-validate`, `v2/e3-sandbox` и
+`v2/e6-audit`; все четыре по таблице работ трогают `packages/core`, тогда как эта ветка
+трогает `packages/desktop`, `packages/design` и `docs/`. Пересечение возможно ровно в двух
+файлах — `packages/design/src/semantic.ts` и `docs/08-demo-scenarios.md`; перед слиянием
+их надо перечитать, а не полагаться на разведение по каталогам.
 
 Потребителей в исполняемом коде нет, поэтому расширение сигнатуры вторым аргументом никого
 не ломает. Это установлено грепом, а не рассуждением: пакет `design` собран, но ещё никем
@@ -198,7 +206,7 @@ origin в сборке на `loadFile()` не проверяет ничего, �
 
 ### Task 1 — тулчейн, окно и четыре флага
 
-Реализует `R1`, `R2`, `R10`, `R55`.
+Реализует `R1`, `R2`, `R55`.
 
 **Files:**
 - Create: `packages/desktop/electron.vite.config.ts`
@@ -225,10 +233,17 @@ export function webPreferencesFor(role: WindowRole, preload: string): Electron.W
     sandbox: true,
     nodeIntegration: false,
     webSecurity: true,
+    spellcheck: false,
     preload,
   };
 }
 ```
+
+`spellcheck: false` — не косметика. Проверка орфографии включена по умолчанию и тянет
+словари **из главного процесса по сети**, то есть мимо CSP рендерера. Окно апрува по `R41`
+содержит текстовое поле, в которое человек набирает опасный токен, — это ровно то место,
+где оно бы сработало. Чек-лист приватности спеки утверждает, что данные машину не покидают;
+пока `spellcheck` по умолчанию включён, это утверждение ложно.
 
 Путь к preload — вход, а не вычисление внутри. Ценность фабрики в том, что четыре флага
 читаются как данные без запуска Electron; композиция с резолвом раскладки сборки эту
@@ -241,16 +256,32 @@ export function webPreferencesFor(role: WindowRole, preload: string): Electron.W
    больше не скачивает бинарь на установке, поэтому после установки обязателен прогон
    `install-electron`, иначе `electron-vite` падает с `Error('Electron uninstall')`.
 2. `electron.vite.config.ts`: три сборки. В сборке preload задать
-   `build.rollupOptions.output.format` равным `cjs`. В `build.target` задать цель явно —
-   таблица версий `electron-vite` кончается на Electron 39 и промах молча отдаёт последнюю
-   запись, то есть `chrome108`.
+   `build.rollupOptions.output.format` равным `cjs` **и `entryFileNames` равным
+   `'[name].cjs'`**. Одного `format` мало: расширение определяет `entryFileNames`, а его
+   `electron-vite` выводит из поля `"type": "module"` пакета, которое здесь остаётся ради
+   ESM в main. Файл `.mjs` с CJS-содержимым Electron грузит как ESM, а ESM-preload требует
+   `sandbox: false` — единственное, чем этот продукт торговать не может. Расширение
+   закрепляется конструкцией, а не наблюдается после сборки. В `build.target` задать цель
+   явно — таблица версий `electron-vite` кончается на Electron 39 и промах молча отдаёт
+   последнюю запись, то есть `chrome108`.
 3. Разделить tsconfig: главный и preload остаются на `lib: ["ES2023"]`, рендерер добавляет
-   `DOM` и `DOM.Iterable`. Корневой `packages/desktop/tsconfig.json` становится ссылочным.
+   `DOM` и `DOM.Iterable`, `"jsx": "react-jsx"` и объявление модуля для
+   `@mcpproxy/design/css` — при `moduleResolution: NodeNext` спецификатор CSS иначе не
+   резолвится. Ссылки на `../contracts` и `../design`, живущие сегодня в
+   `packages/desktop/tsconfig.json`, обязаны остаться в том под-конфиге, который
+   компилирует TS, иначе граф проекта рвётся. Корневой конфиг пакета становится ссылочным.
 4. `window.ts` с фабрикой выше. Обе роли окна ходят через неё; путь к preload резолвится
    в `main/index.ts`, где Electron и так присутствует.
 5. `main/index.ts` создаёт главное окно из фабрики.
 6. Удалить заглушку `packages/desktop/src/index.ts` и снять её из `exports` пакета.
-7. Записать в раздел F6 фактическое имя эмитированного файла preload.
+7. Переписать скрипты пакета: `build` — `electron-vite build`, `test` — `vitest run`,
+   `typecheck` — `tsc -b --noEmit`. Сегодня `build` это `tsc -b`, а `test` отсутствует
+   вовсе, поэтому корневой `yarn build` собирал бы типы вместо приложения, а `yarn test`
+   молча пропускал бы пакет — и проверки трёх задач оказались бы пусто-зелёными.
+8. Перевести запрет навигации на единую точку `app.on('web-contents-created')`: обработчики,
+   привешенные к главному окну, не покрывают окно апрува, которое создаёт Task 13.
+9. Обновить раздел F6: расширение теперь закреплено `entryFileNames`, и факт перестаёт быть
+   `ASSUMED` по построению, а не по наблюдению.
 
 **Falsification:** утверждение — `expect(webPreferencesFor(role, '/p')).toEqual({ contextIsolation: true, sandbox: true, nodeIntegration: false, webSecurity: true, preload: '/p' })`,
 прогнанное `it.each` по обоим значениям `WindowRole`. Именно `toEqual`, а не `toMatchObject`:
@@ -266,7 +297,7 @@ export function webPreferencesFor(role: WindowRole, preload: string): Electron.W
 
 ### Task 2 — схема `app://`, CSP, запрет навигации
 
-Реализует `R3`, `R9`, `R10`.
+Реализует `R3`, `R9`, `R10`, `R55`.
 
 **Files:**
 - Create: `packages/desktop/src/main/protocol.ts`
@@ -294,7 +325,8 @@ export function cspFor(mode: 'development' | 'production', nonce: string): strin
 **Шаги.**
 
 1. Зарегистрировать схему через `registerSchemesAsPrivileged` с константой
-   `APP_SCHEME_PRIVILEGES`. Origin выводится из схемы и хоста, а не повторяется вторым
+   `APP_SCHEME_PRIVILEGES` — **до `app.whenReady()`**, тогда как `protocol.handle`
+   вызывается после. Перепутанный порядок — самый частый способ сломать ровно эту связку. Origin выводится из схемы и хоста, а не повторяется вторым
    литералом: два независимых источника одного значения расходятся молча.
    `corsEnabled` обязателен: `supportFetchAPI` без него — это CVE-2026-70604. `standard`
    обязателен отдельно: без него отключены `localStorage` и относительные ссылки
@@ -309,13 +341,32 @@ export function cspFor(mode: 'development' | 'production', nonce: string): strin
 5. Ветка режима — по `NODE_ENV`, не по `app.isPackaged`: собранное приложение под e2e идёт
    с `isPackaged` равным false и получило бы мягкую политику в единственной автоматической
    проверке, которая вообще поднимает настоящий рендерер.
-6. `will-navigate` и `setWindowOpenHandler` отклоняют всё.
+6. `will-navigate` и `setWindowOpenHandler` отклоняют всё — через точку
+   `web-contents-created` из Task 1, чтобы правило распространялось на оба окна.
+7. **Обработчик схемы резолвит запрошенный путь, берёт `realpath` и отклоняет всё, что не
+   под корнем сборки, возвращая 404.** Стандартная схема нормализует точечные сегменты в
+   URL, но `%2e%2e%2f` доживает до обработчика, и любое декодирование перед чтением с диска
+   открывает обход. Инвариант И3 этого же проекта говорит, что проверка «строка не содержит
+   `..`» защитой не является; применить его к демону и не применить к собственному
+   загрузчику рендерера — ровно тот случай, когда UI продукта становится аргументом против
+   его же тезиса.
+8. **Режим разработки назван явно.** Рендерер в dev грузится с `http://localhost:5173`, где
+   обработчик схемы `app://` не выполняется вовсе — значит, dev-ветка `cspFor` была бы
+   мёртвым кодом, а `senderRejection` отклонял бы каждое сообщение, потому что origin там
+   другой. Решение: в dev множество принимаемых origin расширяется адресом dev-сервера, а
+   CSP в dev доставляется тем же способом через dev-middleware и разрешает `connect-src`
+   на веб-сокет HMR. Одно решение, из которого выводятся и доставка политики, и множество
+   принимаемых origin.
 
-**Falsification:** утверждение — `expect(cspFor('production', 'n0')).not.toMatch(/unsafe-(eval|inline)/)`
-и `expect(cspFor('production', 'n0')).toMatch(/frame-ancestors 'none'/)`. Убрать директиву
-`frame-ancestors` из `cspFor` → второе утверждение падает, первое остаётся зелёным, то есть
-тест различает две независимые ошибки. Тест исполняется в Node: `cspFor` — чистая функция
-над строкой.
+**Falsification:** первое утверждение — `expect(cspFor('production', 'n0')).not.toMatch(/unsafe-(eval|inline)/)`
+и второе — `expect(cspFor('production', 'n0')).toMatch(/frame-ancestors 'none'/)`. Убрать
+директиву `frame-ancestors` из `cspFor` → второе падает, первое остаётся зелёным, то есть
+тест различает две независимые ошибки.
+
+Третье, на обход путей: `expect(resolveBundlePath('/%2e%2e/%2e%2e/etc/passwd')).toBe(null)`.
+Убрать проверку вхождения в корень сборки → функция вернёт путь наружу, и утверждение
+расходится. Тесты в Node: обе функции чистые, файловая система нужна только для `realpath`,
+и корень подставляется аргументом.
 
 **Проверка:** `yarn workspace @mcpproxy/desktop test`.
 
@@ -329,6 +380,7 @@ export function cspFor(mode: 'development' | 'production', nonce: string): strin
 - Create: `packages/desktop/src/shared/channel.ts`
 - Create: `packages/desktop/src/shared/result.ts`
 - Create: `packages/desktop/src/shared/parse.ts`
+- Create: `packages/desktop/src/shared/playerCommand.ts`
 - Create: `packages/desktop/src/main/ipc.ts`
 - Modify: `packages/desktop/src/preload/index.ts`
 - Test: `packages/desktop/src/main/ipc.test.ts`
@@ -352,8 +404,14 @@ export const UI_CHANNEL = 'mcpproxy.ui/1';
 
 export type UiRequest =
   | { readonly kind: 'approval-verdict'; readonly verdict: ApprovalVerdict }
-  | { readonly kind: 'player-command'; readonly command: PlayerCommand };
+  | { readonly kind: 'player-command'; readonly command: PlayerCommand }
+  | { readonly kind: 'export-log' };
 ```
+
+`PlayerCommand` объявляется в `src/shared/playerCommand.ts`, а не в `src/main/player.ts`.
+Иначе `shared/channel.ts` ссылался бы на модуль, который создаёт следующая задача, — тайпчек
+Task 3 падал бы, а её коммит был бы красным. Починить это импортом из `main` нельзя: строка
+архитектуры запрещает рендереру импортировать из `main`, а `shared` импортирует рендерер.
 
 `code` — закрытый union, а не `string`. Каждый дискриминатор в контрактах закрыт
 (`LockStatus`, `Verdict`, `Stage`, `ApprovalDecision`), и именно это делает возможным
@@ -399,14 +457,34 @@ export function guarded<T>(
 проверить литералом, не подделывая `IpcMainInvokeEvent`.
 
 ```ts
-export function parseVerdict(payload: unknown): Result<ApprovalVerdict>;
+export function parseVerdict(payload: unknown): Result<Omit<ApprovalVerdict, 'channel'>>;
+export function parsePlayerCommand(payload: unknown): Result<PlayerCommand>;
 ```
 
-Реализация собирает объект поле за полем через `asRequestId`, `asSessionId` и
-`asRecipeName` из `@mcpproxy/contracts`, а брошенное конструктором превращает в конверт
-`{ ok: false }`. Приведение `as ApprovalVerdict` запрещено: `packages/contracts/src/approval.ts:52`
-объявляет, что брендирование делает подстановку `sessionId` вместо `requestId` ошибкой
-компиляции, и приведение на границе стёрло бы ровно ту гарантию, ради которой существует `R43`.
+`ApprovalVerdict` — это `requestId`, `sessionId`, `channel`, `decision`, `scope`,
+`expiresAt` (`packages/contracts/src/approval.ts:73`). Поля `recipeName` там **нет**, и
+конструктор `asRecipeName` к нему отношения не имеет.
+
+Брендируются два поля — `requestId` и `sessionId` — через `asRequestId` и `asSessionId`,
+а брошенное конструктором превращается в конверт `{ ok: false }`. Приведение
+`as ApprovalVerdict` запрещено: `packages/contracts/src/approval.ts:52` объявляет, что
+брендирование делает подстановку `sessionId` вместо `requestId` ошибкой компиляции, и
+приведение на границе стёрло бы ровно ту гарантию, ради которой существует `R43`.
+
+Остальные четыре поля брендов не имеют и потому нуждаются в проверке значений, а не типов:
+
+- `channel` **не парсится вовсе** — main перезаписывает его значением `'electron'`.
+  Единственный, кто знает, каким каналом человек ответил, — это main; принять это поле от
+  рендерера значит позволить ему записать ложь в append-only лог аудита.
+- `decision` — закрытый союз из двух значений, и именно он решает, запустится ли
+  `publish_release`.
+- `scope` — закрытый союз из трёх; непроверенный расширяет грант за пределы показанного.
+- `expiresAt` — строка ISO либо `null`, и непустой ровно тогда, когда `scope` равен
+  `'until'`. При `exactOptionalPropertyTypes` различие отсутствия и `null` несущее.
+
+`parsePlayerCommand` отдельно ограничивает `speed`: конечное число в закрытом диапазоне.
+Неограниченное число из рендерера уезжает прямо в таймер, и модель угроз, где рендерер
+считается компрометируемым, покупала бы главному процессу занятый цикл.
 
 `const frame = event.senderFrame` — **первый оператор**. Геттер ленивый и заново резолвит
 фрейм в момент обращения, поэтому любой `await` перед ним обнуляет значение; типы Electron
@@ -420,7 +498,8 @@ export function parseVerdict(payload: unknown): Result<ApprovalVerdict>;
    недоверенного содержимого проносит подконтрольный прототип через `contextBridge`
    даже при включённой contextIsolation. Брендированные идентификаторы восстанавливаются
    конструкторами, а не приведением.
-3. `ipc.ts` — обёртка `guarded` и регистрация ровно двух обработчиков через неё.
+3. `ipc.ts` — обёртка `guarded` и регистрация трёх обработчиков через неё: вердикт апрува,
+   команда проигрывателя, запрос на экспорт лога.
 4. preload экспонирует один замороженный объект с именованными методами. `ipcRenderer`
    наружу не отдаётся ни целиком, ни отдельным методом.
 5. Обработчики возвращают `Result`, а не бросают: через `ipcMain.handle` наружу проходит
@@ -445,9 +524,16 @@ export function parseVerdict(payload: unknown): Result<ApprovalVerdict>;
 объявленное свойство, а не симптом, потому что обход цепочки прототипов матчером —
 деталь его реализации, и безопасность границы не может на ней держаться.
 
-Третье — `expect(parseVerdict({ ...verdict, requestId: '' }).ok).toBe(false)`. Заменить
-восстановление брендов приведением → пустой `requestId` проезжает границу, и это закрывает
-ту часть `R55`, которая говорит про полезную нагрузку, не проходящую схему.
+Третье — `it.each` по полям вердикта: `expect(parseVerdict({ ...verdict, requestId: '' }).ok).toBe(false)`,
+`expect(parseVerdict({ ...verdict, decision: 'maybe' }).ok).toBe(false)`,
+`expect(parseVerdict({ ...verdict, scope: 'forever' }).ok).toBe(false)`,
+`expect(parseVerdict({ ...verdict, expiresAt: 'вчера' }).ok).toBe(false)` и
+`expect(Object.hasOwn(parseVerdict(verdict).value, 'channel')).toBe(false)` — последнее
+удерживает то, что канал не приходит снаружи. Убрать проверку `decision` → строка `'maybe'`
+проезжает границу и решает судьбу `publish_release`. Одного утверждения про пустой
+`requestId` было мало: оно не покрывало ни одно из четырёх небрендированных полей.
+
+Четвёртое — `expect(parsePlayerCommand({ kind: 'play', speed: Infinity }).ok).toBe(false)`.
 
 Все тесты в Node: `senderRejection` берёт структурный литерал, настоящий фрейм не нужен.
 
@@ -455,18 +541,52 @@ export function parseVerdict(payload: unknown): Result<ApprovalVerdict>;
 
 **Коммит:** «E7: граница IPC — конверты вместо исключений, senderFrame до любого await».
 
-### Task 4 — проигрыватель трейса и фикстуры
+### Task 4 — свёртка вызовов, проигрыватель и фикстуры
 
-Реализует `R11`, `R12`, `R13`.
+Реализует `R11`, `R12`, `R13`, `R58`.
 
 **Files:**
+- Create: `packages/desktop/src/shared/call.ts`
 - Create: `packages/desktop/src/main/player.ts`
 - Create: `packages/desktop/src/main/trace.ts`
 - Create: `packages/desktop/fixtures/demo.jsonl`
+- Create: `packages/desktop/fixtures/manifest.yaml`
+- Create: `packages/desktop/fixtures/mcpproxy.lock`
+- Test: `packages/desktop/src/shared/call.test.ts`
 - Test: `packages/desktop/src/main/trace.test.ts`
 - Test: `packages/desktop/src/main/player.test.ts`
 
 **Interfaces.**
+
+**Свёртка — недостающее звено.** `AuditEvent` описывает **одну стадию**: он несёт один
+`stage`, одну `durationUs` (`packages/contracts/src/event.ts:83` — длительность стадии) и
+собирается в вызов только по `traceId` и `spanId` (`packages/contracts/src/event.ts:71`).
+Пока такой свёртки нет, ни «худший исход в группе», ни «каких стадий не было», ни «команда
+не собиралась» вычислить не из чего: все три — свойства вызова, а не события. Ровно на этом
+месте четыре задачи из четырнадцати опирались на функцию, которой не существует.
+
+```ts
+import type { ChainedEvent, Stage, Verdict } from '@mcpproxy/contracts';
+
+export interface Call {
+  readonly traceId: string;
+  readonly toolName: string;
+  readonly startedAt: string;
+  readonly verdict: Verdict;
+  readonly stages: readonly ChainedEvent[];
+  readonly reached: ReadonlySet<Stage>;
+  readonly open: boolean;
+}
+
+export function foldCalls(events: readonly ChainedEvent[]): readonly Call[];
+```
+
+`stages` хранит события как есть, а не выжимку: `violation` может повторяться
+(`packages/contracts/src/domain.ts:27`), и схлопывание потеряло бы повторы вместе с
+контрастом сценария S5. `reached` — множество, потому что вопрос «дошёл ли вызов до стадии»
+задают чаще, чем «какая стадия была N-й». `open` отличает вызов, ждущий продолжения, от
+завершённого: проигрыватель отдаёт события по одному, и половина вызовов на экране всегда
+незакончена.
 
 ```ts
 import type { ChainedEvent } from '@mcpproxy/contracts';
@@ -496,6 +616,9 @@ export function createPlayer(
 export function readTrace(text: string): Result<readonly ChainedEvent[]>;
 ```
 
+`PlayerCommand` объявлен в `src/shared/playerCommand.ts` (Task 3) и здесь только
+используется.
+
 Приёмник событий — аргумент, а не спрятанный внутри модуля побочный эффект: иначе тип
 умалчивает, куда уходят события, и позиция оказывается сплавлена с транспортом в одном
 модуле. `state()` существует, потому что без запроса ни рендерер не нарисует правильную
@@ -515,6 +638,17 @@ export function readTrace(text: string): Result<readonly ChainedEvent[]>;
    **отсутствует**, а не приезжает пустым массивом.
 4. Хотя бы одно событие несёт `protocolVersion` старой ревизии: значение принадлежит сессии,
    а не сборке, и UI не имеет права его захардкодить.
+5. `fixtures/manifest.yaml` и `fixtures/mcpproxy.lock` — вторая пара фикстур, без которой
+   два экрана не имеют источника данных. Policy viewer показывает колонку «обеспечено
+   прокси», которой в `Tool` нет вовсе (`packages/contracts/src/tool.ts:16` — имя, схемы и
+   аннотации, никаких осей песочницы и никакого тира). Права живут в нормализованном
+   рецепте, тир считает `deriveRiskTier`. Модалка расхождения lock рисует `LockDiff`, а он
+   требует и манифест, и lock-файл, тогда как событие несёт только `recipe.name` и
+   `recipe.hash` (`packages/contracts/src/event.ts:86`).
+6. Трейс содержит **две сессии одного вызова** — `run_tests` в `seatbelt` и он же в `none`.
+   Переключатель режима песочницы выбирает трейс через команду проигрывателя, а не
+   подменяет выделенную строку: подмена выглядела бы так же, но доказывала бы другое, а S5
+   держится именно на том, что вызов один и тот же.
 
 **Falsification:** первое утверждение — `expect(Object.hasOwn(lockCheckEvent, 'argv')).toBe(false)`.
 Дописать `argv: []` в фикстуру остановленного вызова → утверждение расходится, и это ловит
@@ -522,11 +656,16 @@ export function readTrace(text: string): Result<readonly ChainedEvent[]>;
 
 Второе — `expect(readTrace('{ broken').ok).toBe(false)`.
 
-Третье, на проигрыватель: `emit` подменяется собирающим массивом, и
+Третье, на свёртку: `expect(foldCalls(shuffled).map((c) => c.traceId)).toEqual(foldCalls(ordered).map((c) => c.traceId))`
+при перемешанном порядке прихода, и `expect(call.stages.filter((e) => e.stage === 'violation')).toHaveLength(2)`
+на вызове с двумя нарушениями. Свернуть по `spanId` вместо `traceId` → события одного вызова
+расползаются по разным вызовам, и оба утверждения расходятся.
+
+Четвёртое, на проигрыватель: `emit` подменяется собирающим массивом, и
 `expect(collected).toHaveLength(1)` после одного `step`, затем
 `expect(player.state().position).toBe(1)`. Убрать инкремент позиции → второе утверждение
 расходится, тогда как первое остаётся зелёным, то есть тест различает две независимые
-ошибки. Четвёртое — шаг за последним событием: `expect(collected).toHaveLength(total)`
+ошибки. Пятое — шаг за последним событием: `expect(collected).toHaveLength(total)`
 после лишнего `step`. Все тесты в Node, IPC не нужен: приёмник — обычная функция.
 
 **Проверка:** `yarn workspace @mcpproxy/desktop test`.
@@ -572,17 +711,26 @@ export function violationRole(type: ViolationType, action: 'denied' | 'allowed')
    записи в persistence-путь означает, что код пытался закрепиться.
 3. Завести пакету скрипт `test` — сегодня его нет, и первый же тест пакета не запустился бы.
    Добавить `vitest` в его `devDependencies`.
-4. Добавить рядом с существующими записями подписи, которых ещё нет и которые иначе
-   пришлось бы чеканить в рендерере: `outcomeLabel` для исхода нарушения
-   (`blocked` → «Отбито», `passed` → «Прошло»), `axisLabel` для осей регистров политики
-   (`network` → «сеть», `write` → «запись», `read` → «чтение») и `applicabilityLabel`
-   (`not-applicable` → «не применимо»).
+4. Добавить `outcomeLabel` — подпись исхода вызова по **всем пяти** значениям
+   `CallLine.outcome`: `blocked` → «Отбито», `passed` → «Прошло», `denied` → «Отказано»,
+   `awaiting` → «Ждёт подтверждения», `clean` → «Выполнено». Покрыть два значения из пяти
+   означало бы, что остальные три всё равно чеканятся в рендерере — то есть правило,
+   с которого эта задача начинается, нарушается ею же.
+
+   Подписи осей политики и «не применимо» сюда **не** переезжают: это копия одного экрана
+   одного потребителя, и толкать её в пакет, от которого зависят другие эпики, — расширение
+   объёма. В `design` живут отображения доменного значения в слово; экранная копия —
+   заголовки, пустые состояния, вся проза окна апрува, чеклист цепочки — остаётся
+   в `desktop`, где она и есть.
 5. Существующий JSDoc про `mandatory-deny` — записанное WHY, а не украшение — переезжает
    на функцию и дополняется новой осью `action`. Он объясняет единственное исключение из
    правила «отбито значит янтарь», и потерять его при переписывании записи в функцию
    означало бы потерять причину.
-6. `README.md`: заголовок «Четыре роли, а не три» противоречит собственной таблице, где
-   ролей пять; и строка 73 обещает `stageOrder` из этого пакета, тогда как он живёт в
+6. `README.md`: заголовок «Четыре роли, а не три» неверен, и таблица под ним тоже.
+   `packages/design/src/semantic.ts:27` объявляет **шесть** значений `Role`; таблица
+   перечисляет пять, опуская `muted`, который реально используется в бейджах. Число берётся
+   из типа, а не из таблицы — иначе одно неверное число меняется на другое. Плюс строка 73
+   обещает `stageOrder` из этого пакета, тогда как он живёт в
    `packages/contracts/src/domain.ts:28`.
 
 **Falsification:** утверждение — `expect(violationRole('network', 'allowed')).toBe('danger')`.
@@ -634,6 +782,8 @@ export function violationRole(type: ViolationType, action: 'denied' | 'allowed')
 **Interfaces.**
 
 ```ts
+import type { Call } from '../../shared/call.js';
+
 export type StageGroup = 'checks' | 'setup' | 'execution';
 
 export interface CallLine {
@@ -642,9 +792,13 @@ export interface CallLine {
   readonly detail: string;
 }
 
-export function callLine(event: AuditEvent): CallLine;
-export function groupBar(event: AuditEvent): ReadonlyArray<{ group: StageGroup; role: Role }>;
+export function callLine(call: Call): CallLine;
+export function groupBar(call: Call): ReadonlyArray<{ group: StageGroup; role: Role }>;
 ```
+
+Аргумент — `Call` из Task 4, а не `AuditEvent`. Событие описывает одну стадию, и вывести
+из него «худший исход в группе стадий» невозможно: свернуть по `traceId` обязана свёртка,
+а не функция отрисовки строки.
 
 Чистые функции возвращают доменные значения, а не готовые русские слова: подпись берётся
 из `@mcpproxy/design` на отрисовке. Группы именованы, потому что позиция в массиве ничего
@@ -695,13 +849,20 @@ export function groupBar(event: AuditEvent): ReadonlyArray<{ group: StageGroup; 
 **Interfaces.**
 
 ```ts
+import type { Call } from '../../shared/call.js';
+
 export type CommandView =
   | { readonly kind: 'built'; readonly argv: readonly string[]; readonly fromParams: readonly string[] }
   | { readonly kind: 'not-built'; readonly stoppedAt: Stage };
 
-export function commandView(event: AuditEvent): CommandView;
-export function stagePresence(event: AuditEvent): ReadonlyArray<{ stage: Stage; present: boolean }>;
+export function commandView(call: Call): CommandView;
+export function stagePresence(call: Call): ReadonlyArray<{ stage: Stage; present: boolean }>;
 ```
+
+Аргумент — `Call`. На `AuditEvent` `commandView` возвращала бы `not-built` для событий
+`received`, `lock_check`, `validate` и `resolve_paths` **успешного** вызова, потому что
+`argv` впервые появляется только на `build_argv`. Утверждение из прежней формулировки
+проходило бы на любом событии до этой стадии и не доказывало ничего.
 
 `MachineText` — отрисовка машинных фрагментов: путей, регексов, хэшей и элементов argv
 моноширинным и без переноса по словам. Имя называет, что именно рисуется; предыдущее имя
@@ -726,13 +887,15 @@ export function stagePresence(event: AuditEvent): ReadonlyArray<{ stage: Stage; 
    (`packages/contracts/src/event.ts:149`), и второе его определение неизбежно разъедется.
 8. Поля деталей кликабельны и работают фильтром по списку.
 
-**Falsification:** утверждение — `expect(commandView(lockCheckEvent).kind).toBe('not-built')`.
-Заменить `Object.hasOwn(event, 'argv')` на проверку истинности `event.argv?.length` →
+**Falsification:** утверждение — `expect(commandView(lockCheckCall).kind).toBe('not-built')`
+вместе с `expect(commandView(successfulCall).kind).toBe('built')`. Второе обязательно:
+без него реализация, всегда отвечающая `not-built`, прошла бы первое.
+Заменить `Object.hasOwn(argvEvent, 'argv')` на проверку истинности `argvEvent.argv?.length` →
 вызов, остановленный на `lock_check`, и вызов с пустым `argv` становятся неразличимы, и
 `commandView` возвращает `built` с пустой командой; утверждение расходится. Это ровно тот
 дефект, ради предотвращения которого написана премисса P1, и без этого теста план проверял
 бы, что **фикстура** не пишет ключ, оставляя **читателю** свободу ветвиться по истинности.
-Второе — `expect(stagePresence(lockCheckEvent).find((x) => x.stage === 'spawn')?.present).toBe(false)`
+Второе — `expect(stagePresence(lockCheckCall).find((x) => x.stage === 'spawn')?.present).toBe(false)`
 при том, что стадия с нулевой длительностью даёт `present: true`: «прошло мгновенно» и
 «до стадии не дошло» обязаны различаться. Тесты в Node над чистыми функциями.
 
@@ -774,6 +937,8 @@ export function stagePresence(event: AuditEvent): ReadonlyArray<{ stage: Stage; 
 **Interfaces.**
 
 ```ts
+import type { NormalizedRecipe, RiskTier, Tool } from '@mcpproxy/contracts';
+
 export type PolicyAxis = 'network' | 'write' | 'read';
 
 export interface Register {
@@ -784,8 +949,19 @@ export interface Register {
   readonly defaulted: boolean;
 }
 
-export function registers(tool: Tool): Readonly<Record<PolicyAxis, Register>>;
+export interface PolicyRow {
+  readonly tool: Tool;
+  readonly effective: NormalizedRecipe;
+  readonly tier: RiskTier;
+}
+
+export function registers(row: PolicyRow): Readonly<Record<PolicyAxis, Register>>;
 ```
+
+`Tool` один эту таблицу не выдаёт: `packages/contracts/src/tool.ts:16` объявляет имя,
+схемы и аннотации — ни осей песочницы, ни тира, ни человеческого предложения. Заявленная
+сторона считается из аннотаций, обеспеченная — из нормализованного рецепта, тир — из
+`deriveRiskTier`. Источник обеих — пара фикстур манифеста и lock из Task 4.
 
 Ключ — доменное значение, а не русское слово. Подпись оси берётся из
 `@mcpproxy/design`; если ключом сделать отображаемую строку, переименование слова в
@@ -826,8 +1002,9 @@ export function registers(tool: Tool): Readonly<Record<PolicyAxis, Register>>;
 
 **Files:**
 - Create: `packages/desktop/src/main/chain.ts`
+- Create: `packages/desktop/src/shared/chainBadge.ts`
 - Create: `packages/desktop/src/renderer/audit/AuditView.tsx`
-- Test: `packages/desktop/src/main/chain.test.ts`
+- Test: `packages/desktop/src/shared/chainBadge.test.ts`
 
 **Шаги.**
 
@@ -843,22 +1020,43 @@ export function registers(tool: Tool): Readonly<Record<PolicyAxis, Register>>;
 5. При разрыве список якорится к точке разрыва и показывает её саму. Записи выше отделены
    штриховкой и подписью «утверждать нельзя» — «непроверяемое» и «подделанное» это разные
    утверждения.
-6. Экспорт JSONL.
+6. **Список аудита рисует окно, а не весь лог.** Виртуализация не нужна таймлайну, где
+   вызовов десятки, но лог — это тысячи записей, и факт F7 про него молчал. Окно якорится
+   либо на `brokenAt`, либо на хвост.
+7. **Экспорт JSONL — третий канал, а не строка из двух слов.** Кнопка живёт в рендерере, а
+   запись файла возможна только в main, поэтому появляется обработчик `export-log` с
+   `dialog.showSaveDialog` в main. Архитектурная строка «ровно два сообщения» и шаг 3
+   Task 3 правятся на три: они были написаны раньше, чем экспорт получил механизм, и
+   остались бы прямым противоречием плана самому себе.
 
 **Interfaces.**
 
 ```ts
-export function chainBadge(verification: ChainVerification): {
+import type { ChainVerification } from '@mcpproxy/contracts/audit';
+
+export function chainBadge(verification: ChainVerification, total: number): {
   readonly status: 'consistent' | 'broken';
   readonly brokenAt: number | null;
+  readonly verifiedThrough: number;
 };
 ```
+
+Функция живёт в `shared/`, а не в `main/`: её результат потребляет `AuditView.tsx`, а
+рендереру запрещено импортировать из `main`. В `main` остаётся только вызов `verifyChain`.
+
+`ChainVerification` объявлен в `packages/contracts/src/audit/chain.ts:45`, а не в
+`event.ts`, и в рендерер он приходит **только** через `import type`: при
+`verbatimModuleSyntax` такой импорт стирается, а значимый затащил бы `node:crypto` в
+песочничный бандл — ровно тот провал, ради предотвращения которого написан факт F1.
+
+`total` — аргумент, потому что `ChainVerification` числа записей не несёт, и строка
+«самосогласована · N записей» из него невыводима.
 
 Имя называет то, что функция делает: она возвращает описание бейджа и исполняется в Node
 без DOM. `render` и соврало бы про это, и столкнулось бы с одноимённой функцией из
 библиотеки тестирования React в том же пакете.
 
-**Falsification:** утверждение — `expect(chainBadge(verifyOf(forgedFirstEntry)).status).toBe('broken')`.
+**Falsification:** утверждение — `expect(chainBadge(verifyOf(forgedFirstEntry), 1284).status).toBe('broken')`.
 Заменить ветвление `if (!verification.ok)` на `if (verification.brokenAt)` → подделка
 записи №0 даёт `brokenAt: 0`, ложный как число, экран показывает «самосогласована» на
 сломанной цепочке, и утверждение расходится. Тест в Node: `verifyChain` — чистая функция
@@ -874,6 +1072,28 @@ export function chainBadge(verification: ChainVerification): {
 
 **Files:**
 - Create: `packages/desktop/src/renderer/lock/LockDiffModal.tsx`
+- Create: `packages/desktop/src/renderer/lock/diffSlots.ts`
+- Test: `packages/desktop/src/renderer/lock/diffSlots.test.ts`
+
+**Interfaces.**
+
+```ts
+import type { LockDiff, NormalizedRecipe } from '@mcpproxy/contracts';
+
+export type DiffSlot = 'added' | 'removed' | 'changed' | 'defaults';
+
+export interface SlotView {
+  readonly slot: DiffSlot;
+  readonly rows: ReadonlyArray<{ name: string; was: string | null; is: string | null }>;
+}
+
+export function diffSlots(diff: LockDiff): ReadonlyArray<SlotView>;
+```
+
+`changed[].was` и `changed[].is` — целые `NormalizedRecipe`, а не строки, поэтому «дифф
+целиком и без усечения» это настоящая функция сериализации, а не деталь JSX. Источник
+данных — пара фикстур манифеста и lock из Task 4: событие несёт только `recipe.name` и
+`recipe.hash`, никакого `LockDiff` в нём нет.
 
 **Шаги.**
 
@@ -886,19 +1106,29 @@ export function chainBadge(verification: ChainVerification): {
 5. Основное действие — «Оставить запрет». Безопасный исход не может быть вторичным.
 6. Это **не** окно апрува: дрейф lock не риск-тир, и поверхности не смешиваются.
 
-**Проверка:** `yarn build` из корня.
+**Falsification:** утверждение — `expect(diffSlots(defaultsOnlyDiff).find((s) => s.slot === 'changed')?.rows).toHaveLength(0)`
+при непустом слоте `defaults`. Схлопнуть правку значений по умолчанию в изменения рецептов
+→ одна правка `defaults` размножается по всем рецептам модалки, и утверждение расходится.
+Второе — `expect(diffSlots(diff).map((s) => s.slot)).toHaveLength(4)`: все четыре слота
+присутствуют всегда, включая пустые, потому что «ничего не добавлено» — тоже сведение.
+Тесты в Node над чистой функцией.
+
+**Проверка:** `yarn workspace @mcpproxy/desktop test`.
 
 **Коммит:** «E7: дифф lock; безопасный исход — основное действие».
 
-### Task 13 — окно подтверждения
+### Task 13 — окно подтверждения и инбокс
 
-Реализует `R39`, `R40`, `R41`, `R42`, `R43`, `R44`, `R49`.
+Реализует `R39`, `R40`, `R41`, `R42`, `R43`, `R44`, `R49`, `R57`, `R59`.
 
 **Files:**
 - Create: `packages/desktop/src/main/approvalWindow.ts`
 - Create: `packages/desktop/src/renderer/approval/ApprovalWindow.tsx`
 - Create: `packages/desktop/src/renderer/approval/confirmToken.ts`
+- Create: `packages/desktop/src/renderer/approval/ApprovalInbox.tsx`
+- Create: `packages/desktop/src/shared/approvalScope.ts`
 - Test: `packages/desktop/src/renderer/approval/confirmToken.test.ts`
+- Test: `packages/desktop/src/shared/approvalScope.test.ts`
 
 **Interfaces.**
 
@@ -939,15 +1169,47 @@ export function confirmState(challenge: ConfirmChallenge): {
 7. Вердикт несёт и `requestId`, и `sessionId` (`packages/contracts/src/approval.ts:73`).
    Без `requestId` сообщение из рендерера может одобрить не тот ожидающий вызов, который
    человеку показали.
-8. Отсутствие окна означает отказ, а не ожидание.
-9. Каждая строка окна берётся из макета дословно.
+8. **Отказ по умолчанию — код, а не декларация.** Если окно создать не удалось, main сам
+   синтезирует `decision: 'denied'` и закрывает запрос. Прежняя формулировка повторяла
+   требование вместо того, чтобы его реализовать.
+9. **Обработчик вердикта требует тождества окна.** Оба окна грузятся с одного origin, делят
+   один preload и один канал, поэтому проверки origin недостаточно: скомпрометированный
+   рендерер главного окна отправил бы вердикт, неотличимый от нажатия человека. Обработчик
+   дополнительно требует, чтобы `event.sender.id` совпадал с `webContents.id` открытого
+   окна апрува, и отклоняет вердикт, когда окна нет, отдельным кодом. Без этого отдельное
+   окно даёт представление, а не полномочие, — то есть ADR-0005 остаётся невыполненным.
+10. **Инбокс** — список ожидающих запросов отдельной поверхностью, из которой открывается
+    authoritative-окно. Строка эпика называет его среди поверхностей E7, и это не то же
+    самое, что окно: окно решает по одному запросу, инбокс показывает очередь. Слить их
+    значило бы сделать рутинную поверхность authoritative — ровно та ошибка, из-за которой
+    93% запросов разрешения одобряются не глядя.
+11. Каждая строка окна берётся из макета дословно.
+
+**Соответствие выбора и замороженного союза.** Окно предлагает область и срок независимо,
+а `ApprovalScope` знает три значения плюс `expiresAt`. Соответствие задаётся таблицей, а не
+подразумевается: это поле, по которому E5 будет ключевать разрешения, и неверное
+соответствие выдаёт грант шире показанного человеку.
+
+| Область в окне | Срок в окне | `scope` | `expiresAt` |
+|---|---|---|---|
+| только этот вызов | до конца вызова | `once` | `null` |
+| только этот вызов | 10 минут | `until` | ISO, момент выдачи плюс 10 минут |
+| только этот вызов | 1 час | `until` | ISO, момент выдачи плюс час |
+| рецепт и хэш аргументов | до конца вызова | `recipe_and_args` | `null` |
+| рецепт и хэш аргументов | 10 минут | `recipe_and_args` | ISO, плюс 10 минут |
+| рецепт и хэш аргументов | 1 час | `recipe_and_args` | ISO, плюс час |
 
 **Falsification:** утверждение — `expect(confirmState({ token: 'v2.4.0', typed: 'v2.4.1' }).approve).toBe('blocked')`.
 Заменить сравнение на проверку непустоты → любой набранный текст разблокирует разрешение,
 и утверждение расходится. Второе — `expect(confirmState({ token: 'v2.4.0', typed: 'v2.4.0' }).approve).toBe('ready')`,
 оно отделяет «блокирует всегда» от «блокирует до совпадения»: без него реализация
 `return { approve: 'blocked', deny: 'ready' }` прошла бы первое утверждение. Мгновенность
-отказа тестом не проверяется, потому что она выражена типом. Тесты в Node.
+отказа тестом не проверяется, потому что она выражена типом.
+
+Третье, на соответствие скоупа: `expect(toScope({ area: 'call', ttl: '10m' })).toMatchObject({ scope: 'until' })`
+и `expect(toScope({ area: 'call', ttl: 'call' }).expiresAt).toBeNull()`. Отобразить
+«10 минут» в `once` → грант переживёт вызов, хотя человек выбрал один вызов, и первое
+утверждение расходится. Тесты в Node.
 
 **Проверка:** `yarn workspace @mcpproxy/desktop test`.
 
@@ -955,7 +1217,7 @@ export function confirmState(challenge: ConfirmChallenge): {
 
 ### Task 14 — правки документации и покрытие
 
-Реализует `R52`, `R53`, `R54`, `R56`.
+Реализует `R53`, `R54`, `R60`.
 
 **Files:**
 - Modify: `docs/08-demo-scenarios.md`
@@ -963,13 +1225,73 @@ export function confirmState(challenge: ConfirmChallenge): {
 
 **Шаги.**
 
-1. `docs/08-demo-scenarios.md` в сценарии S2 говорит «таймлайн из 13 стадий» и перечисляет
-   одиннадцать: пропущены `approval` и `violation`. Каноничен `stageOrder`
-   (`packages/contracts/src/domain.ts:28`), не проза.
-2. Находка разведки о тайминге демо уже записана в `research.md` и остаётся там до E9, где
+1. S2 говорит «таймлайн из 13 стадий» и перечисляет одиннадцать. **Правится число, а не
+   список.** S2 — это happy path `run_tests`, где `approval` и `violation` действительно не
+   происходят, и дописать их значило бы вписать в документацию ложь, прямо противоречащую
+   шагу 5 Task 7 этого же плана: «стадии, которых в записи нет, не рисуются». Становится
+   «11 из 13 возможных стадий». Прежняя формулировка правила доку в сторону, обратную
+   правильной.
+2. Там же — две формулировки, запрещённые требованиями этой спеки: S8 предлагает
+   «на 10 минут» относительным сроком, тогда как `R42` и ADR-0005 требуют абсолютного
+   времени истечения; S9 называет бейдж «цепочка верифицирована» — ровно тот вердикт,
+   который `R32` запрещает, и ровно та формулировка, из-за которой бейдж обещает больше,
+   чем механизм даёт.
+3. Находка разведки о тайминге демо уже записана в `research.md` и остаётся там до E9, где
    принимается решение о режиссуре: владелец решил не трогать её в этом ране.
-3. Дописать в спеку таблицу покрытия: по строке на каждое `R1`–`R56` с пометкой
+4. Дописать в спеку таблицу покрытия: по строке на каждое `R1`–`R60` с пометкой
    реализовано, частично или нет. Частично и нет блокируют PR.
+
+**Проверка:** `yarn typecheck && yarn build && yarn test` из корня.
+
+**Коммит:** «E7: правки доков и таблица покрытия требований».
+
+### Task 15 — смоук-тест собранного приложения
+
+Реализует `R2`, `R55`, и закрывает открытые хвосты фактов F1, F2 и F6.
+
+**Files:**
+- Create: `packages/desktop/e2e/smoke.spec.ts`
+- Modify: `packages/desktop/package.json`
+
+**Зачем отдельной задачей.** Одиннадцать тестов плана исполняют чистые функции в Node, и
+**ни один не запускает Electron**. Для продукта, чей питч — хардненинг Electron, это
+неверное место границы между «дёшево» и «правда». Конкретно: `R2` требует читать
+`webPreferences` **созданного окна**, а тест фабрики её не читает — вызов
+`new BrowserWindow({ webPreferences: { ...webPreferencesFor(role, p), sandbox: false } })`
+проходит все тесты этого плана. Тот же класс риска в Task 3 закрыт структурно, сканированием
+исходников; И8 заслуживает не меньшего, потому что именно про него сказано «провалить всё».
+
+**Шаги.**
+
+1. Playwright уже в корневых `devDependencies` — он был поставлен ради съёмки макета.
+   Использовать `_electron.launch()` на собранном приложении.
+2. Утверждать по обоим окнам через `webContents.getLastWebPreferences()`: четыре флага
+   плюс `spellcheck: false`.
+3. Утверждать, что preload действительно загрузился: мост присутствует на `window`, а
+   `ipcRenderer` — нет. Это и закрывает факт F6 наблюдением поверх закрепления
+   `entryFileNames`.
+4. Утверждать заголовок CSP в ответе схемы и отказ на `app://bundle/%2e%2e/%2e%2e/etc/passwd`.
+5. Утверждать, что настоящий origin `app://bundle` принимается: единственный тест
+   `senderRejection` сравнивает `APP_ORIGIN` с `APP_ORIGIN`, то есть тавтологичен, и
+   открытый хвост факта F2 закрывается только здесь.
+6. Утверждать отсутствие `node:crypto`, `ajv` и `re2` в собранном бандле рендерера. Факт F1
+   сам признаёт, что не доказывает вытряхивание неиспользуемых веток; `packages/contracts`
+   уже моделирует ответ своим `deps.test.ts`. Это единственное, что отделяет «мы рассуждали
+   про песочницу» от «песочница держится».
+7. Утверждать, что вердикт, отправленный из главного окна, отклоняется, а из окна апрува —
+   принимается.
+8. Прогнать `e2e/browser/shot-mockup.mjs` по **собранному приложению** и сверить снятые
+   состояния с состояниями макета. Шутер уже принимает URL и контракт состояний, поэтому
+   критерий готовности «реализация сверена с макетом по строкам и состояниям» становится
+   механическим, а `R49` перестаёт быть обещанием, данным одной задачей за все.
+
+**Falsification:** утверждение — `expect(prefs.sandbox).toBe(true)` по обоим окнам.
+Дописать `sandbox: false` в объект `webPreferences` **на месте вызова**, оставив фабрику
+нетронутой, → тест Task 1 остаётся зелёным, а этот падает. Это и есть та дыра, ради которой
+задача существует. Второе — `expect(rendererBundle).not.toContain('node:crypto')`; сделать
+импорт `ChainVerification` значимым вместо `import type` → модуль затягивается в бандл, и
+утверждение расходится. Тест исполняется в настоящем Electron: в Node ни один из этих
+вопросов не имеет ответа.
 
 **Проверка:** `yarn typecheck && yarn build && yarn test` из корня; затем прогон шутера
 `e2e/browser/shot-mockup.mjs` по макету, чтобы убедиться, что он не сломался правками.
@@ -983,58 +1305,62 @@ export function confirmState(challenge: ConfirmChallenge): {
 | `Rn` | Строка плана, которая его реализует |
 |---|---|
 | `R1` | Task 1, шаг 3 — «Разделить tsconfig: главный и preload остаются на `lib: ["ES2023"]`» |
-| `R2` | Task 1, `webPreferencesFor` — четыре флага литералами, читаются тестом |
+| `R2` | **Task 15, шаг 2** — четыре флага читаются с созданного окна через `getLastWebPreferences()`. Тест фабрики в Task 1 требование не закрывает: спека просит созданное окно, а вызов может ослабить флаги на месте |
 | `R3` | Task 2, шаг 1 — «Зарегистрировать схему через `registerSchemesAsPrivileged`» |
-| `R4` | Task 1, шаг 2 — `format` равным `cjs`; Task 3, шаг 4 — один замороженный объект |
+| `R4` | Task 1, шаг 2 — `entryFileNames` равным `'[name].cjs'`; Task 3, шаг 4 — один замороженный объект |
 | `R5` | Task 3, `guarded` — `const frame = event.senderFrame` первым оператором |
 | `R6` | Task 3, шаг 6 — тест-страж на голые `ipcMain.handle` и `ipcMain.on` |
 | `R7` | Task 3, шаг 5 — «Обработчики возвращают `Result`, а не бросают» |
 | `R8` | Task 3, `Interfaces` — «Имя `IpcRequest` здесь не используется» |
-| `R9` | Task 2, шаг 3 — «Отгружать **один** механизм доставки CSP — заголовок» |
-| `R10` | Task 2, шаг 6 — «`will-navigate` и `setWindowOpenHandler` отклоняют всё» |
+| `R9` | Task 2, шаг 3 — «Отгружать **один** механизм доставки CSP — заголовок»; шаг 8 — что происходит в dev |
+| `R10` | Task 2, шаг 6 — запрет навигации через точку `web-contents-created`, покрывающую оба окна |
 | `R11` | Task 4, шаг 2 — «Тот же механизм — и моки, и демо со сцены, и план Б» |
-| `R12` | Task 4, шаг 2 — «Шаг, пауза, скорость» |
+| `R12` | Task 4, шаг 2 — «Шаг, пауза, скорость, сброс — одной командой из размеченного union» |
 | `R13` | Task 4, шаг 3 — «ключ `argv` … **отсутствует**, а не приезжает пустым массивом» |
-| `R14` | Task 11, шаг 1 — «`chain.ts` в main вызывает `verifyChain`» |
+| `R14` | Task 11, шаг 1 — «`chain.ts` в main вызывает `verifyChain`»; `Interfaces` — почему только `import type` |
 | `R15` | Task 7, шаг 1 — строка с именем, вердиктом, режимом и временем |
 | `R16` | Task 7, шаг 5 — «Свёрнутая полоса из трёх групп, каждая по худшему исходу» |
 | `R17` | Task 8, шаг 1 — секции вызова, команды, стадий и редакции |
 | `R18` | Task 8, шаг 7 — «Оверхед берётся из `duration.overheadMs`, а не считается в UI» |
-| `R19` | Task 8, шаг 4 — «Вызов без ключа `argv` рисует объяснение» |
+| `R19` | Task 8, `Interfaces` — `commandView` над `Call`, ветка `not-built` |
 | `R20` | Task 8, шаг 5 — «Стадии, которых не было, перечислены отдельной строкой» |
 | `R21` | Task 8, шаг 8 — «Поля деталей кликабельны и работают фильтром» |
 | `R22` | Task 7, шаг 6 — «Скелет повторяет геометрию наполненной строки бокс в бокс» |
 | `R23` | Task 9, шаг 1 — «стучался на evil.io:443, отказано, 0 байт» |
-| `R24` | Task 7, шаг 3 и Task 5, шаг 1 — роль из типа и исхода вместе |
+| `R24` | Task 5, `Interfaces` — `violationRole(type, action)`; Task 7, шаг 3 |
 | `R25` | Task 5, шаг 2 — «`mandatory-deny` остаётся красным на обоих исходах» |
 | `R26` | Task 9, шаг 4 — «Пустая панель — и есть положительный индикатор» |
 | `R27` | Task 10, шаг 1 — «**одно предложение по-человечески**» |
-| `R28` | Task 10, шаг 2 — «Два регистра на **одних осях** — сеть, запись, чтение» |
+| `R28` | Task 10, `Interfaces` — `registers(row: PolicyRow)` над парой фикстур манифеста и lock |
 | `R29` | Task 10, шаг 4 — «Молчание манифеста показывается как «да»» |
 | `R30` | Task 10, шаг 5 — «бейджи `destructiveHint` и `idempotentHint` рисуются неприменимыми» |
 | `R31` | Task 10, шаг 6 — «Рецепт с `*` в домене … помечается «ослабленный режим»» |
 | `R32` | Task 11, шаг 2 — «Бейдж **называет механизм и якорь, а не выносит вердикт**» |
 | `R33` | Task 11, шаг 3 — «чеклист … включая ту, которая **не** выполнялась» |
 | `R34` | Task 11, шаги 4 и 5 — ветвление по `ok`, якорение к точке разрыва |
-| `R35` | Task 11, шаг 6 — «Экспорт JSONL» |
+| `R35` | **Task 11, шаг 7** — третий канал `export-log` с `dialog.showSaveDialog` в main. Прежняя строка «Экспорт JSONL» механизма не называла, а архитектура плана в тот момент разрешала только два сообщения |
 | `R36` | Task 12, шаг 3 — «Дифф целиком, без усечения» |
-| `R37` | Task 12, шаг 1 — «Четыре раздельных слота» |
+| `R37` | Task 12, `Interfaces` — `diffSlots`, четыре слота всегда |
 | `R38` | Task 12, шаг 6 — «Это **не** окно апрува» |
 | `R39` | Task 13, шаг 1 — «Отдельный `BrowserWindow` через ту же фабрику» |
 | `R40` | Task 13, шаг 3 — «Команда — в основном тексте, не за раскрытием» |
 | `R41` | Task 13, шаг 4 — «Отказ мгновенный — набор нужен только чтобы разрешить» |
-| `R42` | Task 13, шаг 5 — «строка пересчитывается от выбранного значения» |
-| `R43` | Task 13, шаг 7 — «Вердикт несёт и `requestId`, и `sessionId`» |
-| `R44` | Task 13, шаг 8 — «Отсутствие окна означает отказ, а не ожидание» |
+| `R42` | Task 13, шаг 5 и таблица соответствия — абсолютное время истечения |
+| `R43` | Task 13, шаг 7 и шаг 9 — вердикт несёт оба идентификатора, и обработчик требует тождества окна |
+| `R44` | **Task 13, шаг 8** — main синтезирует `decision: 'denied'`, когда окна нет. Прежняя строка повторяла требование вместо реализации |
 | `R45` | Task 6, шаг 1 — «Ни одного шестнадцатеричного значения в коде E7 не появляется» |
 | `R46` | Task 6, шаг 4 — «явный выбор побеждает системный в обе стороны» |
-| `R47` | Task 6, шаг 5 и Task 8, шаг 6 — кольцо фокуса и моноширинность без переноса |
+| `R47` | Task 6, шаг 5 и Task 8, шаг 6 — кольцо фокуса и `MachineText` |
 | `R48` | Task 6, шаг 2 — «баннер `unsandboxed-banner` при `none`» |
-| `R49` | Task 13, шаг 9 — «Каждая строка окна берётся из макета дословно» |
+| `R49` | **Task 15, шаг 8** — шутер прогоняется по собранному приложению и сверяет состояния с макетом. Прежняя строка поручала это одному шагу одной задачи, тогда как копию чеканят семь задач |
 | `R50` | Закрыто до плана: `packages/design/src/css/base.css:109` читается `  background: var(--brand);` |
 | `R51` | Task 5, `Interfaces` — новая сигнатура `violationRole` |
-| `R52` | Task 5, шаг 4 — «заголовок «Четыре роли, а не три» противоречит собственной таблице» |
-| `R53` | Task 14, шаг 1 — «перечисляет одиннадцать: пропущены `approval` и `violation`» |
-| `R54` | Task 14, шаг 2 — находка о тайминге остаётся в `research.md` до E9 |
-| `R55` | Task 1, Task 3 — тесты на флаги окна и на границу IPC |
-| `R56` | Task 14, `Проверка` — прогон `e2e/browser/shot-mockup.mjs` |
+| `R52` | Task 5, шаг 6 — число ролей берётся из типа: их шесть, таблица опускает `muted` |
+| `R53` | Task 14, шаг 1 — правится число «13», а не список из одиннадцати стадий |
+| `R54` | Task 14, шаг 3 — находка о тайминге остаётся в `research.md` до E9 |
+| `R55` | Task 1 (флаги фабрики), Task 3 (граница IPC), Task 4 (отсутствие `argv`), Task 5 (роль при `allowed`), Task 11 (`brokenAt: 0`), Task 15 (флаги созданного окна). Требование перечисляет шесть областей, и несут его шесть задач, а не две |
+| `R56` | Закрыто до плана: `e2e/browser/shot-mockup.mjs` уже пишет `pageerror` и `console.error` в отказ и водит макет по объявленному контракту состояний |
+| `R57` | Task 13, шаг 10 — инбокс отдельной поверхностью от authoritative-окна |
+| `R58` | Task 4, шаг 6 — трейс несёт обе сессии, переключатель ходит через проигрыватель |
+| `R59` | Task 13, таблица соответствия области и срока замороженному `ApprovalScope` |
+| `R60` | Task 14, шаг 2 — относительный срок в S8 и вердиктная формулировка бейджа в S9 |
