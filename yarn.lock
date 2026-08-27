@@ -248,6 +248,9 @@ __metadata:
   resolution: "@mcpproxy/core@workspace:packages/core"
   dependencies:
     "@mcpproxy/contracts": "workspace:*"
+    "@types/node": "npm:^22"
+    es-module-lexer: "npm:^2"
+    vitest: "npm:^3"
   languageName: unknown
   linkType: soft
 
@@ -689,7 +692,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"es-module-lexer@npm:^2.3.2":
+"es-module-lexer@npm:^2, es-module-lexer@npm:^2.3.2":
   version: 2.3.2
   resolution: "es-module-lexer@npm:2.3.2"
   checksum: 10/065246d6e2b2dfea3287650b5800a30326771e0d9d238570e81371d7ae8d53db239bccb2166e272926bba44917da7c66dd7407a5214d17b0af5269005b1fec52
