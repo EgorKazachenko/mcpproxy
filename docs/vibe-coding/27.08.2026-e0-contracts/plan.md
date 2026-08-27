@@ -2,7 +2,7 @@
 
 ## Goal
 
-Реализовать `R1..R25` из `spec.md`: манифест, событие, риск, lock, IPC, четыре
+Реализовать `R1..R32` из `spec.md`: манифест, событие, риск, lock, IPC, четыре
 заглушки, тест-инфраструктура, заморозка, правки доков.
 
 ## Architecture
@@ -161,13 +161,19 @@ YAML (R8) — единственный порог, и он не ветвит л�
 `deriveRiskTier`, поэтому параметр остаётся со всеми полями опциональными и строка 1
 (пустой объект) достижима. Каждая строка — тест.
 
-Сигнатура — `deriveRiskTier(annotations: ToolAnnotations, lockVerified: boolean)`, и при
-`lockVerified === false` возвращается `high` независимо от аннотаций. Причина в том, что
-таблица ниже верна только для рецепта, чью нормализованную форму одобрил lock: спека MCP
-требует считать аннотации недоверенными, а `analyze_logs` с одним лишь
-`readOnlyHint: true` даёт `low` и авто-исполнение. Между rug pull'ом, дописавшим
-`readOnlyHint: true`, и молчаливым запуском стоит только lock — поэтому правило вносится
-в сигнатуру, а не в комментарий, и забыть его вниз по течению нельзя.
+Сигнатура — `deriveRiskTier(annotations: ToolAnnotations): RiskTier`, ровно таблица ниже.
+Второй аргумент `lockVerified` рассматривался и **отвергнут**: он вносил в контракт неверную
+семантику. `high` здесь означает конкретное поведение — out-of-band апрув в Electron с показом
+argv, cwd и профиля (`docs/07-contracts.md:104`). Расхождение с lock означает совсем другое:
+жёсткий стоп на стадии `lock_check` с модалкой «было/стало» (ADR-0006, S7). Отобразив одно в
+другое, контракт сказал бы имплементатору E1, что rug pull — это обычный high-risk апрув, и
+S7 перестал бы существовать как сценарий. Вдобавок `lock_check` — стадия 2, а `classify_risk`
+— стадия 6 (`packages/contracts/src/domain.ts:28`), так что при жёстком стопе состояние
+«не верифицирован» до `classify_risk` не доходит вовсе.
+
+Сверка с lock живёт отдельным типом в Task 9: `LockStatus = 'verified' | 'drifted' | 'absent'`,
+и `drifted`/`absent` дают `verdict: 'denied'` на стадии `lock_check`, а не тир. Гарантия R11
+записывается комментарием в `annotations.ts`, чтобы жить в контракте, а не только в плане.
 
 | Вход | Возврат | Ветка | Обоснование |
 |---|---|---|---|
@@ -317,6 +323,21 @@ fields with unknown names», то есть `trace_id` не даёт ошибки
 наблюдался (`gen_ai.agent.name` появился на спане `execute_tool` после v1.41.0 без релиза).
 Это и есть довод за экспортёр вместо нативной схемы (D2).
 
+**Ф10. `code.regExp` с RE2 совместим с ajv 8.20.0.** Сырой вывод на схеме нашей формы
+(`propertyNames` + `pattern` + unicode `\p{L}`):
+
+```
+plain            compile OK  valid: true  invalidRejected: true
+code.regExp=RE2  compile OK  valid: true  invalidRejected: true
+lookahead in OUR schema: THROW invalid perl operator: (?=
+```
+
+Паритет достаточен: схема компилируется, валидные значения проходят, невалидные отвергаются.
+Третья строка — ограничение на **нас**: с подключённым RE2 наша собственная схема тоже не может
+использовать lookahead. Записано, чтобы это не выяснилось при первой правке схемы.
+**Не покрывает:** сериализацию `source`/`flags` в сгенерированном ajv коде при `code.esm`;
+проверялся дефолтный режим генерации.
+
 **`ASSUMED`:** что демо-клиент согласует именно `2025-11-25`. Не проверялось, какой
 именно клиент будет на сцене. Если он окажется старее — правится в E4, контракта не
 касается, потому что R18 держит поля опциональными.
@@ -358,8 +379,8 @@ fields with unknown names», то есть `trace_id` не даёт ошибки
 `ToolAnnotations = Partial<Record<AnnotationKey, boolean>>`,
 `ANNOTATION_DEFAULTS: Readonly<Record<AnnotationKey, boolean>>` (`as const`, по стилю
 `packages/design/src/semantic.ts:31`),
-`deriveRiskTier(annotations: ToolAnnotations, lockVerified: boolean): RiskTier`.
-Функция чистая; дефолты применяет сама.
+`deriveRiskTier(annotations: ToolAnnotations): RiskTier`.
+Функция чистая; дефолты применяет сама. Гарантия R11 — комментарием рядом с ней.
 
 Имена хинтов **не перечисляются заново**: `AnnotationKey` уже владеет ими
 (`packages/contracts/src/domain.ts:57`), и `design` строит по нему исчерпывающий
@@ -367,12 +388,9 @@ fields with unknown names», то есть `trace_id` не даёт ошибки
 
 **Falsification:** утверждение — `expect(deriveRiskTier({readOnlyHint: true, destructiveHint: true}, true)).toBe('low')`.
 Убрать проверку `readOnlyHint === false` перед чтением `destructiveHint` → возвращается
-`high`, падает только этот кейс. Второе утверждение —
-`expect(deriveRiskTier({readOnlyHint: true}, false)).toBe('high')`: убрать `lockVerified`
-из ветвления → возвращается `low`, и неодобренный рецепт исполняется молча.
+`high`, падает только этот кейс.
 
-**Verification:** `vitest run src/annotations.test.ts` — шесть кейсов таблицы §7 плюс два
-кейса `lockVerified`.
+**Verification:** `vitest run src/annotations.test.ts` — шесть кейсов таблицы §7.
 
 **Commit:** `E0: аннотации MCP и вывод риск-тира`
 
@@ -397,6 +415,11 @@ prototype-pollution на каждом `manifest.tools[name]` вниз по те�
 `src/manifest.generated.ts` — **коммитится**: корневой вход обязан собираться `tsc -b`
 без запуска dev-генератора. `index.ts` реэкспортирует `Manifest`, `Recipe` и типы веток.
 
+Схема **публикуется**, иначе R1 — тик над нереализованным: `"files": ["dist", "schema"]` и
+`"./schema": "./schema/mcpproxy.schema.json"` в `exports`, `$id` фиксируется как стабильный
+URL, и файл входит в снапшот поверхности Task 12 — без этого он не заморожен. Тест Task 6
+читает `$defs` из файла, а не через `resolveJsonModule`.
+
 **Falsification:** утверждение — `expect(validate(manifestWithProtoKey)).toBe(false)`.
 Убрать `propertyNames` → манифест с рецептом `__proto__` грузится, утверждение читает
 `true` и падает. Второе — `expect(schema).toMatchObject({$defs: {StringParam: {required: ['type','pattern']}}})`:
@@ -414,8 +437,15 @@ prototype-pollution на каждом `manifest.tools[name]` вниз по те�
 Именованные формы объявляются в **корневом** входе (`src/types.ts`), не в `./validate`:
 `ManifestSource = {path: string; maxBytes?: number}`,
 `Diagnostic = {path: string; line: number; column: number; message: string}`,
-`ParseManifestResult = {ok: true; manifest: Manifest} | {ok: false; diagnostics: Diagnostic[]}`.
+`ParseManifestResult = {ok: true; manifest: Manifest; matchers: ReadonlyMap<string, PatternMatcher>}
+| {ok: false; diagnostics: Diagnostic[]}`.
 `./validate` экспортирует только функцию.
+
+Матчеры едут **рядом** с манифестом, а не внутри него. `Manifest` генерируется из схемы с
+`additionalProperties: false`, поэтому носителем скомпилированного объекта быть не может; а если
+бы мог, `Recipe` перестал бы быть JSON-сериализуемым — и Task 9 подаёт именно `Recipe` в
+`canonicalizeJcs`. Ключ карты — точечный путь параметра (`tools.run_tests.params.pattern`),
+в том же формате, что `Diagnostic.path`.
 
 `parseManifest(yamlText: string, source: ManifestSource): ParseManifestResult`.
 Разбор `yaml@2.9.0` с `LineCounter`. Три меры сверх дефолтов (Ф3, Ф3-бис):
@@ -427,8 +457,12 @@ prototype-pollution на каждом `manifest.tools[name]` вниз по те�
 strictRequired: false})`, **именованный импорт** (Ф4). `instancePath` → точечный путь +
 `строка:колонка`.
 
-`deps.test.ts` — исполняемая проверка архитектурного заявления: собранный `dist/index.js`
-и его граф не содержат `ajv`, `yaml`, `re2`. Сегодня это утверждение живёт только в прозе.
+`deps.test.ts` — исполняемая проверка архитектурного заявления: статический обход
+`import`-специфаеров по `dist/**/*.js` (через `es-module-lexer`, dev-зависимость) не находит
+`ajv`, `yaml`, `re2` из корневого входа. Механизм назван явно, потому что `tsc` эмитит
+пофайлово и «граф» сам себя не обойдёт. Verification задачи запускает сборку перед тестом —
+на чистом клоне `dist/` нет, и тест иначе либо падает на отсутствии файла, либо тихо
+проходит на пустом графе.
 
 **Falsification:** утверждение — `expect(parseManifest(yaml11Directive, src).ok).toBe(false)`.
 Снять отказ по директиве → `%YAML 1.1` разбирается, `sandbox.network.allow: [no]` даёт
@@ -436,7 +470,7 @@ strictRequired: false})`, **именованный импорт** (Ф4). `instan
 `expect(diagnostics).toHaveLength(1)`: убрать `discriminator: true` → 8 диагностик вместо 1.
 Третье — `deps.test.ts` падает, если `ajv` попал в граф корневого входа.
 
-**Verification:** `vitest run src/validate/parse.test.ts src/deps.test.ts` — кейсы: валидный
+**Verification:** `yarn workspace @mcpproxy/contracts build && vitest run src/validate/parse.test.ts src/deps.test.ts` — кейсы: валидный
 манифест; `string` без `pattern`; `path` без `root`; неизвестный `type`; дубль ключа;
 алиас-бомба; неизвестный тег; директива `%YAML 1.1`; размер ровно на лимите, на байт больше,
 на байт меньше (три значения §6).
@@ -452,10 +486,12 @@ strictRequired: false})`, **именованный импорт** (Ф4). `instan
 пользовательской строки (её ajv видит как данные), а для схем, которые E2 будет
 компилировать из параметров рецепта.
 
-**Главное:** через границу пакета едет не голая строка. `parseManifest` возвращает параметр,
-несущий `PatternMatcher {test(value: string): boolean}` рядом с исходным `pattern`.
-Иначе E2 вправе вызвать `new RegExp(pattern)` и вернуть ReDoS, который здесь закрыт только
-на загрузке: манифест поставляет и выражение, и — через модель — проверяемую строку.
+**Главное:** через границу пакета едет не голая строка. `PatternMatcher {test(value: string): boolean}`
+объявляется в `src/types.ts` и возвращается в `ParseManifestResult.matchers` (Task 4), а не
+внутри `Manifest`. Иначе E2 вправе вызвать `new RegExp(pattern)` и вернуть ReDoS, который здесь
+закрыт только на загрузке: манифест поставляет и выражение, и — через модель — проверяемую строку.
+
+`code.regExp` подтверждён замером (Ф10), а не обещанием.
 
 **Falsification:** утверждение — `expect(parseManifest(withLookahead, source).ok).toBe(false)`.
 Убрать компиляцию через RE2 → манифест с `pattern: "^(?=.*a)b$"` грузится, утверждение
@@ -545,21 +581,46 @@ self = sha256(utf8(canonicalizeJcs({ prev, event })))
 `docs/02-architecture.md:171` («изменение любой прошлой записи ломает все последующие»)
 ложен — при этом тест на порчу записи 3 всё ещё проходит.
 
-`chainHash(event: AuditEvent, prevHash: string | null): string`. Так как TypeScript
-структурен и `ChainedEvent` присваиваем к `AuditEvent`, хэшировать `ChainedEvent` напрямую
-нельзя — самоссылочно. Поэтому экспортируется один `unchain(e: ChainedEvent): AuditEvent`,
-и `verifyChain` обязан ходить через него.
+`chainHash(event: AuditEvent & {chain?: never}, prevHash: string | null): string`.
+Тип аргумента запрещает передачу `ChainedEvent` **компилятором**, а не дисциплиной: TypeScript
+структурен, `ChainedEvent` присваиваем к `AuditEvent`, и хэширование самоссылочного `chain.self`
+иначе компилируется молча. `unchain(e: ChainedEvent): AuditEvent` возвращает **новый** объект
+без ключа `chain` — `(e) => e` типизировался бы идеально и не удалял бы ничего.
 
-`verifyChain(events: ChainedEvent[]): {ok: true} | {ok: false; brokenAt: number}` — форма
-та же, что у `ParseManifestResult`: `number | null` сделал бы `0` ложным, то есть подделка
-**первой** записи прошла бы и через `if (!verifyChain(...))`, и через `if (verifyChain(...))`.
+`verifyChain(events: ChainedEvent[]): {ok: true} | {ok: false; brokenAt: number}`. Форма та же,
+что у `ParseManifestResult`: `number | null` сделал бы `0` ложным, то есть подделка **первой**
+записи прошла бы и через `if (!verifyChain(...))`, и через `if (verifyChain(...))`.
 
-**Falsification:** утверждение — `expect(verifyChain(tampered)).toEqual({ok: false, brokenAt: 2})`.
-Изменить один байт в `output.bytes` третьей записи → при семиполевой схеме хэша вернулось бы
-`{ok: true}`, тест падает — это дефект, ломающий S9. Второе утверждение —
-`expect(verifyChain(tamperedAtZero)).toEqual({ok: false, brokenAt: 0})`. Третье, которое
-не проходит реализация «цепочки нет вовсе»: поменять местами `prev` двух соседних записей и
-потребовать `ok: false`.
+**Замораживается предикат, а не только дайджест.** `brokenAt: i` — первый `i`, на котором
+нарушено любое из двух:
+
+```
+i === 0 ? e.chain.prev === null : e.chain.prev === events[i-1].chain.self
+chainHash(unchain(e), e.chain.prev) === e.chain.self
+```
+
+Без второй строки предиката возможна реализация «самосогласованности», проверяющая каждую
+запись в одиночку. Она даёт **ноль** доказательной силы: формула публична, атакующий правит
+запись 3 и пересчитывает её `self`, взяв `prev` из неё же; запись 4 продолжает ссылаться на
+старый `self`, но их никто не сравнивает. Лог подделан, бейдж зелёный, и тезис
+`docs/02-architecture.md:171` ложен.
+
+Обрезание хвоста лога этим предикатом **не** ловится — для этого нужен внешний якорь. Это
+записывается в честные границы рядом с Merkle-корнем, а не выдаётся за покрытое.
+
+**Falsification:** утверждение — `expect(verifyChain(recomputed)).toEqual({ok: false, brokenAt: 4})`
+на «компетентном атакующем»: изменить `output.bytes` записи 3 **и пересчитать её `self` по
+замороженной формуле**. Индекс именно 4, и это стоит проговорить: запись 3 проходит обе половины
+предиката — её `prev` не тронут, её `self` пересчитан верно. Расхождение всплывает на записи 4,
+чей `prev` всё ещё хранит **старый** `self` записи 3. Реализация «самосогласованности» не
+сравнивает эти два значения никогда и возвращает `{ok: true}` — то есть падает на этом тесте и
+только на нём. Это единственная фальсификация, отбраковывающая целый класс неверных реализаций.
+
+Остальные: `expect(verifyChain(tampered)).toEqual({ok: false, brokenAt: 2})` — правка байта без
+пересчёта; `expect(verifyChain(tamperedAtZero)).toEqual({ok: false, brokenAt: 0})`;
+перестановка `prev` двух соседних записей; `expect('chain' in unchain(e)).toBe(false)`;
+и `canonicalizeJcs` на объекте с не-plain значением (экземпляр класса) обязан **бросать**,
+а не сериализовать в `{}`.
 
 **Verification:** `vitest run src/audit/chain.test.ts src/jcs.test.ts`, включая векторы
 RFC 8785, в том числе числовой файл.
@@ -570,11 +631,20 @@ RFC 8785, в том числе числовой файл.
 
 **Files:** `packages/contracts/src/lock.ts` (Create), `packages/contracts/src/lock.test.ts` (Create)
 
-`normalizeRecipe(recipe: Recipe): NormalizedRecipe` — детерминированное представление
-(`exec`, `cwd`, схемы параметров, аннотации, **эффективный** профиль песочницы и env, то
-есть `defaults`, слитый с блоком рецепта, `description`). Порядок параметров **сохраняется
-и входит в форму**: из него собирается argv, поэтому сортировка «для детерминизма» изменила
-бы команду, не изменив хэш.
+`normalizeRecipe(recipe: Recipe, defaults: Defaults): NormalizedRecipe` — детерминированное
+представление (`exec`, `cwd`, схемы параметров, аннотации, `description`), хранящее **и
+собственный блок рецепта, и эффективный** профиль. Оба нужны: по эффективному считается хэш,
+по собственному строится атрибуция в диффе. Порядок параметров **сохраняется и входит в форму**:
+из него собирается argv, поэтому сортировка «для детерминизма» изменила бы команду, не изменив хэш.
+
+**Правило слияния замораживается явным списком**, потому что, положив эффективный профиль в
+хэшируемую форму, план втянул его в контракт. `docs/07-contracts.md:20` даёт
+`defaults.sandbox.read: {deny: [...], allow: ["."]}`, а `analyze_logs` объявляет
+`read: {allow: ["./logs"]}` — замена по листу даёт `["./logs"]`, объединение оставляет весь
+проект читаемым. Это решение о blast radius (И4, A10), и без записанного правила E1 и E3
+выберут по-разному, а lock-хэш перестанет быть сравнимым между версиями демона. План фиксирует:
+по каким узлам замена, по каким объединение, и что означает явный пустой массив
+(`network: {allow: []}` — «обнулить», не «наследовать»).
 
 `normalizeManifest(manifest)` и `manifestHash` в `LockFile` — потому что
 `defaults.env.allow: [..., "AWS_SECRET_ACCESS_KEY"]` или опустошённый `defaults.sandbox.read.deny`
@@ -586,16 +656,31 @@ RFC 8785, в том числе числовой файл.
 показать дифф целиком и без усечения. Дописывать снапшот после E1/E7 — инвалидировать
 все существующие lock-файлы.
 
-`diffLock(lock, manifest): {added: string[]; removed: string[]; changed: Array<{name, was, is}>}`
-— добавление и удаление рецепта становятся обязательством формы возврата, а не дисциплиной
-реализации.
+`diffLock(lock, manifest): {defaults: {was, is} | null; added: string[]; removed: string[];
+changed: Array<{name, was, is}>}` — добавление и удаление рецепта становятся обязательством
+формы возврата, а не дисциплиной реализации.
+
+Слот `defaults` отдельный, иначе правка одной строки в `defaults.env.allow` меняет эффективный
+профиль каждого рецепта, `changed` содержит все четыре записи с полным `was/is`, и модалка S7
+показывает одно изменение, размноженное N раз. Человек тогда не отличает «добавили
+`AWS_SECRET_ACCESS_KEY` в общий allowlist» от «кто-то тронул четыре рецепта» — то есть страдает
+читаемость ровно того диффа, ради которого снапшот и добавлялся. В `changed` попадают только
+рецепты с изменением **собственного** блока.
+
+Сверка как тип: `LockStatus = 'verified' | 'drifted' | 'absent'` и
+`LockCheck = {status: 'verified'} | {status: 'drifted'; diff: LockDiff} | {status: 'absent'}`.
+Правило записывается здесь: `drifted` и `absent` дают `verdict: 'denied'` на стадии `lock_check`
+— это не риск-тир, и в `deriveRiskTier` оно не отображается (см. §7).
 
 **Falsification:** утверждение — `expect(diffLock(lock, withNewRecipe).added).toEqual(['exfil'])`.
 Реализация, которая обходит записи lock и сверяет хэши, добавленный рецепт не заметит —
-утверждение читает `[]` и падает. Второе — `expect(diffLock(lock, defaultsWidened).changed).not.toHaveLength(0)`:
-изменить только `defaults.env.allow`, не трогая рецепты; без `normalizeManifest` вернётся
-пусто. Третье — `expect(normalizeRecipe(a)).not.toEqual(normalizeRecipe(b))` при разнице
-только в `description` (класс CVE-2025-54136) и при разном порядке параметров.
+утверждение читает `[]` и падает. Второе, на атрибуцию —
+`expect(diffLock(lock, defaultsWidened)).toMatchObject({defaults: expect.anything(), changed: []})`:
+изменить только `defaults.env.allow`, не трогая рецепты; без `normalizeManifest` вернётся пусто,
+а без отдельного слота `changed` окажется длиной 4. Третье —
+`expect(normalizeRecipe(a, d)).not.toEqual(normalizeRecipe(b, d))` при разнице только в
+`description` (класс CVE-2025-54136) и при разном порядке параметров. Четвёртое — эффективный
+`read` для `analyze_logs` из `docs/07-contracts.md` равен записанному правилом слияния значению.
 
 **Verification:** `vitest run src/lock.test.ts`
 
@@ -614,7 +699,22 @@ RFC 8785, в том числе числовой файл.
 **Подтверждения** (R26): `ApprovalChannel = 'electron' | 'elicitation'`, `ApprovalDecision`,
 `ApprovalScope = 'once' | 'until' | 'recipe_and_args'`, `expiresAt: string | null` —
 **абсолютное** ISO-время, потому что относительный TTL в append-only записи нельзя оценить
-при повторном чтении через год, — и `argsHash`, считаемый `canonicalizeJcs` от параметров.
+при повторном чтении через год.
+
+`argsHash` замораживается формулой, по образцу Task 8 — иначе это тот же незамороженный
+дайджест на границе доверия:
+
+```
+argsHash = sha256(utf8(canonicalizeJcs({ recipe: recipeName, params })))
+```
+
+`params` — значения **после** валидации и резолва путей, поэтому `{file: "./logs/a.log"}` и
+`{file: "/…/logs/a.log"}` — один и тот же вызов; незаданные необязательные параметры
+**отсутствуют как ключи**, а не присутствуют со значением `undefined` (JCS их различает).
+`recipeName` входит в дайджест, иначе скоуп `recipe_and_args` переносится между рецептами с
+совпадающим набором аргументов. Функция экспортируется из `./audit` — там уже есть
+`node:crypto`; в корневом входе живёт только строковое **поле** `argsHash`, иначе Task 10
+нарушил бы правило, которое Task 8 формулирует двумя задачами выше.
 Плюс `ApprovalRequest`/`ApprovalVerdict` с непрозрачным `requestId`: без него сообщение из
 рендерера может одобрить не тот ожидающий вызов, который человеку показали. Это И8 и самая
 дорогая граница доверия в продукте, и оставлять её на E7 после заморозки нельзя.
@@ -625,16 +725,24 @@ RFC 8785, в том числе числовой файл.
 `sanitizeDescription(text: string): {text: string; removedRuns: number}` задаётся
 **структурно, а не блоклистом**: лимит длины, вырезание C0/C1, ANSI-escape, zero-width и
 bidi-override, схлопывание переводов строки. В контракте записывается, что результат
-*уменьшен*, а не *безопасен*. Применяется ко **всем** недоверенным строкам, которые
-эмитит `toTool`: описание рецепта, имена параметров (они становятся ключами
-`inputSchema.properties`), описания параметров, значения `enum` и само имя рецепта.
+*уменьшен*, а не *безопасен*. Применяется к **свободному тексту**, который эмитит `toTool`: описание рецепта, описания
+параметров, значения `enum`.
+
+Имена рецептов и параметров через неё **не проходят**. Их безопасность обеспечивает
+`propertyNames` схемы (Task 3): имя, прошедшее загрузку, уже соответствует
+`^[a-z][a-z0-9_]{0,63}$`, санитизировать в нём нечего. Хуже того, у `sanitizeDescription` есть
+лимит длины — применённый к имени, он отдал бы модели имя, которое `IpcRequest.recipeName`
+затем не разрешит в рецепт. Тождественность имени становится утверждением, а не
+подразумевается.
 
 **Falsification:** утверждение — `expect(toTool(poisoned).description).not.toContain('IGNORE PREVIOUS')`.
 Пропустить `sanitizeDescription` → строка доезжает до вывода и падает. Второе —
-`expect(toTool(poisonedParamName).inputSchema.properties).not.toHaveProperty('\u202e')`:
-санитизация только описания оставляет line jumping через имя параметра. Третье —
-`expect(approvalVerdictFor(otherRequestId)).toBe(null)`: убрать сверку `requestId` → вердикт
-применяется к чужому вызову.
+`expect(toTool(r).name).toBe(r.name)`: имя обязано доехать байт в байт, иначе `tools/list`
+отдаёт модели неразрешимое имя. Третье, достижимое через `parseManifest` —
+`expect(toTool(poisonedEnum).inputSchema.properties.mode.enum[0]).not.toContain('\u202e')`:
+bidi-override в значении `enum`, куда схема пускает свободный текст. Четвёртое —
+`expect(applyVerdict(pending, verdictWithOtherRequestId)).toBe(null)`: убрать сверку
+`requestId` → вердикт применяется к чужому вызову.
 
 **Verification:** `vitest run src/tool.test.ts src/approval.test.ts`
 
@@ -659,7 +767,7 @@ bidi-override, схлопывание переводов строки. В кон
 
 ### Task 12 — заморозка с исполняемой проверкой и правки доков
 
-**Files:** `packages/contracts/src/index.ts` (Modify), `packages/contracts/src/api-surface.test.ts` (Create), `docs/04-research-findings.md` (Modify), `docs/07-contracts.md` (Modify), `docs/08-demo-scenarios.md` (Modify), `docs/10-honest-limitations.md` (Modify), `docs/adr/0003-otel-event-schema.md` (Modify), `docs/adr/0004-mcp-tool-annotations.md` (Modify)
+**Files:** `packages/contracts/src/index.ts` (Modify), `packages/contracts/src/api-surface.test.ts` (Create), `docs/04-research-findings.md` (Modify), `docs/07-contracts.md` (Modify), `docs/02-architecture.md` (Modify), `docs/08-demo-scenarios.md` (Modify), `docs/10-honest-limitations.md` (Modify), `docs/adr/0003-otel-event-schema.md` (Modify), `docs/adr/0004-mcp-tool-annotations.md` (Modify), `docs/adr/0005-dual-channel-approvals.md` (Modify), `docs/adr/0006-manifest-lockfile.md` (Modify)
 
 Снять `TODO(E0)` (`packages/contracts/src/index.ts:6`). Заморозка получает исполняемую
 проверку: снапшот публичной поверхности `.d.ts` всех трёх входов, падающий при любом
@@ -672,6 +780,20 @@ bidi-override, схлопывание переводов строки. В кон
 загрузке, а что — матчером; смягчение «fail-safe by construction» до границы R11 плюс
 оговорка про `lockVerified`.
 
+**Источник истины приводится в соответствие с замороженным контрактом.** Это не косметика:
+заморозка, у которой `docs/07-contracts.md` расходится с типами, живёт один спринт, а E6 и E7
+будут писать по документу.
+
+| Место | Сейчас | Станет |
+|---|---|---|
+| `docs/07-contracts.md:135` | `trace_id`, `span_id`, `start_time`, плоский шейп | вложенный шейп Task 7; плоский camelCase — это выход `toOtlp` |
+| `docs/07-contracts.md:155` | `approval: {…, ttl, …}` | `expiresAt`, абсолютное |
+| `docs/07-contracts.md:113` | lock без `snapshot` | `{hash, approvedAt, snapshot}` |
+| `docs/07-contracts.md:198`, `docs/02-architecture.md:75` | `{"recipe": "run_tests"}` | `recipeName` |
+| `docs/02-architecture.md:168` | семиполевая формула `entry_hash` | замороженная формула Task 8 |
+| ADR-0005:33 | «на 10 минут» (TTL) | абсолютный `expiresAt` |
+| ADR-0006:22 | нормализованное представление | + эффективный профиль и порядок параметров |
+
 Отдельно — сверка набора рецептов: `WORK.md`, `docs/07-contracts.md:25-76` и
 `docs/08-demo-scenarios.md:36` называют три разных набора. Приводятся к четырём из Task 11,
 иначе слайд S1 противоречит поставленной фикстуре.
@@ -681,7 +803,8 @@ bidi-override, схлопывание переводов строки. В кон
 перестаёт быть обещанием.
 
 **Verification:** `yarn typecheck && yarn build && yarn test` из корня — зелено на всём
-графе, включая `design`.
+графе, включая `design`. Снапшот поверхности читает `dist/**/*.d.ts`, поэтому сборка идёт
+перед тестом, а не после.
 
 **Commit:** `E0: заморозка контракта и правки документации`
 
@@ -691,7 +814,7 @@ bidi-override, схлопывание переводов строки. В кон
 
 | R | Строка плана, которая его реализует |
 |---|---|
-| R1 | Task 3: «Схема 2020-12 с `$id`, `$defs`, `oneOf` из `$ref`…» |
+| R1 | Task 3: «Схема **публикуется**… `"files": ["dist", "schema"]` и `"./schema"` в `exports`» |
 | R2 | Task 3: «Ветки: `StringParam` (требует `pattern`)… `PathParam` (требует `root`)» |
 | R3 | Task 3: `scripts/gen-types.mjs` + `src/manifest.generated.ts`, коммитится; Ф6 обосновывает маршрут |
 | R4 | Task 4: «`parseManifest(yamlText: string, source: ManifestSource): ParseManifestResult`» |
@@ -700,12 +823,12 @@ bidi-override, схлопывание переводов строки. В кон
 | R7 | Task 5: «Компиляция каждого `pattern` через `re2` на загрузке» |
 | R8 | Task 4: «Три меры сверх дефолтов… документ с директивой `%YAML` отвергается целиком» |
 | R9 | Task 2: «`ToolAnnotations = Partial<Record<AnnotationKey, boolean>>`» |
-| R10 | Task 2: «`deriveRiskTier(annotations, lockVerified): RiskTier`» + таблица §7 |
-| R11 | Task 2 Falsification (строка 3 §7) + §7 про `lockVerified` + Task 12 правка формулировки |
+| R10 | Task 2: «`deriveRiskTier(annotations: ToolAnnotations): RiskTier`» + таблица §7 |
+| R11 | Task 2 «Гарантия R11 — комментарием рядом с ней» + §7 + Task 9 `LockStatus` + Task 12 |
 | R12 | Task 7: «`AuditEvent` — вложенный, ISO-время, строковые enum'ы» |
 | R13 | Task 7: «`toOtlp` — `traceId`/`spanId` hex, числовой `kind`…» |
 | R14 | Task 7 Falsification: «проверяется **отсутствие** любого ключа с `_`» |
-| R15 | Task 8: «`self = sha256(utf8(canonicalizeJcs({ prev, event })))`» |
+| R15 | Task 8: «Замораживается предикат, а не только дайджест» + формула |
 | R16 | Task 9: «`normalizeRecipe(recipe: Recipe): NormalizedRecipe`» + порядок параметров |
 | R17 | Task 10: «`IpcRequest = {recipeName; params; sessionId}`» |
 | R18 | Task 10: «проекция ревизии `2025-11-25` с опциональными `resultType`/`ttlMs`/`cacheScope`» |
@@ -719,7 +842,7 @@ bidi-override, схлопывание переводов строки. В кон
 | R26 | Task 10: «`ApprovalScope = 'once' \| 'until' \| 'recipe_and_args'`… `ApprovalRequest`/`ApprovalVerdict` с непрозрачным `requestId`» |
 | R27 | Task 9: «`normalizeManifest(manifest)` и `manifestHash`» + `diffLock` с `added`/`removed`/`changed` |
 | R28 | Task 9: «`LockEntry = {hash, approvedAt, snapshot: NormalizedRecipe}` — снапшот обязателен» |
-| R29 | Task 5: «через границу пакета едет не голая строка… `PatternMatcher`» |
+| R29 | Task 4: «`matchers: ReadonlyMap<string, PatternMatcher>`» + Task 5 |
 | R30 | Task 7: «`durationUs: number`, монотонная длительность стадии» |
 | R31 | Task 12: «снапшот публичной поверхности `.d.ts` всех трёх входов» + `version: {const: 1}` в Task 3 |
 | R32 | Task 3: «`propertyNames: {pattern: "^[a-z][a-z0-9_]{0,63}$"}` на `tools` и на `params`» |
