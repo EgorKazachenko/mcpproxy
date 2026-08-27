@@ -1,0 +1,11 @@
+{
+  "gate": "review-internal",
+  "status": "waived",
+  "waived_by": "agent-recorded",
+  "reason": "Решение владельца после ПЯТИ кругов веера. Дименсия читала дерево четырежды: b22e0e34 (5 Major), 0e6741ba (4 Major), ad6df6fb (0 Major, 3 Minor), 6d05cf1d (0 Major, 3 Minor, 2 Nit). Всё найденное закрыто и проверено мутациями. Не читала два последних коммита: de72b28 (связка схемы с durationToMs, доккомментарий лоссового pointer, три фактические неточности) и dc5940a (валидаторы нормализованных форм в parseLockFile, двусторонняя перепись R6). Ревью этих трёх файлов — глазами владельца на PR.",
+  "codeTree": "2223236b1f84354a277b665a36ff5333670f3df1",
+  "codeDirty": false,
+  "headSha": "dc5940ae1ec34167b1717294e5a9096b435de374",
+  "startedAt": "2026-08-27T20:25:46.449Z",
+  "artifacts": []
+}

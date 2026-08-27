@@ -1,0 +1,11 @@
+{
+  "gate": "review-scan",
+  "status": "waived",
+  "waived_by": "agent-recorded",
+  "reason": "Решение владельца после пяти кругов. Дименсия читала дерево трижды: b22e0e34 (2 Major, 7 Minor, 5 Nit), 0e6741ba (1 Major — санитизация Diagnostic.message работала у одного производителя из пяти), 6d05cf1d (2 находки на пороге: голый durationToMs вне catch и доккомментарий лоссового pointer). Всё закрыто. Не читала de72b28 и dc5940a.",
+  "codeTree": "2223236b1f84354a277b665a36ff5333670f3df1",
+  "codeDirty": false,
+  "headSha": "dc5940ae1ec34167b1717294e5a9096b435de374",
+  "startedAt": "2026-08-27T20:25:52.408Z",
+  "artifacts": []
+}

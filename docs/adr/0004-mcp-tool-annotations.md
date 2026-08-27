@@ -17,15 +17,22 @@
 |---|---|
 | `readOnlyHint: true` | low |
 | не readOnly, не destructive, не openWorld | medium |
-| `destructiveHint: true` **или** `openWorldHint: true` | high |
+| `readOnlyHint: false` и (`destructiveHint: true` **или** `openWorldHint: true`) | high |
 | **аннотации не заданы** | **high** |
+
+Оговорка спеки: `destructiveHint` и `idempotentHint` значимы **только** при
+`readOnlyHint == false`. Рецепт с `readOnlyHint: true` и `destructiveHint: true` — это low.
 
 ## Ключевая деталь
 
 **Дефолты в спеке пессимистичные:** `destructiveHint` по умолчанию `true`,
 `openWorldHint` по умолчанию `true`. Инструмент без аннотаций считается разрушительным
-и открытым во внешний мир. Это даёт нам fail-safe by construction: забыл объявить —
-получил максимальный тир, а не минимальный.
+и открытым во внешний мир: забыл объявить — получил максимальный тир, а не минимальный.
+
+**Но «fail-safe by construction» — неверная формулировка, и она заменена.** Гарантия уже:
+молчание манифеста может сделать рецепт только **опаснее**; явный `readOnlyHint: true` тир
+**понижает**, а спека прямо требует считать аннотации недоверенными. Значит вторая линия
+обороны — песочница и lock, а не вывод тира.
 
 ## Последствия
 

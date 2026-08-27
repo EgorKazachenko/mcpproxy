@@ -1,0 +1,12 @@
+{
+  "gate": "build-test",
+  "status": "pass",
+  "exit_code": 0,
+  "codeTree": "2223236b1f84354a277b665a36ff5333670f3df1",
+  "codeDirty": false,
+  "headSha": "dc5940ae1ec34167b1717294e5a9096b435de374",
+  "startedAt": "2026-08-27T20:25:32.286Z",
+  "command": "node .claude/skills/vibe-code-developing-v2/scripts/run-build-test.mjs --feature docs/vibe-coding/27.08.2026-e0-contracts",
+  "evidencePath": null,
+  "artifacts": []
+}

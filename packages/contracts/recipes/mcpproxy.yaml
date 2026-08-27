@@ -1,0 +1,106 @@
+# Четыре рецепта-заглушки. Валидны по schema/mcpproxy.schema.json и грузятся через
+# parseManifest без диагностик — это утверждает src/recipes.test.ts.
+#
+# publish_release — единственный high-risk, и он нужен сценарию S8: без него в наборе
+# нет ни одного вызова, доходящего до out-of-band апрува в Electron.
+version: 1
+
+defaults:
+  timeout: 120s
+  output:
+    maxBytes: 65536
+    redact: true
+  env:
+    allow: ["PATH", "HOME", "LANG", "CI"]
+  sandbox:
+    read:
+      deny: ["~/.ssh", "~/.aws", "~/.config/gh"]
+      allow: ["."]
+    write:
+      allow: []
+    network:
+      allow: []
+
+tools:
+  run_tests:
+    description: "Прогнать тесты проекта"
+    exec: ["pnpm", "test"]
+    cwd: "."
+    params:
+      pattern:
+        type: string
+        required: false
+        pattern: "^[\\w./-]{0,64}$"
+        # ДВА отдельных элемента argv, а не одна строка "--testPathPattern={}": иначе
+        # значение и флаг склеиваются в один аргумент (И2).
+        argv: ["--testPathPattern", "{}"]
+      update_snapshots:
+        type: boolean
+        required: false
+        argv: ["-u"]
+    annotations:
+      readOnlyHint: false
+      destructiveHint: false
+      idempotentHint: true
+      openWorldHint: false
+    sandbox:
+      write:
+        allow: ["coverage", "node_modules/.cache", "/tmp"]
+      network:
+        allow: []
+    timeout: 300s
+
+  build_project:
+    description: "Собрать проект"
+    exec: ["pnpm", "build"]
+    cwd: "."
+    params:
+      target:
+        type: enum
+        required: false
+        values: ["debug", "release"]
+        argv: ["--mode", "{}"]
+    annotations:
+      readOnlyHint: false
+      destructiveHint: false
+      idempotentHint: true
+      openWorldHint: false
+    sandbox:
+      write:
+        allow: ["dist", "node_modules/.cache", "/tmp"]
+      network:
+        allow: []
+    timeout: 600s
+
+  analyze_logs:
+    description: "Разобрать логи приложения"
+    exec: ["./scripts/analyze-logs.sh"]
+    params:
+      file:
+        type: path
+        root: "./logs"
+        required: true
+        argv: ["{}"]
+    annotations:
+      readOnlyHint: true
+    sandbox:
+      read:
+        allow: ["./logs"]
+
+  publish_release:
+    description: "Опубликовать релиз"
+    exec: ["./scripts/publish.sh"]
+    params:
+      tag:
+        type: string
+        required: true
+        pattern: "^v\\d+\\.\\d+\\.\\d+$"
+        argv: ["{}"]
+    annotations:
+      readOnlyHint: false
+      destructiveHint: true
+      idempotentHint: false
+      openWorldHint: true
+    sandbox:
+      network:
+        allow: ["registry.npmjs.org", "api.github.com"]

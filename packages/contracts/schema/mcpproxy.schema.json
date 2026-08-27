@@ -1,0 +1,217 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/EgorKazachenko/mcpproxy/main/packages/contracts/schema/mcpproxy.schema.json",
+  "title": "Manifest",
+  "description": "Манифест рецептов mcpproxy. Содержимое НЕДОВЕРЕННОЕ: инварианты кодируются структурно, а не комментарием.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "defaults", "tools"],
+  "properties": {
+    "version": {
+      "description": "Версия формата. Двигается только вместе с CONTRACTS_VERSION и явным решением владельца.",
+      "const": 1
+    },
+    "defaults": { "$ref": "#/$defs/Defaults" },
+    "tools": {
+      "description": "Рецепты, ключованные именем. Имя ограничено propertyNames, поэтому __proto__ и constructor — ошибка загрузки, а не имя рецепта.",
+      "type": "object",
+      "propertyNames": {
+        "pattern": "^[a-z][a-z0-9_]{0,63}$",
+        "not": { "enum": ["constructor", "prototype", "__proto__"] }
+      },
+      "additionalProperties": { "$ref": "#/$defs/Recipe" }
+    }
+  },
+  "$defs": {
+    "Defaults": {
+      "description": "Общая база. Блок обязателен: без него манифест терял бы весь список запретов на учётные данные одной строкой.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["timeout", "output", "env", "sandbox"],
+      "properties": {
+        "timeout": { "$ref": "#/$defs/Duration" },
+        "output": { "$ref": "#/$defs/OutputPolicy" },
+        "env": { "$ref": "#/$defs/EnvPolicy" },
+        "sandbox": { "$ref": "#/$defs/SandboxProfile" }
+      }
+    },
+    "Recipe": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["description", "exec"],
+      "properties": {
+        "description": {
+          "description": "Свободный текст, попадающий прямо в контекст модели. Санитизируется в toTool, а не здесь.",
+          "type": "string"
+        },
+        "exec": {
+          "description": "exec[0] резолвится в абсолютный путь и проверяется по binary allowlist демона. Ни один параметр в него не подставляется.",
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string" }
+        },
+        "cwd": { "type": "string" },
+        "params": {
+          "type": "object",
+          "propertyNames": {
+            "pattern": "^[a-z][a-z0-9_]{0,63}$",
+            "not": { "enum": ["constructor", "prototype", "__proto__"] }
+          },
+          "additionalProperties": { "$ref": "#/$defs/Param" }
+        },
+        "annotations": { "$ref": "#/$defs/Annotations" },
+        "sandbox": { "$ref": "#/$defs/SandboxProfile" },
+        "timeout": { "$ref": "#/$defs/Duration" },
+        "env": { "$ref": "#/$defs/EnvPolicy" },
+        "output": { "$ref": "#/$defs/OutputPolicy" }
+      }
+    },
+    "Param": {
+      "description": "Союз самодостаточных веток с const-дискриминатором type. Соседних properties рядом с oneOf нет намеренно; type здесь обязателен — без него ajv в strict-режиме отказывается компилировать discriminator.",
+      "type": "object",
+      "discriminator": { "propertyName": "type" },
+      "oneOf": [
+        { "$ref": "#/$defs/StringParam" },
+        { "$ref": "#/$defs/EnumParam" },
+        { "$ref": "#/$defs/NumberParam" },
+        { "$ref": "#/$defs/BooleanParam" },
+        { "$ref": "#/$defs/PathParam" }
+      ]
+    },
+    "StringParam": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "pattern"],
+      "properties": {
+        "type": { "const": "string" },
+        "description": { "type": "string" },
+        "required": { "type": "boolean" },
+        "argv": { "$ref": "#/$defs/ArgvTemplate" },
+        "pattern": {
+          "description": "Синтаксис RE2, компилируется на загрузке. Отсутствие — ошибка загрузки, а не warning.",
+          "type": "string",
+          "minLength": 1
+        },
+        "maxLength": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "EnumParam": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "values"],
+      "properties": {
+        "type": { "const": "enum" },
+        "description": { "type": "string" },
+        "required": { "type": "boolean" },
+        "argv": { "$ref": "#/$defs/ArgvTemplate" },
+        "values": {
+          "description": "Значения едут в контекст модели и обязаны вернуться байт в байт, поэтому ограничиваются здесь структурно, а не переписываются санитайзером.",
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/SafeText" }
+        }
+      }
+    },
+    "NumberParam": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type"],
+      "properties": {
+        "type": { "const": "number" },
+        "description": { "type": "string" },
+        "required": { "type": "boolean" },
+        "argv": { "$ref": "#/$defs/ArgvTemplate" },
+        "min": { "type": "number" },
+        "max": { "type": "number" },
+        "integer": { "type": "boolean" }
+      }
+    },
+    "BooleanParam": {
+      "description": "Флаг присутствует или отсутствует; подстановки в argv нет.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type"],
+      "properties": {
+        "type": { "const": "boolean" },
+        "description": { "type": "string" },
+        "required": { "type": "boolean" },
+        "argv": { "$ref": "#/$defs/ArgvTemplate" }
+      }
+    },
+    "PathParam": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "root"],
+      "properties": {
+        "type": { "const": "path" },
+        "description": { "type": "string" },
+        "required": { "type": "boolean" },
+        "argv": { "$ref": "#/$defs/ArgvTemplate" },
+        "root": {
+          "description": "realpath, затем confinement под root. Обязателен: без него path — обычная строка с обходом каталогов.",
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "ArgvTemplate": {
+      "description": "Массив литералов. Слот {} допустим не более одного раза на элемент — проверяется на загрузке.",
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "Annotations": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "readOnlyHint": { "type": "boolean" },
+        "destructiveHint": { "type": "boolean" },
+        "idempotentHint": { "type": "boolean" },
+        "openWorldHint": { "type": "boolean" }
+      }
+    },
+    "SandboxProfile": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "read": { "$ref": "#/$defs/AccessRule" },
+        "write": { "$ref": "#/$defs/AccessRule" },
+        "network": { "$ref": "#/$defs/AccessRule" }
+      }
+    },
+    "AccessRule": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "allow": { "type": "array", "items": { "type": "string" } },
+        "deny": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "EnvPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["allow"],
+      "properties": {
+        "allow": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "OutputPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "maxBytes": { "type": "integer", "minimum": 1 },
+        "redact": { "type": "boolean" }
+      }
+    },
+    "Duration": {
+      "description": "Целое число с единицей. Нормализуется в миллисекунды до хэширования, иначе 120s и 2m дают разные дайджесты при одном таймауте.",
+      "type": "string",
+      "pattern": "^[0-9]{1,10}(ms|s|m|h)$"
+    },
+    "SafeText": {
+      "description": "Строка без управляющих и форматирующих символов: \\p{Cc} закрывает C0/C1, \\p{Cf} — zero-width, bidi-переопределения и BOM. Категории вместо перечисления диапазонов: читаемо, ASCII-only в файле схемы и принимается обоими движками.",
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[^\\p{Cc}\\p{Cf}]{1,128}$"
+    }
+  }
+}

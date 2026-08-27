@@ -7,14 +7,36 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
-    }
+    },
+    "./validate": {
+      "types": "./dist/validate/index.d.ts",
+      "default": "./dist/validate/index.js"
+    },
+    "./audit": {
+      "types": "./dist/audit/index.d.ts",
+      "default": "./dist/audit/index.js"
+    },
+    "./schema": "./schema/mcpproxy.schema.json"
   },
   "files": [
-    "dist"
+    "dist",
+    "schema"
   ],
   "scripts": {
     "build": "tsc -b",
     "typecheck": "tsc -b --noEmit false --emitDeclarationOnly",
+    "test": "tsc -b && vitest run",
+    "gen:types": "node scripts/gen-types.mjs",
     "clean": "rm -rf dist *.tsbuildinfo"
+  },
+  "devDependencies": {
+    "es-module-lexer": "^2.3.2",
+    "json-schema-to-typescript": "15.0.4",
+    "vitest": "^3"
+  },
+  "dependencies": {
+    "ajv": "8.20.0",
+    "re2": "1.26.1",
+    "yaml": "2.9.0"
   }
 }
