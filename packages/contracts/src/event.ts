@@ -84,6 +84,16 @@ export interface AuditEvent {
   readonly duration?: { readonly overheadMs: number };
 }
 
+/**
+ * Событие, уже вписанное в цепочку. Тип объявлен здесь, в корневом входе, а не рядом с
+ * `chainHash`: рендереру, который показывает лог, нужен именно он, а `node:crypto` — нет.
+ *
+ * `prev: null` означает генезис. Формула `self` заморожена в `./audit`.
+ */
+export type ChainedEvent = AuditEvent & {
+  readonly chain: { readonly prev: string | null; readonly self: string };
+};
+
 export interface SandboxViolation {
   readonly type: ViolationType;
   readonly target: string;

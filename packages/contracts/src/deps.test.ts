@@ -84,4 +84,11 @@ describe('граф зависимостей корневого входа', () =
     expect(bare).toContain('re2');
     expect(bare.some((one) => one.startsWith('ajv'))).toBe(true);
   });
+
+  it('вход ./audit тянет node:crypto — и только его', () => {
+    // Правило размещения из Task 8: функция, которой нужен node:crypto, живёт в ./audit.
+    // Утверждение «и только его» держит границу с другой стороны: валидатор сюда не заезжает.
+    const { bare } = walk(resolve(distRoot, 'audit', 'index.js'), '.js');
+    expect(bare).toEqual(['node:crypto']);
+  });
 });

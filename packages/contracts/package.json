@@ -12,6 +12,10 @@
       "types": "./dist/validate/index.d.ts",
       "default": "./dist/validate/index.js"
     },
+    "./audit": {
+      "types": "./dist/audit/index.d.ts",
+      "default": "./dist/audit/index.js"
+    },
     "./schema": "./schema/mcpproxy.schema.json"
   },
   "files": [
