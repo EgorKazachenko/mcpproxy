@@ -5,7 +5,7 @@ import type { Manifest } from '../manifest.generated.js';
 import type { Diagnostic, ManifestSource, ParseManifestResult, PatternMatcher } from '../types.js';
 import { matcherKey } from '../types.js';
 import { manifestValidator } from './ajv.js';
-import { diagnosticAt, pointerOf, positionOf, segmentsOf } from './locate.js';
+import { diagnosticAt, segmentsOf } from './locate.js';
 import { compilePattern } from './regex.js';
 import { refine } from './refine.js';
 import { parseYaml } from './yaml.js';
@@ -80,9 +80,14 @@ function buildMatchers(
  *
  * Канонизируется **сырой** манифест, а не `normalizeManifest(manifest)`: замерено, что вторая
  * форма стоит 2.2 с CPU на манифесте в 258 КБ, потому что строит эффективный профиль каждого
- * рецепта, чтобы тут же его выбросить. Покрытие при этом то же самое: нормализация переносит
- * строки дословно (значит одиночный суррогат виден и здесь), а единственное вычисляемое число
- * — `timeoutMs` — ограничено сверху `checkDuration`, и `maxBytes` в JSON нечислом быть не может.
+ * рецепта, чтобы тут же его выбросить.
+ *
+ * Покрытие при этом не тождественно, и это стоит сказать точно, а не «то же самое»:
+ * нормализация переносит строки дословно, поэтому одиночный суррогат видно и здесь, но
+ * `timeoutMs` она **вычисляет**, и длительность из четырёхсот цифр канонизируется сырой,
+ * а после нормализации даёт `Infinity`. Тот вектор закрыт раньше и в двух местах — пределом
+ * цифр в схеме и `checkDuration` по значению, — поэтому до этой проверки он не доходит.
+ * Она отвечает за строки; за числа отвечают те двое.
  */
 function notHashable(manifest: Manifest): string | null {
   try {

@@ -154,12 +154,22 @@ function checkOutputFloor(
  *
  * Схема ограничивает `Duration` девятью цифрами — этого хватает, чтобы значение осталось
  * безопасным целым, но не хватает, чтобы оно осталось таймером: `999999999h` — законные девять
- * цифр и 3.6·10¹² мс, а выше `DURATION_MAX_MS` Node клампит таймаут к 1 мс. Манифест,
+ * цифр и 3.6·10¹⁵ мс, а выше `DURATION_MAX_MS` Node клампит таймаут к 1 мс. Манифест,
  * просящий «почти никогда не прерывать», получил бы прерывание немедленно — молча.
  */
 function checkDuration(value: string | undefined, path: Segment[], report: (path: Segment[], message: string) => void) {
   if (value === undefined) return;
-  const ms = durationToMs(value);
+  let ms: number;
+  try {
+    ms = durationToMs(value);
+  } catch {
+    // Сюда попасть можно, только если паттерн схемы и регулярка `durationToMs` разошлись:
+    // до `refine` документ уже прошёл валидацию. Но связка между двумя файлами ничем не
+    // держится, а `parseManifest` обязан возвращать диагностику, а не бросать, — поэтому
+    // расхождение читается как отказ загрузки, а не как крэш на пути решения.
+    report(path, `не длительность: ${value}`);
+    return;
+  }
   if (ms > DURATION_MAX_MS) {
     report(path, `длительность больше максимума таймера платформы: ${ms} мс при ${DURATION_MAX_MS}`);
   }

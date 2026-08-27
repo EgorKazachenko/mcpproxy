@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { Ajv2020 } from 'ajv/dist/2020.js';
 import { describe, expect, it } from 'vitest';
+import { durationToMs } from './lock.js';
 
 const packageRoot = fileURLToPath(new URL('..', import.meta.url));
 const schemaPath = `${packageRoot}schema/mcpproxy.schema.json`;
@@ -69,6 +70,25 @@ describe('схема манифеста', () => {
     expect(new RegExp(pattern).test(`${'9'.repeat(10)}s`)).toBe(false);
     expect(new RegExp(pattern).test(`${'9'.repeat(400)}s`)).toBe(false);
     expect(new RegExp(pattern).test('120s')).toBe(true);
+  });
+
+  it('паттерн Duration и durationToMs согласованы — связку держит тест, а не совпадение', () => {
+    // `refine` зовёт `durationToMs` после успешной валидации по схеме, то есть на строке,
+    // уже прошедшей этот паттерн. Связка живёт в двух файлах и ничем не держится; разойдись
+    // они — `parseManifest` бросал бы вместо диагностики. (Отказ на этот случай в `refine`
+    // есть, но он страховка, а не замена проверке.)
+    const defs = schema.$defs as Record<string, { pattern?: string } | undefined>;
+    const pattern = defs.Duration?.pattern;
+    if (pattern === undefined) throw new Error('ветка Duration исчезла из схемы');
+    const re = new RegExp(pattern);
+    for (const value of ['1ms', '120s', '2m', '24h', '999999999h', '0ms']) {
+      expect(re.test(value), value).toBe(true);
+      expect(() => durationToMs(value), value).not.toThrow();
+    }
+    for (const value of ['120', '120sec', 's', '1.5s', '-1s', '', '1d']) {
+      expect(re.test(value), value).toBe(false);
+      expect(() => durationToMs(value), value).toThrow(TypeError);
+    }
   });
 
   it('требует непустой values у enum', () => {
