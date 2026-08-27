@@ -1,5 +1,5 @@
 import RE2 from 're2';
-import { BASE64_MIN_RUN, ENTROPY_RULE_ID, findHighEntropyRuns } from './entropy.js';
+import { ENTROPY_RULE_ID, findHighEntropyRuns } from './entropy.js';
 import type { SecretRule } from './rules.js';
 import { SECRET_RULES } from './rules.js';
 
@@ -163,5 +163,3 @@ function resolveOverlaps(candidates: readonly (SecretMatch & { order: number })[
 
   return accepted.sort((a, b) => a.start - b.start);
 }
-
-export { BASE64_MIN_RUN, ENTROPY_RULE_ID };
