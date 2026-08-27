@@ -1,0 +1,10 @@
+{
+  "feature": "docs/vibe-coding/27.08.2026-e0-contracts",
+  "branch": "v2/e0-contracts",
+  "baseSha": "c65f71eafc0a230cb4227e8ec6f49eea21b3b6c6",
+  "mode": "attended",
+  "track": "full",
+  "agentConsent": true,
+  "createdAt": "2026-08-27T11:42:18.661Z",
+  "killReviewDue": "2026-10-26"
+}
