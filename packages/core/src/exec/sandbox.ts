@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import type { NormalizedDefaults, RecipeName, SandboxMode, SandboxViolation } from '@mcpproxy/contracts';
+import type { EventSink } from './events.js';
 
 /**
  * Публичная поверхность E3. Ни один тип из `@anthropic-ai/sandbox-runtime` здесь не
@@ -83,6 +84,16 @@ export interface ExecOutcome {
   /** Сколько нарушений вытеснило кольцо стора srt. Ненуль означает, что набор неполон (R45). */
   readonly violationsLost: number;
   /**
+   * Сколько нарушений приехало с чужим или отсутствующим ключом атрибуции (R45).
+   *
+   * Поле, а не строчка в логе, потому что «докладывается громко» обязано быть проверяемо:
+   * ключ ненадёжен с обеих сторон — имя пользователя прокси вшито в env ребёнка, то есть
+   * им управляет ребёнок, — и нарушение по расхождению **не отбрасывается**, иначе процесс,
+   * переписавший имя, выкинул бы свои отказы из нашей корзины, и S5 показал бы ноль при
+   * работающей защите.
+   */
+  readonly attributionMismatches: number;
+  /**
    * Хэш JCS применённой политики, **включая доменные списки** (R47). Материал для сверки
    * согласия в E5. Узко намеренно: он доказывает тождество нашего входа, а не итоговой
    * политики — srt при обёртке доливает `getDefaultWritePaths()`, mandatory-deny и пути
@@ -97,7 +108,16 @@ export interface Sandbox {
    * `onViolation` зовётся **по мере возникновения**, пока процесс ещё жив (R29): красная
    * строка S5 появляется в таймлайне до выхода, а не пакетом после него.
    */
-  run(request: ExecRequest, onViolation: (violation: SandboxViolation) => void): Promise<ExecOutcome>;
+  run(
+    request: ExecRequest,
+    onViolation: (violation: SandboxViolation) => void,
+    /**
+     * Сток событий четырёх стадий E3 (R32). Третьим параметром, а не полем запроса: событие
+     * пишется и на вызове, остановленном отказом, то есть до того, как `run()` вернёт
+     * что-либо вообще.
+     */
+    onEvent?: EventSink,
+  ): Promise<ExecOutcome>;
   /** Считает ссылки; после последнего вызова любой `run()` бросает (R50). */
   dispose(): Promise<void>;
 }
