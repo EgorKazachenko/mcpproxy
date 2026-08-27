@@ -14,26 +14,29 @@
 |---|---|---|
 | `.` | Типы (`Manifest`, `Recipe`, `AuditEvent`, `Diagnostic`), доменные юнионы, `deriveRiskTier`, `sanitizeDescription`, `toOtlp`, `canonicalizeJcs` | нет |
 | `./validate` | `parseManifest` | `ajv`, `yaml`, `re2` |
-| `./audit` | `chainHash`, `verifyChain` | `node:crypto` |
+| `./audit` | `chainHash`, `verifyChain`, `recipeHash`, `manifestHash`, `argsHash` | `node:crypto` |
 
 Корневой вход обязан остаться без зависимостей, но **не** по той причине, которая
 напрашивается. Проверено: собранный design (dist/semantic.js) не содержит ни одного
 `import` — там только `import type`, который стирает `verbatimModuleSyntax`. Утечки на
 уровне импорта нет.
 
-Настоящая цена — установочная. пакет desktop зависит от `contracts`
-напрямую, поэтому зависимость корневого входа становится транзитивной зависимостью
-Electron-приложения: `re2` — нативный аддон, который придётся собирать каждому
-разработчику и каждому раннеру CI и пересобирать под ABI Electron, причём на платформах,
-где он не проверялся (Ф2 честно ограничена macOS arm64). Отсюда правило: `.` без
-зависимостей, `./validate` тянет только демон, а Task 4 добавляет исполняемую проверку
-этого, а не обещание.
+И **не** установочная — эта мотивировка тоже формулировалась неверно. У пакетных менеджеров
+нет скоупинга зависимостей по entry point: `ajv`, `yaml` и `re2` попадают в
+`packages/contracts/package.json` (Task 4), а пакет desktop зависит от `contracts` напрямую,
+значит `re2` соберётся у каждого разработчика и на каждом раннере CI независимо от того,
+какой вход его импортирует. Этот остаточный расход записывается в
+`docs/10-honest-limitations.md` (Task 12), а не выдаётся за устранённый.
+
+Настоящая выгода раскола — **граф импортов и чистота `.d.ts`**: корневой вход не тянет
+валидатор в рантайме, а его декларации не ссылаются на чужие типы (R3, Ф6). Именно это и
+проверяет `deps.test.ts` — то есть заявление исполняемое, а не обещание.
 
 Типы живут в `.` целиком — включая `Manifest`, `Recipe`, `Diagnostic`,
 `ParseManifestResult`, `ManifestSource`. `./validate` экспортирует только *функцию*
 `parseManifest`. Иначе рендерер, которому надо показать диагностику с координатами
-(R4), обязан импортировать `./validate` и притащить нативный аддон — то есть раскол
-не выполнит ровно ту работу, ради которой существует.
+(R4), обязан импортировать `./validate` — то есть раскол не выполнит ровно ту работу, ради
+которой существует.
 
 ## Tech Stack
 
@@ -308,7 +311,7 @@ names are not valid to use as keys for JSON objects.» И: приёмники «
 fields with unknown names», то есть `trace_id` не даёт ошибки — он молча теряется.
 Отсюда R14: тест на отсутствие snake_case обязателен, иначе дефект ненаблюдаем.
 
-**Ф9. Имена атрибутов OTel — откуда они взяты.** Task 6 эмитит `gen_ai.tool.name`,
+**Ф9. Имена атрибутов OTel — откуда они взяты.** Task 7 эмитит `gen_ai.tool.name`,
 `jsonrpc.request.id`, `network.transport` и не эмитит `mcp.tool.name`,
 `mcp.request.id`, `mcp.transport`. Основание — не npm-пакет, а репозиторий конвенций:
 `model/mcp/registry.yaml` проверен на каждом теге и отсутствует до v1.39.0, присутствует
@@ -549,9 +552,11 @@ JSON Schema не выражает эти правила, поэтому они �
 6. рецептный `sandbox.*.deny`, если ключ присутствует, обязан быть **непустым** массивом.
 
 Правило 6 чисто синтаксическое и от таблицы слияния Task 9 ничего не требует, поэтому стоит
-здесь, а не там. Оно закрывает единственную синтаксическую форму, которой рецепт мог бы
-стереть `~/.ssh`, `~/.aws` и `~/.config/gh` из эффективного профиля при объединяющем слиянии
-(атака A10).
+здесь, а не там. Оно закрывает единственную синтаксическую форму, которой рецепт **выражает намерение** снять
+запрет. При объединяющем слиянии `deny: []` не стирает ничего (Task 9 говорит это прямо), но
+при слиянии заменой — стёрло бы `~/.ssh`, `~/.aws` и `~/.config/gh` (атака A10). Правило
+делает намерение ошибкой загрузки, а не тихим no-op, и страхует от реализации слияния через
+замену.
 
 `branch-checks.ts` — экспортируемый `Record<BranchName, CheckId[]>`, где ветка без проверок
 помечена явно. Это и есть R6.
@@ -585,7 +590,7 @@ JSON Schema не выражает эти правила, поэтому они �
 заморожен ссылкой в никуда.
 
 ```
-operation, toolName, traceId, spanId, parentSpanId, startTime, endTime, durationUs
+operation, toolName, sessionId, traceId, spanId, parentSpanId, startTime, endTime, durationUs
 stage, verdict, denyReason
 recipe: { name, hash }
 argv, cwd
@@ -598,6 +603,10 @@ output:   { bytes, truncated }
 redactions[]
 duration: { overheadMs }        // только на complete
 ```
+
+Брендированные `RecipeName`/`SessionId` объявляются на границе IPC (Task 10); событие держит
+обычные `string` — брендированное значение присваивается к `string` без приведения, поэтому
+ничего не ломается, но выбор фиксируется здесь, а не оставляется реализатору.
 
 **Обязательное ядро** — то, что существует на любой стадии, включая `received`:
 `operation`, `toolName`, `traceId`, `spanId`, `parentSpanId`, `startTime`, `endTime`,
@@ -651,12 +660,19 @@ overheadMs = round(Σ durationUs по стадиям ∉ {spawn, violation, appr
   этот момент ещё не известен. Формула, включающая его, невычислима.
 
 `toOtlp` — `traceId`/`spanId` hex, числовой `kind`, `startTimeUnixNano`/`endTimeUnixNano`
-десятичными строками, атрибуты под именами из **Ф9**: `gen_ai.tool.name`,
-`jsonrpc.request.id`, `network.transport`, и `mcp.*` половина, которой требует R13, —
+десятичными строками, и атрибуты под именами из **Ф9**: `gen_ai.tool.name`,
+`network.transport` — **константа `"pipe"`**, потому что MCP-сессия это stdio между клиентом
+и шимом, а сокет шим↔демон внутренний и MCP-транспортом не является, — и `mcp.*` половина,
+которой требует R13, —
 `mcp.session.id` (из `sessionId`), `mcp.method.name` (константа `"tools/call"`),
 `mcp.protocol.version` (константа D1, экспортируется как `MCP_PROTOCOL_VERSION`).
 `mcp.resource.uri` не эмитится: у нас нет ресурсов. Несуществующих `mcp.tool.name`,
 `mcp.request.id`, `mcp.transport` нет и не будет.
+
+`jsonrpc.request.id` **не эмитится**, и это записано, а не забыто: id живёт в E4 между
+клиентом и шимом, через `IpcRequest` не едет (И5 — демон принимает только `{recipeName,
+params, sessionId}`), и добавлять его в замороженное событие ради одного атрибута неверно.
+Корреляция идёт по `traceId`.
 
 **Falsification:** утверждение — `expect(Object.keys(flatten(toOtlp(e))).filter(k => k.includes('_'))).toEqual([])`.
 Вернуть ключ `trace_id` вместо `traceId` → находится snake_case, тест падает. Проверяется
@@ -926,8 +942,10 @@ argsHash = sha256(utf8(canonicalizeJcs({ recipeName, params })))
 `requestId` сообщение из рендерера может одобрить не тот ожидающий вызов, который человеку
 показали, а без `sessionId` подтверждение со скоупом `until` или `recipe_and_args` ключуется
 только по `(recipeName, argsHash, expiresAt)` и оказывается неявно действительным во всех
-сессиях, включая ту, которую человеку никогда не показывали. Скоупы сессионные; сузить это
-после заморозки E5 уже не сможет. Это И8 и самая
+сессиях, включая ту, которую человеку никогда не показывали. E0 делает сессионную атрибуцию
+**выразимой**; ключевание — дело E5, но без поля оно не смогло бы сузить скоуп после заморозки.
+`approval.sessionId` в событии равен `sessionId` события и повторяется, чтобы запись вердикта
+была самодостаточной, — это утверждается тестом в `approval.test.ts`. Это И8 и самая
 дорогая граница доверия в продукте, и оставлять её на E7 после заморозки нельзя.
 
 `toTool(name: RecipeName, recipe: Recipe): Tool` — проекция ревизии `2025-11-25` с
@@ -997,7 +1015,9 @@ bidi-override в значении `enum` обязан быть отвергну�
 
 Снять `TODO(E0)` (`packages/contracts/src/index.ts:6`). Заморозка получает исполняемую
 проверку: снапшот публичной поверхности `.d.ts` всех трёх входов, падающий при любом
-изменении, плюс записанное правило, когда двигается `CONTRACTS_VERSION`. Иначе R23 — это
+изменении. Факт заморозки и правило бампа `CONTRACTS_VERSION` (двигается только при
+несовместимом изменении публичной поверхности, вместе с обновлением снапшота и явным
+решением владельца) записываются в `docs/07-contracts.md` — файл уже в списке. Иначе R23 — это
 удалённый комментарий и фраза в доке.
 
 Правки доков: направление переезда OTel по **Ф9**; несуществующие `mcp.tool.name`,
@@ -1018,7 +1038,7 @@ bidi-override в значении `enum` обязан быть отвергну�
 | `docs/07-contracts.md:112,143,164` | хэши с префиксом `sha256:` | префикс — приём отображения; поле несёт 64 hex-символа |
 | `docs/07-contracts.md:198`, `docs/02-architecture.md:75` | `{"recipe": "run_tests"}` | `recipeName` |
 | `docs/02-architecture.md:168` | семиполевая формула `entry_hash` | замороженная формула Task 8 |
-| ADR-0005:33 | «на 10 минут» (TTL) | абсолютный `expiresAt` |
+| ADR-0005:33 | «на 10 минут» (TTL), «всегда» | абсолютный `expiresAt`; + скоуп действует внутри сессии |
 | ADR-0006:22 | нормализованное представление | + `own`/`effective` и порядок параметров |
 | `docs/07-contracts.md:100` | таблица тиров без приоритета `readOnlyHint` | строка 3 §7: `readOnlyHint: true` перебивает `destructiveHint` |
 | `docs/07-contracts.md:105` | «fail-safe by construction» | граница R11: молчание повышает тир, явный хинт понижает |
@@ -1049,7 +1069,7 @@ bidi-override в значении `enum` обязан быть отвергну�
 | R2 | Task 3: «Ветки: `StringParam` (требует `pattern`)… `PathParam` (требует `root`)» |
 | R3 | Task 3: `scripts/gen-types.mjs` + `src/manifest.generated.ts`, коммитится; Ф6 обосновывает маршрут |
 | R4 | Task 4: «`parseManifest(yamlText: string, source: ManifestSource): ParseManifestResult`» |
-| R5 | Task 6: пять пронумерованных правил, по кейсу на каждое |
+| R5 | Task 6: правила 1–5 из шести пронумерованных, по кейсу на каждое |
 | R6 | Task 6: «`branch-checks.ts` — экспортируемый `Record<BranchName, CheckId[]>`» + сверка множеств |
 | R7 | Task 5: «Компиляция каждого `pattern` через `re2` на загрузке» |
 | R8 | Task 4: «Три меры сверх дефолтов… документ с директивой `%YAML` отвергается целиком» |
@@ -1072,7 +1092,7 @@ bidi-override в значении `enum` обязан быть отвергну�
 | R25 | Task 12: «ReDoS в честных границах вместе с тем, что закрыто на загрузке, а что — матчером» |
 | R26 | Task 10: «`ApprovalScope = 'once' \| 'until' \| 'recipe_and_args'`… `ApprovalRequest`/`ApprovalVerdict` с непрозрачным `requestId`» |
 | R27 | Task 9: «`normalizeManifest(manifest)` и `manifestHash`» + `diffLock` с `added`/`removed`/`changed` |
-| R28 | Task 9: «`LockEntry = {hash, approvedAt, snapshot: NormalizedRecipe}` — снапшот обязателен» |
+| R28 | Task 9: «`LockEntry = {recipeHash, approvedAt, snapshot: NormalizedRecipe}` — снапшот обязателен» |
 | R29 | Task 4: «`matchers: ReadonlyMap<string, PatternMatcher>`» + Task 5 |
 | R30 | Task 7: «`durationUs: number`, монотонная длительность стадии» |
 | R31 | Task 12: «снапшот публичной поверхности `.d.ts` всех трёх входов» + `version: {const: 1}` в Task 3 |
