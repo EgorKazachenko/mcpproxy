@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import type { ManifestSource } from '../types.js';
-import { branchChecks } from './branch-checks.js';
+import { branchChecks, CHECK_IDS } from './branch-checks.js';
 import { parseManifest } from './index.js';
 
 // Путь намеренно глубокий: из `/proj` выражение `../..` резолвится в корень файловой системы,
@@ -477,6 +477,14 @@ describe('таблица «ветка ↔ проверка» (R6)', () => {
     // перестановке, и первый же пострадавший «починил» бы гейт через .sort(), заодно
     // молча превратив его в не-проверку.
     expect(new Set(Object.keys(branchChecks))).toEqual(new Set(Object.keys(schema.$defs)));
+  });
+
+  it('каждая объявленная проверка где-то применена', () => {
+    // Вторая половина переписи. Пока сверялись только имена веток, объявленная проверка
+    // могла не стоять нигде: удаление `duration-executable` из строки `Duration` не роняло
+    // ни одного теста, хотя таблица — единственная исполняемая перепись причин отказа.
+    const used = new Set(Object.values(branchChecks).flat());
+    expect([...CHECK_IDS].filter((one) => !used.has(one))).toEqual([]);
   });
 
   it('называет разницу в обе стороны, когда она есть', () => {

@@ -65,6 +65,44 @@ const at = (pointer: string, message: string): Diagnostic =>
     message: sanitizeDescription(message).text,
   });
 
+const isStringArray = (value: unknown): value is string[] =>
+  Array.isArray(value) && value.every((one) => typeof one === 'string');
+
+const isAccess = (value: unknown): boolean =>
+  isRecord(value) && isStringArray(value.allow) && isStringArray(value.deny);
+
+/**
+ * `NormalizedDefaults` — не «какой-нибудь объект».
+ *
+ * Проверка формы, а не только `isRecord`, потому что иначе бросок не исчезал, а **переезжал**:
+ * `parseLockFile` кастовал `defaults` и `snapshot.effective` в типизированные формы, проверив
+ * лишь что это объекты, — и `{}` доезжал до рендерера апрува S7 через `LockDiff.was` как
+ * `NormalizedDefaults`, которым он не является. Парсер обязан проверять ту форму, которую
+ * обещает возвращаемым типом; иначе он просто передвигает падение дальше по пути решения.
+ */
+function isNormalizedDefaults(value: unknown): boolean {
+  if (!isRecord(value)) return false;
+  if (typeof value.timeoutMs !== 'number' || !Number.isFinite(value.timeoutMs)) return false;
+  const output = value.output;
+  if (!isRecord(output)) return false;
+  if (typeof output.redact !== 'boolean') return false;
+  if (output.maxBytes !== null && typeof output.maxBytes !== 'number') return false;
+  if (!isRecord(value.env) || !isStringArray(value.env.allow)) return false;
+  const sandbox = value.sandbox;
+  if (!isRecord(sandbox)) return false;
+  return ['read', 'write', 'network'].every((node) => isAccess(sandbox[node]));
+}
+
+/** `NormalizedOwn` — то, из чего строится сторона «было» и считается `recipeHash`. */
+function isNormalizedOwn(value: unknown): boolean {
+  if (!isRecord(value)) return false;
+  if (typeof value.description !== 'string' || !isStringArray(value.exec)) return false;
+  if (value.cwd !== null && typeof value.cwd !== 'string') return false;
+  if (!Array.isArray(value.params)) return false;
+  if (!isRecord(value.annotations)) return false;
+  return Object.values(value.annotations).every((one) => typeof one === 'boolean');
+}
+
 /**
  * Значение переживёт `canonicalizeJcs` — то есть `diffLock` на нём не бросит.
  * Возвращает причину отказа, а не булев: она едет в диагностику.
@@ -99,14 +137,14 @@ function checkEntry(name: string, value: unknown, report: (pointer: string, mess
     report(`${pointer}.snapshot`, 'снапшот обязателен: без него сторону «было» для диффа строить не из чего');
     return;
   }
-  if (!isRecord(value.snapshot.own)) {
-    report(`${pointer}.snapshot.own`, 'снапшот обязан нести собственный блок рецепта');
+  if (!isNormalizedOwn(value.snapshot.own)) {
+    report(`${pointer}.snapshot.own`, 'снапшот обязан нести собственный блок рецепта в нормализованной форме');
   } else {
     const reason = canonicalizable(value.snapshot.own);
     if (reason !== null) report(`${pointer}.snapshot.own`, `собственный блок не канонизируется: ${reason}`);
   }
-  if (!isRecord(value.snapshot.effective)) {
-    report(`${pointer}.snapshot.effective`, 'снапшот обязан нести эффективный профиль');
+  if (!isNormalizedDefaults(value.snapshot.effective)) {
+    report(`${pointer}.snapshot.effective`, 'снапшот обязан нести эффективный профиль в нормализованной форме');
   }
 }
 
@@ -131,8 +169,8 @@ export function parseLockFile(text: string): ParseLockResult {
   if (typeof data.manifestHash !== 'string' || !HEX64.test(data.manifestHash)) {
     report('manifestHash', 'manifestHash обязан быть 64 строчными hex без префикса');
   }
-  if (!isRecord(data.defaults)) {
-    report('defaults', 'слот defaults обязателен: из snapshot.effective его не восстановить');
+  if (!isNormalizedDefaults(data.defaults)) {
+    report('defaults', 'слот defaults обязателен и обязан быть в нормализованной форме');
   } else {
     // `sameDefaults` зовётся на КАЖДОМ `diffLock` безусловно, поэтому эта ветка опаснее
     // ветки `own`: там канонизация случается только для имён, присутствующих в манифесте.

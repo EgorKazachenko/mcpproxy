@@ -117,6 +117,35 @@ describe('parseLockFile', () => {
     expect(result.diagnostics.map((one) => one.pointer).join('')).not.toContain(ESC);
   });
 
+  it('форма defaults и effective проверяется, а не кастуется', () => {
+    // Иначе бросок не исчезал, а переезжал: `{}` проходил `isRecord`, кастовался в
+    // `NormalizedDefaults` и доезжал до рендерера апрува S7 через `LockDiff.was`.
+    const cases: Array<[string, unknown, string]> = [
+      ['defaults пустой', { ...CURRENT, defaults: {} }, 'defaults'],
+      [
+        'defaults без sandbox.network',
+        { ...CURRENT, defaults: { ...CURRENT.defaults, sandbox: { read: { allow: [], deny: [] }, write: { allow: [], deny: [] } } } },
+        'defaults',
+      ],
+      [
+        'effective пустой',
+        { ...CURRENT, tools: { publish_release: { ...CURRENT.tools.publish_release, snapshot: { own: normalized.own, effective: {} } } } },
+        'tools.publish_release.snapshot.effective',
+      ],
+      [
+        'own без exec',
+        { ...CURRENT, tools: { publish_release: { ...CURRENT.tools.publish_release, snapshot: { own: { description: 'x' }, effective: normalized.effective } } } },
+        'tools.publish_release.snapshot.own',
+      ],
+    ];
+    for (const [label, lock, pointer] of cases) {
+      const result = parseLockFile(JSON.stringify(lock));
+      expect(result.ok, label).toBe(false);
+      if (result.ok) continue;
+      expect(result.diagnostics.map((one) => one.pointer), label).toContain(pointer);
+    }
+  });
+
   it('отвергает дайджест не той формы', () => {
     const broken = { ...CURRENT, manifestHash: 'sha256:' + 'a'.repeat(64) };
     const result = parseLockFile(JSON.stringify(broken));
