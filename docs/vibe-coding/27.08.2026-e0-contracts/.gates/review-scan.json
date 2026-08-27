@@ -1,12 +1,11 @@
 {
   "gate": "review-scan",
-  "status": "pass",
-  "exit_code": 0,
-  "codeTree": "b22e0e3403f5617eeecf45230738961c4d616da5",
+  "status": "waived",
+  "waived_by": "agent-recorded",
+  "reason": "Решение владельца после пяти кругов. Дименсия читала дерево трижды: b22e0e34 (2 Major, 7 Minor, 5 Nit), 0e6741ba (1 Major — санитизация Diagnostic.message работала у одного производителя из пяти), 6d05cf1d (2 находки на пороге: голый durationToMs вне catch и доккомментарий лоссового pointer). Всё закрыто. Не читала de72b28 и dc5940a.",
+  "codeTree": "2223236b1f84354a277b665a36ff5333670f3df1",
   "codeDirty": false,
-  "headSha": "def7d010ff21e2535e414486f5cd3ec6f8f7a166",
-  "startedAt": "2026-08-27T18:10:53.789Z",
-  "command": "node .claude/skills/vibe-code-developing-v2/scripts/review-verify.mjs --kind scan --feature docs/vibe-coding/27.08.2026-e0-contracts",
-  "evidencePath": null,
+  "headSha": "dc5940ae1ec34167b1717294e5a9096b435de374",
+  "startedAt": "2026-08-27T20:25:52.408Z",
   "artifacts": []
 }

@@ -1,12 +1,11 @@
 {
   "gate": "review-tests",
-  "status": "pass",
-  "exit_code": 0,
-  "codeTree": "b22e0e3403f5617eeecf45230738961c4d616da5",
+  "status": "waived",
+  "waived_by": "agent-recorded",
+  "reason": "Решение владельца. Дименсия читала дерево трижды, последний раз b2a14a71 — вердикт TQ-SOLID: 0 Major, 5 Minor на пороге 50, вакуумных кейсов нет, 236/236 стабильны при перемешивании, три сдвига замороженных артефактов признаны умышленными. Она же проаудитировала все двенадцать строк мутационной таблицы хендовера — ложных нет. Не читала dc5940a (валидаторы формы и перепись R6, плюс два теста).",
+  "codeTree": "2223236b1f84354a277b665a36ff5333670f3df1",
   "codeDirty": false,
-  "headSha": "def7d010ff21e2535e414486f5cd3ec6f8f7a166",
-  "startedAt": "2026-08-27T18:11:00.104Z",
-  "command": "node .claude/skills/vibe-code-developing-v2/scripts/review-verify.mjs --kind test-quality --feature docs/vibe-coding/27.08.2026-e0-contracts",
-  "evidencePath": null,
+  "headSha": "dc5940ae1ec34167b1717294e5a9096b435de374",
+  "startedAt": "2026-08-27T20:26:06.830Z",
   "artifacts": []
 }
