@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { alnum } from '../redact/secret-samples.js';
 import { MINIMAL_PATH, buildEnv } from './build.js';
 
 /**
@@ -11,12 +12,12 @@ describe('buildEnv', () => {
     const { env } = buildEnv(['HOME', 'LANG'], {
       HOME: '/Users/dev',
       LANG: 'ru_RU.UTF-8',
-      AWS_SECRET_ACCESS_KEY: 'wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY',
-      GITHUB_TOKEN: 'ghp_0123456789abcdefghijklmnopqrstuvwxyzAB',
+      AWS_SECRET_ACCESS_KEY: alnum(40),
+      GITHUB_TOKEN: `ghp_${alnum(36)}`,
     });
 
     expect(Object.keys(env).sort()).toEqual(['HOME', 'LANG', 'PATH']);
-    expect(JSON.stringify(env)).not.toContain('wJalrXUtnFEMI');
+    expect(JSON.stringify(env)).not.toContain(alnum(40));
     expect(JSON.stringify(env)).not.toContain('ghp_');
   });
 

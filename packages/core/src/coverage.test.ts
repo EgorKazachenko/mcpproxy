@@ -24,6 +24,10 @@ const packageRoot = resolve(srcRoot, '..');
 const WITHOUT_TEST = new Map<string, string>([
   ['index.ts', 'баррель корневого входа: его содержимое утверждают снапшот поверхности и deps.test.ts'],
   ['audit/index.ts', 'баррель входа ./audit: то же самое, плюс отдельная проверка отсутствия re2'],
+  [
+    'redact/secret-samples.ts',
+    'сборщик тестовых фикстур: сломанный сборщик красит тесты «правило ловит свою форму», по одному на каждое правило набора',
+  ],
 ]);
 
 function walk(dir: string): string[] {

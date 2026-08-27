@@ -2,10 +2,12 @@ import { describe, expect, it } from 'vitest';
 import { ENTROPY_RULE_ID } from './entropy.js';
 import { RuleCompilationError, createRedactor, placeholder } from './engine.js';
 import type { SecretRule } from './rules.js';
+import { alnum, distinct, upper } from './secret-samples.js';
 
-/** Синтетические значения: форма настоящая, содержимое выдумано. */
-const PAT = 'ghp_016ABCdefGHIjklMNOpqrSTUvwxYZ0123456';
-const TOKEN = 'kR7pQz2XvN4mB8sT1wY6uH0jL5gC3fD9eA+oI/xZbn';
+/** Собираются на прогоне — строки формы креденшла на диске нет. См. `secret-samples.ts`. */
+const PAT = `ghp_${alnum(36)}`;
+/** 42 различных символа: энтропия ровно log2(42) = 5.39, выше порога 4.5. */
+const TOKEN = distinct(42);
 
 const rule = (id: string, pattern: string): SecretRule => ({
   id,
@@ -56,7 +58,7 @@ describe('редакция', () => {
   });
 
   it('несколько разных правил в одном тексте — по записи на правило', () => {
-    const { counts } = redactor.redact(`token=${PAT} key=AKIAIOSFODNN7EXAMPLE`, OUT);
+    const { counts } = redactor.redact(`token=${PAT} key=AKIA${upper(16)}`, OUT);
     expect([...counts.entries()].sort()).toEqual([
       ['aws-access-key-id', 1],
       ['github-pat', 1],
@@ -101,12 +103,12 @@ describe('R13: разрешение пересечений', () => {
     // Регрессия на находку ревью, воспроизведённую запуском. Прежняя реализация выбрасывала
     // пересёкшегося кандидата ЦЕЛИКОМ: JWT длиннее и побеждал, высокоэнтропийный блоб рядом
     // отбрасывался, и 42 символа секрета уезжали вызывающему — без следа в отчёте.
-    const jwt = 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dBjftJeZ4CVPmB92K27uhbUJU1p1r_wW1g';
-    const blob = 'kR7pQz2XvN4mB8sT1wY6uH0jL5gC3fD9eA0oI1xZbn';
+    const jwt = `eyJ${alnum(16)}.eyJ${alnum(16)}.${alnum(30)}`;
+    const blob = distinct(42);
     const { text, counts } = createRedactor().redact(blob + jwt, OUT);
 
     expect(text).not.toContain(blob.slice(0, 20));
-    expect(text).not.toContain('eyJhbGci');
+    expect(text).not.toContain(jwt.slice(0, 12));
     // Оба детектора сработали, и оба обязаны быть в отчёте: блоб торчит за границы JWT.
     expect(counts.get(ENTROPY_RULE_ID)).toBe(1);
     expect(counts.get('jwt')).toBe(1);

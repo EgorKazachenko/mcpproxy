@@ -1,12 +1,16 @@
 import RE2 from 're2';
 import { describe, expect, it } from 'vitest';
 import { SECRET_RULES } from './rules.js';
+import { alnum, basicAuthUrl, dbUri, digits, hex, pemHeader, upper } from './secret-samples.js';
 
 /**
  * R5 и R6 — исполняемые, а не декларативные.
  *
- * Секреты в фикстурах ниже синтетические: форма настоящая, значение выдумано. Настоящий
- * ключ в тестовом файле — это тот же A12 через git-историю.
+ * Секреты в фикстурах ниже синтетические и **собираются из частей на прогоне**: строки формы
+ * креденшла не существует на диске. Причина не в аккуратности — сканеры секретов поднимают
+ * такие литералы (GitGuardian на этом PR нашёл восемь), а красная проверка на каждом пуше
+ * становится шумом, за которым настоящая утечка проедет незамеченной. Подробности — в
+ * `secret-samples.ts`.
  */
 
 describe('набор правил', () => {
@@ -60,29 +64,29 @@ describe('набор правил', () => {
  */
 describe('правила ловят свою форму', () => {
   const cases: ReadonlyArray<readonly [string, string]> = [
-    ['private-key-pem', '-----BEGIN OPENSSH PRIVATE KEY-----'],
-    ['aws-access-key-id', 'AKIAIOSFODNN7EXAMPLE'],
-    ['aws-secret-access-key', 'aws_secret_access_key = wJalrXUtnFEMIfK7MDENGfbPxRfiCYEXAMPLEKEYx'],
-    ['github-pat', 'ghp_016ABCdefGHIjklMNOpqrSTUvwxYZ0123456'],
-    ['github-oauth-token', 'gho_016ABCdefGHIjklMNOpqrSTUvwxYZ0123456'],
-    ['github-app-token', 'ghs_016ABCdefGHIjklMNOpqrSTUvwxYZ0123456'],
-    ['github-refresh-token', 'ghr_016ABCdefGHIjklMNOpqrSTUvwxYZ0123456'],
-    ['github-fine-grained-pat', `github_pat_${'A1b2C3d4E5'.repeat(8)}ab`],
-    ['gitlab-pat', 'glpat-ABCdefGHIjklMNOpqrST'],
-    ['slack-bot-token', 'xoxb-1234567890123-1234567890123-AbCdEfGhIjKlMnOpQrStUvWx'],
-    ['slack-webhook-url', `https://hooks.slack.com/services/${'A1b2C3d4E5'.repeat(4)}`],
-    ['stripe-secret-key', 'sk_live_ABCdefGHIjklMNOpqrSTUvwx'],
-    ['anthropic-api-key', `sk-ant-api03-${'A1b2C3d4E5'.repeat(9)}AA`],
-    ['openai-api-key-classic', `sk-${'A1b2C3d4E5'.repeat(2)}T3BlbkFJ${'F6g7H8i9J0'.repeat(2)}`],
-    ['openai-project-key', `sk-proj-${'A1b2C3d4E5'.repeat(5)}`],
-    ['google-api-key', 'AIzaSyA1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q'],
-    ['npm-access-token', 'npm_016ABCdefGHIjklMNOpqrSTUvwxYZ0123456'],
-    ['pypi-upload-token', `pypi-AgEIcHlwaS5vcmc${'A1b2C3d4E5'.repeat(6)}`],
-    ['sendgrid-api-key', `SG.${'A1b2C3d4E5'.repeat(2)}ab.${'A1b2C3d4E5'.repeat(4)}abc`],
-    ['twilio-api-key', 'SK0123456789abcdef0123456789abcdef'],
-    ['jwt', 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dBjftJeZ4CVPmB92K27uhbUJU1p1r_wW1g'],
-    ['db-connection-uri', 'postgresql://svc:hunter2secret@db.internal:5432/app'],
-    ['basic-auth-url', 'https://deploy:hunter2secret@registry.internal/'],
+    ['private-key-pem', pemHeader('OPENSSH')],
+    ['aws-access-key-id', `AKIA${upper(16)}`],
+    ['aws-secret-access-key', `aws_secret_access_key = ${alnum(40)}`],
+    ['github-pat', `ghp_${alnum(36)}`],
+    ['github-oauth-token', `gho_${alnum(36)}`],
+    ['github-app-token', `ghs_${alnum(36)}`],
+    ['github-refresh-token', `ghr_${alnum(36)}`],
+    ['github-fine-grained-pat', `github_pat_${alnum(82)}`],
+    ['gitlab-pat', `glpat-${alnum(20)}`],
+    ['slack-bot-token', `xoxb-${digits(13)}-${digits(13)}-${alnum(24)}`],
+    ['slack-webhook-url', `https://hooks.slack.com/services/${alnum(40)}`],
+    ['stripe-secret-key', `sk_live_${alnum(24)}`],
+    ['anthropic-api-key', `sk-ant-api03-${alnum(90)}`],
+    ['openai-api-key-classic', `sk-${alnum(20)}T3BlbkFJ${alnum(20)}`],
+    ['openai-project-key', `sk-proj-${alnum(50)}`],
+    ['google-api-key', `AIza${alnum(35)}`],
+    ['npm-access-token', `npm_${alnum(36)}`],
+    ['pypi-upload-token', `pypi-AgEIcHlwaS5vcmc${alnum(50)}`],
+    ['sendgrid-api-key', `SG.${alnum(22)}.${alnum(43)}`],
+    ['twilio-api-key', `SK${hex(32)}`],
+    ['jwt', `eyJ${alnum(12)}.eyJ${alnum(12)}.${alnum(24)}`],
+    ['db-connection-uri', dbUri()],
+    ['basic-auth-url', basicAuthUrl()],
   ];
 
   it('покрыты все правила набора — иначе новое правило приезжает непроверенным', () => {
@@ -109,7 +113,7 @@ describe('правила не ловят обычный вывод', () => {
     'risk-management-and-compliance-framework-v2',
     'disk-space-monitor-daemon-restart-policy',
     // Идентификаторы принципалов IAM — не креденшлы, и `aws iam` печатает их штатно.
-    'arn:aws:iam::123456789012:user/deploy AIDAIOSFODNN7EXAMPLE AROAJQABLZS4A3QDU576Q',
+    `arn:aws:iam::123456789012:user/deploy AIDA${upper(16)} AROA${upper(16)}`,
     'node_modules/.cache/vite/deps',
     'Resolved 412 packages in 1.2s',
     'commit e40b7defb42add5ade60cc85192e63ad42aa7b4a',

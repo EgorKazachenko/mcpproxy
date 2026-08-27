@@ -1,14 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import { createRedactor, placeholder } from './engine.js';
 import { redactInbound, redactOutput } from './output.js';
+import { alnum, distinct, upper } from './secret-samples.js';
 
 const redactor = createRedactor();
 
-/** Синтетический токен формы GitHub PAT. 40 символов. */
-const PAT = 'ghp_016ABCdefGHIjklMNOpqrSTUvwxYZ0123456';
+/** Собирается на прогоне — строки формы креденшла на диске нет. См. `secret-samples.ts`. */
+const PAT = `ghp_${alnum(36)}`;
 /** Начало секрета — то, что не имеет права уцелеть ни при какой обрезке. */
 const PAT_HEAD = PAT.slice(0, 12);
-const TOKEN = 'kR7pQz2XvN4mB8sT1wY6uH0jL5gC3fD9eA+oI/xZbn';
+const TOKEN = distinct(42);
 
 const NO_LIMIT = { maxBytes: null, redact: true } as const;
 const empty = { stdout: '', stderr: '' } as const;
@@ -133,7 +134,7 @@ describe('redactOutput', () => {
   it('отчёт детерминирован: поток по порядку юниона, внутри — правило по имени', () => {
     const result = redactOutput(
       redactor,
-      { stdout: `${TOKEN} AKIAIOSFODNN7EXAMPLE`, stderr: PAT },
+      { stdout: `${TOKEN} AKIA${upper(16)}`, stderr: PAT },
       NO_LIMIT,
     );
     expect(result.redactions.map((one) => `${one.stream}:${one.rule}`)).toEqual([
@@ -183,7 +184,7 @@ describe('redactInbound', () => {
   });
 
   it('R7: выключенная энтропия НЕ отменяет именованные правила на входе', () => {
-    const { redactions } = redactInbound(redactor, { argv: [`--k=AKIAIOSFODNN7EXAMPLE`], env: {} });
+    const { redactions } = redactInbound(redactor, { argv: [`--k=AKIA${upper(16)}`], env: {} });
     expect(redactions).toEqual([{ rule: 'aws-access-key-id', count: 1, stream: 'argv' }]);
   });
 

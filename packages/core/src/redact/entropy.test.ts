@@ -6,17 +6,17 @@ import {
   findHighEntropyRuns,
   shannonEntropy,
 } from './entropy.js';
+import { distinct, hex } from './secret-samples.js';
 
-/** Синтетический токен: форма настоящая, значение выдумано. Энтропия 5.39 — замерена. */
-const TOKEN = 'kR7pQz2XvN4mB8sT1wY6uH0jL5gC3fD9eA+oI/xZbn';
+/** 42 различных символа: энтропия ровно log2(42) = 5.39. Собирается, а не лежит литералом. */
+const TOKEN = distinct(42);
 
 /**
  * Строка из РАЗЛИЧНЫХ символов base64-алфавита — максимум энтропии для своей длины.
  * Генерируется, а не набирается литералом: литерал молча отстаёт от константы, когда порог
  * двигают, и граничные тесты начинают проверять не ту длину, что написана в их заголовке.
  */
-const distinct = (length: number): string =>
-  'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'.slice(0, length);
+
 
 describe('shannonEntropy', () => {
   it('нулевая на одном повторяющемся символе', () => {
@@ -65,7 +65,7 @@ describe('findHighEntropyRuns', () => {
     // Ключ Twilio (32 hex, p50 3.62) и git sha (40 hex, p50 3.70) — одно распределение.
     // Детектор, вырезающий sha из вывода `run_tests`, выключат в первый же день.
     expect(findHighEntropyRuns('commit e40b7defb42add5ade60cc85192e63ad42aa7b4a')).toEqual([]);
-    expect(findHighEntropyRuns('SK0123456789abcdef0123456789abcdef')).toEqual([]);
+    expect(findHighEntropyRuns(`SK${hex(32)}`)).toEqual([]);
   });
 
   it('минимальная длина рана выведена из порога, а не выбрана руками', () => {
@@ -104,7 +104,7 @@ describe('findHighEntropyRuns', () => {
   });
 
   it('находит несколько токенов и отдаёт их в порядке появления', () => {
-    const second = 'Zq4Wm8Kd2Ry6Tn0Bx5Vc9Fj3Hs7Lp1Ga+Ue/OiNvXt';
+    const second = distinct(62).slice(20);
     const text = `a=${TOKEN} b=${second}`;
     const runs = findHighEntropyRuns(text);
     expect(runs.map((run) => text.slice(run.start, run.end))).toEqual([TOKEN, second]);
