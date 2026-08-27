@@ -1,4 +1,7 @@
+import { RECIPE_NAME_PATTERN, RESERVED_RECIPE_NAMES } from '../ipc.js';
+import { canonicalizeJcs } from '../jcs.js';
 import type { LockEntry, LockFile, NormalizedDefaults, NormalizedRecipe } from '../lock.js';
+import { sanitizeDescription } from '../tool.js';
 import type { Diagnostic } from '../types.js';
 
 /**
@@ -12,9 +15,20 @@ import type { Diagnostic } from '../types.js';
  * диагностику и не `absent`, а **необработанное исключение на стадии `lock_check`** — то есть
  * на самом пути принятия решения.
  *
- * Проверка структурная и намеренно неглубокая: она отвечает на вопрос «этот файл вообще
- * наша форма номер 2», а не «правильны ли в нём дайджесты». Второе — `verifyLockEntries`
- * в `./audit`, потому что для него нужен `node:crypto`.
+ * Проверка НЕ ограничивается структурой, и это существенно. Единственная бросающая операция
+ * внутри `diffLock` — `canonicalizeJcs`, а у неё пять оснований для `TypeError`: нефинитное
+ * число, одиночный суррогат, не-plain-объект, значение неcериализуемого типа и вложенность
+ * глубже `JCS_MAX_DEPTH`. Ни одно из них не исключается проверкой «поле на месте и это
+ * объект»: замер на первой версии этого файла показал четыре крафтовых lock, которые парсер
+ * принимал, а `diffLock` ронял. Поэтому обе стороны, которые `diffLock` подаёт в канонизатор
+ * — `defaults` и каждый `snapshot.own`, — прогоняются здесь заранее. Ветка `defaults` важнее:
+ * `sameDefaults` вызывается на каждом `diffLock` безусловно. Тем же проходом закрывается
+ * `verifyLockEntries`: `recipeHash` канонизирует тот же `own`.
+ *
+ * «Прошло парсер» означает «`diffLock` и `verifyLockEntries` не бросят», а не «поля на месте».
+ *
+ * Сверка дайджестов — не здесь: она в `verifyLockEntries` из `./audit`, потому что требует
+ * `node:crypto`.
  *
  * Отказ здесь читается вызывающим как `absent`, а не как «продолжай»: не разобрали lock —
  * значит одобрения нет, значит рецепт идёт на повторный апрув. Fail-closed.
@@ -34,10 +48,31 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 
 /** Координат у lock нет: он машинный, его никто не пишет руками. Указатель есть, он и важен. */
 const at = (pointer: string, message: string): Diagnostic =>
-  ({ pointer, line: 1, column: 1, code: 'schema', message });
+  // Санитизация по той же причине, что и у диагностик манифеста: `JSON.parse` в V8 эхоит
+  // фрагмент разбираемого файла в текст ошибки, а lock — тоже файл с диска.
+  ({ pointer, line: 1, column: 1, code: 'lock', message: sanitizeDescription(message).text });
+
+/**
+ * Значение переживёт `canonicalizeJcs` — то есть `diffLock` на нём не бросит.
+ * Возвращает причину отказа, а не булев: она едет в диагностику.
+ */
+function canonicalizable(value: unknown): string | null {
+  try {
+    canonicalizeJcs(value);
+    return null;
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error);
+  }
+}
 
 function checkEntry(name: string, value: unknown, report: (pointer: string, message: string) => void): void {
   const pointer = `tools.${name}`;
+  // Имя записи проверяется той же парой, что и `asRecipeName`: иначе lock несёт имя, которое
+  // загрузчик манифеста отвергает, `diffLock` кладёт его в `removed`, и человеку показывают
+  // «удалён рецепт `__proto__`», которого никогда не существовало.
+  if (!RECIPE_NAME_PATTERN.test(name) || (RESERVED_RECIPE_NAMES as readonly string[]).includes(name)) {
+    report(pointer, `не имя рецепта: ${name}`);
+  }
   if (!isRecord(value)) {
     report(pointer, 'запись lock обязана быть объектом');
     return;
@@ -51,7 +86,12 @@ function checkEntry(name: string, value: unknown, report: (pointer: string, mess
     report(`${pointer}.snapshot`, 'снапшот обязателен: без него сторону «было» для диффа строить не из чего');
     return;
   }
-  if (!isRecord(value.snapshot.own)) report(`${pointer}.snapshot.own`, 'снапшот обязан нести собственный блок рецепта');
+  if (!isRecord(value.snapshot.own)) {
+    report(`${pointer}.snapshot.own`, 'снапшот обязан нести собственный блок рецепта');
+  } else {
+    const reason = canonicalizable(value.snapshot.own);
+    if (reason !== null) report(`${pointer}.snapshot.own`, `собственный блок не канонизируется: ${reason}`);
+  }
   if (!isRecord(value.snapshot.effective)) {
     report(`${pointer}.snapshot.effective`, 'снапшот обязан нести эффективный профиль');
   }
@@ -80,6 +120,11 @@ export function parseLockFile(text: string): ParseLockResult {
   }
   if (!isRecord(data.defaults)) {
     report('defaults', 'слот defaults обязателен: из snapshot.effective его не восстановить');
+  } else {
+    // `sameDefaults` зовётся на КАЖДОМ `diffLock` безусловно, поэтому эта ветка опаснее
+    // ветки `own`: там канонизация случается только для имён, присутствующих в манифесте.
+    const reason = canonicalizable(data.defaults);
+    if (reason !== null) report('defaults', `defaults не канонизируется: ${reason}`);
   }
   if (!isRecord(data.tools)) report('tools', 'tools обязан быть объектом');
   else for (const [name, entry] of Object.entries(data.tools)) checkEntry(name, entry, report);

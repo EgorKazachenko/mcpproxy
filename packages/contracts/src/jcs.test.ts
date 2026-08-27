@@ -117,8 +117,12 @@ describe('canonicalizeJcs — глубина', () => {
     return value;
   };
 
-  it('на потолке ещё канонизирует', () => {
-    expect(() => canonicalizeJcs(nest(JCS_MAX_DEPTH - 1))).not.toThrow();
+  it('ровно на потолке ещё канонизирует, на потолке+1 — уже нет', () => {
+    // Два СОСЕДНИХ входа, а не два далёких: с `nest(JCS_MAX_DEPTH - 1)` снизу и `+5` сверху
+    // сдвиг границы на единицу (`>` → `>=`) оставлял оба кейса зелёными, то есть пара,
+    // поставленная ради границы, границу не пиннила.
+    expect(() => canonicalizeJcs(nest(JCS_MAX_DEPTH))).not.toThrow();
+    expect(() => canonicalizeJcs(nest(JCS_MAX_DEPTH + 1))).toThrow(TypeError);
   });
 
   it('за потолком бросает TypeError, а не движковый RangeError', () => {

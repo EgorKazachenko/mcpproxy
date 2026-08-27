@@ -1,4 +1,5 @@
 import { LineCounter, parseDocument, type Document } from 'yaml';
+import { sanitizeDescription } from '../tool.js';
 import type { Diagnostic, DiagnosticCode, ManifestSource } from '../types.js';
 import { MANIFEST_MAX_BYTES } from '../types.js';
 
@@ -6,8 +7,15 @@ export type YamlResult =
   | { ok: true; data: unknown; doc: Document; lineCounter: LineCounter }
   | { ok: false; diagnostics: Diagnostic[] };
 
+/**
+ * Санитизация здесь по той же причине, что и в `diagnosticAt`: замерено, что `yaml@2.9.0`
+ * вклеивает в текст ошибки исходную строку манифеста дословно, вместе с подчёркиванием-кареткой,
+ * — то есть ESC и U+202E из недоверенного файла доезжали до сообщения, объявленного безопасным.
+ * Побочно: срез до `DESCRIPTION_MAX_LENGTH` и схлопывание переводов строк делают сообщение
+ * однострочным, каким его и описывает контракт.
+ */
 const at = (code: DiagnosticCode, message: string, line = 1, column = 1): Diagnostic =>
-  ({ pointer: '', line, column, code, message });
+  ({ pointer: '', line, column, code, message: sanitizeDescription(message).text });
 
 /**
  * Разбор недоверенного YAML. Дефолты `yaml@2.9.0` уже отбивают алиас-бомбу, дубли ключей

@@ -1,5 +1,6 @@
 import { describe, expect, expectTypeOf, it } from 'vitest';
 import { argsHash } from './audit/args.js';
+import { isoToUnixNano } from './otlp.js';
 import type { ApprovalRecord, ApprovalRequest, ApprovalVerdict } from './approval.js';
 import type { AuditEvent } from './event.js';
 import { asRecipeName, asRequestId, asSessionId, type IpcRequest, type RequestId, type SessionId } from './ipc.js';
@@ -71,10 +72,15 @@ describe('формы подтверждения', () => {
       expiresAt: '2026-08-27T10:10:00.000Z',
     };
     // `new Date('')` возвращает Invalid Date, а не бросает, — прежняя проверка «не бросает»
-    // не могла покраснеть никогда. Осмысленно здесь только то, что время АБСОЛЮТНОЕ и
-    // разбирается, а не относительный TTL.
+    // не могла покраснеть никогда. Осмысленно здесь только то, что время АБСОЛЮТНОЕ: оно
+    // разбирается, несёт зону и не является длительностью. Последнее и есть суть R26 —
+    // относительный TTL в вердикте выражать нечем.
     expect(Number.isNaN(Date.parse(verdict.expiresAt ?? ''))).toBe(false);
     expect(verdict.expiresAt).toMatch(/Z$|[+-]\d{2}:\d{2}$/);
+    expect(verdict.expiresAt).not.toMatch(/^\d+(ms|s|m|h)$/);
+    // И то же время, поданное экспортёру, — законная метка, а не отвергаемая форма:
+    // связь между двумя замороженными формами держится тестом, а не совпадением.
+    expect(() => isoToUnixNano(verdict.expiresAt ?? '')).not.toThrow();
   });
 
   it('истечение и отмена выражаются отсутствием вердикта, а не третьим решением', () => {

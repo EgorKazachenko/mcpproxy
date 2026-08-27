@@ -66,7 +66,43 @@ describe('parseLockFile', () => {
     expect(result.ok).toBe(false);
     if (result.ok) throw new Error('мусор не должен разбираться');
     expect(result.diagnostics).toHaveLength(1);
-    expect(result.diagnostics[0]?.code).toBe('schema');
+    // Код `lock`, а не `schema`: сломанный lock ведёт на повторный апрув, сломанный
+    // манифест — на отказ старта, и потребитель обязан их различать.
+    expect(result.diagnostics[0]?.code).toBe('lock');
+  });
+
+  it('всё, что прошло парсер, переживает diffLock и verifyLockEntries', () => {
+    // Смысл модуля — снять исключение с пути `lock_check`. Структурной проверки для этого
+    // мало: единственная бросающая операция внутри `diffLock` — `canonicalizeJcs`, и у неё
+    // пять оснований для `TypeError`, ни одно из которых не исключается проверкой «поле на
+    // месте и это объект». Ниже четыре крафтовых входа, каждый из которых ПРОХОДИЛ первую
+    // версию парсера и ронял `diffLock`.
+    const deep = (n: number): unknown => JSON.parse('{"a":'.repeat(n) + '1' + '}'.repeat(n));
+    const loneSurrogate = JSON.parse('{"x": "\\ud800"}') as unknown;
+
+    const crafted: Array<[string, unknown]> = [
+      ['snapshot.own глубокий', { ...CURRENT, tools: { publish_release: { ...CURRENT.tools.publish_release, snapshot: { own: deep(300), effective: {} } } } }],
+      ['defaults глубокий', { ...CURRENT, defaults: deep(300) }],
+      ['defaults с одиночным суррогатом', { ...CURRENT, defaults: loneSurrogate }],
+      ['snapshot.own с одиночным суррогатом', { ...CURRENT, tools: { publish_release: { ...CURRENT.tools.publish_release, snapshot: { own: loneSurrogate, effective: {} } } } }],
+    ];
+
+    for (const [label, lock] of crafted) {
+      const result = parseLockFile(JSON.stringify(lock));
+      expect(result.ok, label).toBe(false);
+    }
+  });
+
+  it('имя записи проверяется той же парой, что и asRecipeName', () => {
+    // Иначе `diffLock` кладёт `__proto__` в `removed`, и человеку показывают «удалён рецепт
+    // __proto__», которого никогда не существовало.
+    for (const name of ['__proto__', 'constructor', 'Publish']) {
+      const lock = { ...CURRENT, tools: { [name]: CURRENT.tools.publish_release } };
+      const result = parseLockFile(JSON.stringify(lock));
+      expect(result.ok, name).toBe(false);
+      if (result.ok) continue;
+      expect(result.diagnostics.map((one) => one.pointer)).toContain(`tools.${name}`);
+    }
   });
 
   it('отвергает дайджест не той формы', () => {

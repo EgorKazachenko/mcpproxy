@@ -1,6 +1,7 @@
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import type { Document, LineCounter } from 'yaml';
-import type { AccessRule, Manifest, Recipe, SandboxProfile } from '../manifest.generated.js';
+import { OUTPUT_MAX_BYTES_DEFAULT } from '../lock.js';
+import type { AccessRule, Defaults, Manifest, Recipe, SandboxProfile } from '../manifest.generated.js';
 import type { Diagnostic, ManifestSource } from '../types.js';
 import { diagnosticAt, type Segment } from './locate.js';
 
@@ -114,6 +115,40 @@ function checkEnvCeiling(
   });
 }
 
+/**
+ * `defaults.output` — пол, а не значение по умолчанию.
+ *
+ * Тот же довод, что и у `checkEnvCeiling`, и сильнее: `output` сливается заменой скаляров, то
+ * есть `redact: false` в рецепте даёт `effective.output.redact === false` — секрет доезжает
+ * до модели и до лога, — а `maxBytes` рецепта поднимает потолок вывода. Схема ограничивает
+ * `maxBytes` только `minimum: 1`. Сравнить с `sandbox.*.deny`, который принципиально неснимаем,
+ * и с молчанием `defaults.output`, которому этот же контракт назначил пессимистичные значения:
+ * без правила ниже принцип «молчание делает вызов опаснее» соблюдался бы для молчания и не
+ * соблюдался для явного ослабления. Оба поля стали достижимыми вместе с рецептным `output`.
+ *
+ * Сужение рецепту остаётся: включить редакцию, когда в `defaults` она выключена, и опустить
+ * потолок — законно.
+ */
+function checkOutputFloor(
+  recipe: Recipe,
+  base: Defaults['output'],
+  at: readonly Segment[],
+  report: (path: Segment[], message: string) => void,
+) {
+  const own = recipe.output;
+  if (own === undefined) return;
+  if (own.redact === false && (base.redact ?? true)) {
+    report([...at, 'output', 'redact'], 'рецепт не может снять редакцию вывода, включённую в defaults');
+  }
+  const ceiling = base.maxBytes ?? OUTPUT_MAX_BYTES_DEFAULT;
+  if (own.maxBytes !== undefined && own.maxBytes > ceiling) {
+    report(
+      [...at, 'output', 'maxBytes'],
+      `рецепт не может поднять потолок вывода выше defaults: ${own.maxBytes} при ${ceiling}`,
+    );
+  }
+}
+
 function checkArgvSlots(recipe: Recipe, at: readonly Segment[], report: (path: Segment[], message: string) => void) {
   for (const [paramName, param] of Object.entries(recipe.params ?? {})) {
     (param.argv ?? []).forEach((element, index) => {
@@ -188,6 +223,7 @@ export function refine(
     checkDenyNonEmpty(recipe, at, report);
     checkRootConfinement(recipe, at, source, report);
     checkEnvCeiling(recipe, manifest.defaults.env.allow, at, report);
+    checkOutputFloor(recipe, manifest.defaults.output, at, report);
   }
 
   return diagnostics;

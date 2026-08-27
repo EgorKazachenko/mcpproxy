@@ -1,7 +1,6 @@
 import type { ErrorObject } from 'ajv';
 import type { Document, LineCounter } from 'yaml';
 import type { Manifest } from '../manifest.generated.js';
-import { sanitizeDescription } from '../tool.js';
 import type { Diagnostic, ManifestSource, ParseManifestResult, PatternMatcher } from '../types.js';
 import { matcherKey } from '../types.js';
 import { manifestValidator } from './ajv.js';
@@ -52,10 +51,9 @@ function buildMatchers(
             ['tools', recipeName, 'params', paramName, 'pattern'],
             'pattern',
             // `reason` — это `error.message` от RE2, а он эхоит фрагмент паттерна дословно.
-            // Паттерн пришёл из недоверенного манифеста, а диагностику рисуют человеку и
-            // пишут в лог, поэтому bidi-override и ANSI-escape доехали бы до глаз и до
-            // терминала. Инструмент для этого в пакете уже есть — он и применяется.
-            `pattern не компилируется движком RE2: ${sanitizeDescription(compiled.reason).text}`,
+            // Санитизацию делает `diagnosticAt`: она стоит в конструкторе, а не здесь, чтобы
+            // её нельзя было забыть в следующей точке — производителей сообщения пять.
+            `pattern не компилируется движком RE2: ${compiled.reason}`,
           ),
         );
       }

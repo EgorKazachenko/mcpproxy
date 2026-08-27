@@ -1,4 +1,5 @@
 import type { Document, LineCounter } from 'yaml';
+import { sanitizeDescription } from '../tool.js';
 import type { Diagnostic, DiagnosticCode } from '../types.js';
 
 /** Сегмент пути внутрь документа: имя ключа или индекс массива. */
@@ -31,6 +32,17 @@ export function positionOf(
   return { line: pos.line, column: pos.col };
 }
 
+/**
+ * Единственный конструктор диагностики манифеста — и санитизация стоит здесь, а не у
+ * вызывающих.
+ *
+ * `Diagnostic.message` объявлен безопасным для отрисовки в **замороженном** типе, а
+ * производителей сообщения пять: ajv, `yaml`, `refine`, компилятор паттернов и парсер lock.
+ * Пока санитизация стояла у одного из них, гарантия была ложной ровно там, где вектор
+ * дешевле: до RE2 надо дойти через валидную схему, а `doc.errors` вклеивает исходную строку
+ * манифеста дословно — с ANSI-escape и bidi-override — от одной синтаксической ошибки.
+ * Поставленная в конструктор, она не может быть забыта следующим производителем.
+ */
 export function diagnosticAt(
   doc: Document,
   lineCounter: LineCounter,
@@ -38,5 +50,10 @@ export function diagnosticAt(
   code: DiagnosticCode,
   message: string,
 ): Diagnostic {
-  return { pointer: pointerOf(segments), ...positionOf(doc, lineCounter, segments), code, message };
+  return {
+    pointer: pointerOf(segments),
+    ...positionOf(doc, lineCounter, segments),
+    code,
+    message: sanitizeDescription(message).text,
+  };
 }

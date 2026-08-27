@@ -178,6 +178,118 @@ describe('правило 6 — рецептный deny не может быть 
   });
 });
 
+describe('код диагностики — каждый член юниона производится своей ситуацией', () => {
+  // `DiagnosticCode` замораживается этим контрактом, и потребитель обязан ветвиться по нему.
+  // Без исполняемого покрытия перестановка двух кодов местами не роняла ничего: юнион
+  // существовал только в типах.
+  const codeOf = (result: ReturnType<typeof load>): (string | undefined)[] =>
+    result.ok ? [] : result.diagnostics.map((one) => one.code);
+
+  it('size-limit — файл больше потолка', () => {
+    const huge = `${HEAD}  x:\n    description: "${'a'.repeat(300_000)}"\n    exec: ["true"]\n`;
+    expect(codeOf(parseManifest(huge, SOURCE))).toEqual(['size-limit']);
+  });
+
+  it('yaml — синтаксис', () => {
+    expect(codeOf(parseManifest(`${HEAD}  x: [unclosed\n`, SOURCE))).toContain('yaml');
+  });
+
+  it('schema — документ разобран, но форма не та', () => {
+    expect(codeOf(load(`  x:
+    description: "x"
+`))).toEqual(['schema']);
+  });
+
+  it('invariant — проверка, которой в схеме нет', () => {
+    expect(codeOf(load(`  x:
+    description: "x"
+    exec: ["true"]
+    cwd: "{}"
+`))).toEqual(['invariant']);
+  });
+
+  it('pattern — RE2 не принял выражение', () => {
+    expect(codeOf(load(`  x:
+    description: "x"
+    exec: ["true"]
+    params:
+      p: { type: string, pattern: "(?=x)" }
+`))).toEqual(['pattern']);
+  });
+});
+
+describe('текст диагностики безопасен для отрисовки', () => {
+  const ESC = String.fromCharCode(27);
+  const BIDI = String.fromCharCode(0x202e);
+  const unsafe = (result: ReturnType<typeof load>): string =>
+    result.ok ? '' : result.diagnostics.map((one) => one.message).join('\n');
+
+  it('сообщение RE2 не проносит ANSI и bidi из паттерна', () => {
+    // Сообщение RE2 эхоит фрагмент паттерна дословно — замерено на вендоренном re2@1.26.1.
+    const result = load(`  x:
+    description: "x"
+    exec: ["true"]
+    params:
+      p: { type: string, pattern: "[a-${ESC}[31m${BIDI}" }
+`);
+    expect(result.ok).toBe(false);
+    expect(unsafe(result)).not.toContain(ESC);
+    expect(unsafe(result)).not.toContain(BIDI);
+  });
+
+  it('сообщение yaml не проносит их из исходной строки — а оно вклеивает её дословно', () => {
+    // Точка ДЕШЕВЛЕ предыдущей: до RE2 надо дойти через валидную схему, а до doc.errors
+    // хватает одной синтаксической ошибки.
+    const result = parseManifest(`version: 1\ndefaults: !${ESC}[31m${BIDI}IGNORE foo\n`, SOURCE);
+    expect(result.ok).toBe(false);
+    expect(unsafe(result)).not.toContain(ESC);
+    expect(unsafe(result)).not.toContain(BIDI);
+  });
+
+  it('и имя переменной окружения из манифеста — тоже', () => {
+    const result = load(`  x:
+    description: "x"
+    exec: ["true"]
+    env: { allow: ["PATH", "A${ESC}[31mB"] }
+`);
+    expect(result.ok).toBe(false);
+    expect(unsafe(result)).not.toContain(ESC);
+  });
+});
+
+describe('правило 8 — рецептный output не ослабляет defaults', () => {
+  it('отвергает снятие редакции вывода', () => {
+    // Слияние скаляров заменой позволило бы рецепту выключить редакцию, включённую в
+    // defaults, — то есть секрет доехал бы до модели и до лога, тогда как sandbox.*.deny
+    // сделан принципиально неснимаемым.
+    const result = load(`  x:
+    description: "x"
+    exec: ["true"]
+    output: { redact: false }
+`);
+    expect(result.ok).toBe(false);
+    expect(messagesOf(result).join('\n')).toContain('редакцию');
+  });
+
+  it('отвергает поднятие потолка вывода', () => {
+    const result = load(`  x:
+    description: "x"
+    exec: ["true"]
+    output: { maxBytes: 999999 }
+`);
+    expect(result.ok).toBe(false);
+    expect(messagesOf(result).join('\n')).toContain('потолок');
+  });
+
+  it('сужение остаётся законным', () => {
+    expect(load(`  x:
+    description: "x"
+    exec: ["true"]
+    output: { maxBytes: 1024, redact: true }
+`).ok).toBe(true);
+  });
+});
+
 describe('правило 7 — рецептный env.allow не выше потолка defaults', () => {
   it('принимает подмножество', () => {
     expect(load(`  x:
