@@ -1,3 +1,7 @@
+import type { RiskTier } from './domain.js';
+import type { RecipeName, RequestId, SessionId } from './ipc.js';
+import type { SandboxProfile } from './manifest.generated.js';
+
 /**
  * Формы подтверждения (R26). Объявлены целиком в E0, а не дорисованы в E5/E7: после
  * заморозки добавление сюда поля означало бы ломающее изменение для семи эпиков, а без
@@ -40,4 +44,37 @@ export interface ApprovalRecord {
   readonly expiresAt: string | null;
   readonly argsHash: string;
   readonly sessionId: string;
+}
+
+/**
+ * Что показывают человеку. Поля — ровно те, которых требует `docs/07-contracts.md` для
+ * out-of-band апрува: argv, cwd и профиль песочницы целиком.
+ *
+ * `requestId` **непрозрачный и брендированный**: без него сообщение из рендерера может
+ * одобрить не тот ожидающий вызов, который человеку показали, а брендирование делает
+ * подстановку `sessionId` вместо него ошибкой компиляции.
+ */
+export interface ApprovalRequest {
+  readonly requestId: RequestId;
+  readonly sessionId: SessionId;
+  readonly recipeName: RecipeName;
+  readonly argsHash: string;
+  readonly tier: RiskTier;
+  readonly argv: readonly string[];
+  readonly cwd: string;
+  readonly profile: SandboxProfile;
+}
+
+/**
+ * Ответ человека. Сопоставлением вердикта с ожидающим вызовом занимается E5/E7 — E0
+ * объявляет форму, а не поведение. Но обе части ключа (`requestId` и `sessionId`) обязаны
+ * существовать здесь: после заморозки скоуп подтверждения сузить будет нечем.
+ */
+export interface ApprovalVerdict {
+  readonly requestId: RequestId;
+  readonly sessionId: SessionId;
+  readonly channel: ApprovalChannel;
+  readonly decision: ApprovalDecision;
+  readonly scope: ApprovalScope;
+  readonly expiresAt: string | null;
 }

@@ -11,5 +11,7 @@ export * from './event.js';
 export * from './otlp.js';
 export * from './jcs.js';
 export * from './lock.js';
+export * from './ipc.js';
+export * from './tool.js';
 
-// TODO(E0): lock, IPC, четыре рецепта-заглушки.
+// TODO(E0): четыре рецепта-заглушки.
