@@ -1,6 +1,8 @@
 import { randomBytes } from 'node:crypto';
 import type { NormalizedDefaults, RecipeName, SandboxMode, SandboxViolation } from '@mcpproxy/contracts';
 import type { EventSink } from './events.js';
+import { createNoneSandbox } from './modes/none.js';
+import { createSeatbeltSandbox } from './modes/seatbelt.js';
 
 /**
  * Публичная поверхность E3. Ни один тип из `@anthropic-ai/sandbox-runtime` здесь не
@@ -146,4 +148,18 @@ export function assertModeSupported(mode: SandboxMode, platform: NodeJS.Platform
         'тихой деградации до none нет намеренно (10-honest-limitations.md:84)',
     );
   }
+}
+
+/**
+ * Единственный вход. Режим приходит **параметром вызова**, а не из манифеста (R4): в
+ * замороженной схеме поля под режим нет и добавить его нельзя, а переключение режима в UI
+ * для одного и того же рецепта — требование S5.
+ *
+ * Проверка отделена в `assertModeSupported`, чтобы её можно было утверждать, не поднимая
+ * прокси и seatbelt; здесь она стоит **первой** — до любого импорта режима, до `initialize`
+ * и до единой строки в аудите.
+ */
+export function createSandbox(mode: SandboxMode, platform: NodeJS.Platform = process.platform): Sandbox {
+  assertModeSupported(mode, platform);
+  return mode === 'none' ? createNoneSandbox() : createSeatbeltSandbox();
 }

@@ -10,6 +10,7 @@ import { assertDomainPatterns } from '../netpolicy.js';
 import { buildProfile, mandatoryDenyGlobs, policyHash, resolveProfilePath, toSandboxProfile } from '../profile.js';
 import type { ResolvedSandboxPolicy } from '../profile.js';
 import { srt } from '../srt-manager.js';
+import type { NetworkPolicy } from '../srt-manager.js';
 import type { ExecOutcome, ExecRequest, Sandbox } from '../sandbox.js';
 import type { ClassifyPolicy } from '../violation.js';
 
@@ -105,7 +106,12 @@ const limitsFor = (effective: NormalizedDefaults, env: NodeJS.ProcessEnv, cwd: s
 export interface ModeBehaviour {
   readonly mode: SandboxMode;
   /** Переменные, которые режим вливает ребёнку мимо allowlist (R24, R31). */
-  injectedEnv(): NodeJS.ProcessEnv;
+  injectedEnv(request: ExecRequest): NodeJS.ProcessEnv;
+  /**
+   * Какая сетевая политика реально применяется (D2). В `seatbelt` это списки рецепта; в
+   * `none` — `['*']`, потому что baseline обязан **наблюдать**, а не запрещать.
+   */
+  networkPolicy(effective: NormalizedDefaults): NetworkPolicy;
   /** Как команда превращается в argv: обёрнутой профилем или как есть. */
   toArgv(
     request: ExecRequest,
@@ -128,7 +134,7 @@ export async function runInMode(
 
   // Стадия 1 — окружение. Событие несёт только ИМЕНА (R25): форма `AuditEvent.env` это и
   // позволяет, а значения не покидают процесс демона.
-  const env = measure(() => buildEnv(effective.env.allow, process.env, behaviour.injectedEnv()));
+  const env = measure(() => buildEnv(effective.env.allow, process.env, behaviour.injectedEnv(request)));
   emit({ stage: 'build_env', durationUs: env.durationUs, env: { allowed: [...effective.env.allow] } });
 
   // Стадия 2 — профиль. `sandbox.profile` — **сырой** `SandboxProfile` манифеста (R36), а
@@ -152,10 +158,9 @@ export async function runInMode(
     resolvePath: (path) => realpathSync.native(path),
   };
 
-  const network = {
-    allowedDomains: effective.sandbox.network.allow,
-    deniedDomains: effective.sandbox.network.deny,
-  };
+  // Хэш считает **применённую** политику (R47), а не манифестную: в `none` они расходятся,
+  // и хэш, врущий про сеть, бесполезен ровно там, где решение человека важнее всего.
+  const network = behaviour.networkPolicy(effective);
 
   const result = await srt.withNetworkPolicy({
     commandId: request.commandId,
@@ -201,6 +206,10 @@ export function createSeatbeltSandbox(): Sandbox {
     // `wrapWithSandboxArgv` возвращает `env` нетронутым), поэтому вливать нечего — и
     // наивная замена env лишила бы ребёнка прокси, то есть тихо сломала бы сеть (R24).
     injectedEnv: () => ({}),
+    networkPolicy: (effective) => ({
+      allowedDomains: effective.sandbox.network.allow,
+      deniedDomains: effective.sandbox.network.deny,
+    }),
     toArgv: async (request, policy) => {
       const wrapped = await srt.wrap(
         quoteArgv(request.command),

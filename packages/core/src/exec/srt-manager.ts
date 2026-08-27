@@ -195,28 +195,6 @@ class SrtSingleton {
     this.unsubscribe = store.subscribe((all) => {
       this.onStoreNotify(all);
     });
-
-    await this.assertNetworkReachable(baseConfig);
-  }
-
-  /**
-   * Громкая проверка на старте (R54). `allowedDomains: ['*']` схема вендора объявляет
-   * недопустимым и сегодня пропускает лишь потому, что ни `initialize`, ни `updateConfig`
-   * его не валидируют.
-   *
-   * Без этой проверки обновление вендора превратит `none` из «наблюдаем всё» в «блокируем
-   * всё», а заблокированный HTTP возвращает `exit=0` с телом (факт Ф6) — то есть демо
-   * покажет нулевую эксфильтрацию и останется зелёным.
-   */
-  private async assertNetworkReachable(baseConfig: SandboxRuntimeConfig): Promise<void> {
-    if (!baseConfig.network.allowedDomains.includes('*')) return;
-    const applied = SandboxManager.getConfig();
-    if (applied === undefined || !applied.network.allowedDomains.includes('*')) {
-      throw new SrtManagerError(
-        'конфиг с allowedDomains: ["*"] не доехал до srt: вендор начал валидировать список, ' +
-          'и режим none из «наблюдаем всё» стал «блокируем всё» (R54)',
-      );
-    }
   }
 
   private onStoreNotify(all: readonly SandboxViolationEvent[]): void {
@@ -432,6 +410,29 @@ function applyNetwork(base: SandboxRuntimeConfig, policy: NetworkPolicy): void {
       deniedDomains: [...policy.deniedDomains],
     },
   });
+  assertWildcardSurvived(policy);
+}
+
+/**
+ * Громкая проверка (R54). `allowedDomains: ['*']` схема вендора объявляет **недопустимым** и
+ * сегодня пропускает лишь потому, что `updateConfig` — голый `structuredClone` без валидации.
+ *
+ * Без проверки обновление вендора превратит `none` из «наблюдаем всё» в «блокируем всё», а
+ * заблокированный HTTP возвращает `exit=0` с телом `Connection blocked by network allowlist`
+ * (факт Ф6) — то есть демо показало бы нулевую эксфильтрацию и осталось бы зелёным.
+ *
+ * Проверка стоит здесь, а не на старте демона, потому что `'*'` появляется только в
+ * пер-вызовном конфиге режима `none`: базовый конфиг всегда уезжает с пустыми списками (R52).
+ */
+function assertWildcardSurvived(policy: NetworkPolicy): void {
+  if (!policy.allowedDomains.includes('*')) return;
+  const applied = SandboxManager.getConfig();
+  if (applied === undefined || !applied.network.allowedDomains.includes('*')) {
+    throw new SrtManagerError(
+      'политика с allowedDomains: ["*"] не доехала до srt: вендор начал валидировать список, ' +
+        'и режим none из «наблюдаем всё» стал «блокируем всё» (R54)',
+    );
+  }
 }
 
 /**

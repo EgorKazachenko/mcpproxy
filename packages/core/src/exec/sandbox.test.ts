@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { SandboxMode } from '@mcpproxy/contracts';
-import { asCommandId, assertModeSupported } from './sandbox.js';
+import { asCommandId, assertModeSupported, createSandbox } from './sandbox.js';
 
 /**
  * Платформа — **параметр**, а не `process.platform`, и это не удобство: с чтением глобала
@@ -44,5 +44,21 @@ describe('asCommandId', () => {
 
   it('пропускает непустую', () => {
     expect(asCommandId('abc')).toBe('abc');
+  });
+});
+
+describe('createSandbox (R3, R4)', () => {
+  it('режим приходит параметром вызова, а не из манифеста', () => {
+    // В замороженной схеме поля под режим нет и добавить его нельзя, а переключение режима
+    // в UI для одного и того же рецепта — требование S5.
+    expect(createSandbox('none').mode).toBe('none');
+  });
+
+  it('container бросает, а не откатывается на seatbelt', () => {
+    expect(() => createSandbox('container')).toThrow(/container/);
+  });
+
+  it('seatbelt вне macOS бросает до всякой инициализации', () => {
+    expect(() => createSandbox('seatbelt', 'linux')).toThrow(/seatbelt/);
   });
 });
