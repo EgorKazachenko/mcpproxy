@@ -1,0 +1,28 @@
+{
+  "name": "@mcpproxy/design",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Визуальный язык mcpproxy. Палитра Opera, семантика домена, токены для TS и CSS.",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./css": "./dist/css/index.css",
+    "./css/tokens.css": "./dist/css/tokens.css",
+    "./css/reset.css": "./dist/css/reset.css",
+    "./css/base.css": "./dist/css/base.css"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -b && node scripts/generate-css.mjs",
+    "typecheck": "tsc -b --noEmit false --emitDeclarationOnly",
+    "clean": "rm -rf dist *.tsbuildinfo"
+  },
+  "dependencies": {
+    "@mcpproxy/contracts": "workspace:*"
+  }
+}

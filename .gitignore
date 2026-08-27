@@ -1,0 +1,26 @@
+.DS_Store
+
+# yarn (berry, nodeLinker: node-modules)
+node_modules/
+.yarn/*
+!.yarn/patches
+!.yarn/releases
+!.yarn/plugins
+!.yarn/versions
+.pnp.*
+yarn-error.log
+
+# build
+dist/
+build/
+out/
+*.tsbuildinfo
+
+# runtime
+.mcpproxy/
+mcpproxy.log
+audit/*.jsonl
+
+# env
+.env
+.env.local

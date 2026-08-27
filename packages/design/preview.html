@@ -1,0 +1,1074 @@
+<title>Opera Red Token Set</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap">
+
+<style>
+  /* ══════════════════════════════════════════════════════════════════════
+     Зеркало packages/design/dist/css/tokens.css.
+     Значения не выдуманы для страницы — они скопированы из src/tokens.ts.
+     ══════════════════════════════════════════════════════════════════════ */
+
+  :root {
+    --op-red-50:#FFF0F1;  --op-red-100:#FFDDE0; --op-red-200:#FFBFC5;
+    --op-red-300:#FF949E; --op-red-400:#FF5568; --op-red-500:#FF1B2D;
+    --op-red-600:#E00A1C; --op-red-700:#B80816; --op-red-800:#920A15;
+    --op-red-900:#740D16; --op-red-950:#400308;
+
+    --op-neutral-0:#FFFFFF;    --op-neutral-25:#FBFBFC;  --op-neutral-50:#F6F6F8;
+    --op-neutral-100:#EEEEF1;  --op-neutral-200:#E0E0E5; --op-neutral-300:#C6C6CE;
+    --op-neutral-400:#9B9BA6;  --op-neutral-500:#74747F; --op-neutral-600:#55555F;
+    --op-neutral-700:#3D3D46;  --op-neutral-800:#2A2A31; --op-neutral-900:#1C1C21;
+    --op-neutral-950:#131317;  --op-neutral-1000:#0A0A0C;
+
+    --font-sans: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+
+    --text-xs:.6875rem; --text-sm:.8125rem; --text-md:.875rem;
+    --text-lg:1rem; --text-xl:1.25rem; --text-2xl:1.75rem;
+
+    --radius-sm:6px; --radius-md:10px; --radius-lg:14px;
+    --radius-xl:20px; --radius-full:999px;
+
+    --motion-fast:120ms; --motion-normal:180ms;
+    --motion-ease:cubic-bezier(.2,.8,.2,1);
+
+    /* ── Светлая тема ── */
+    --bg-app:#F6F6F8; --bg-surface:#FFFFFF; --bg-raised:#FFFFFF;
+    --bg-sunken:#EEEEF1; --bg-hover:rgba(10,10,12,.04);
+    --text-primary:#1C1C21; --text-secondary:#55555F; --text-tertiary:#74747F;
+    --text-inverse:#FFFFFF; --text-on-brand:#FFFFFF;
+    --border-subtle:rgba(10,10,12,.07); --border-default:rgba(10,10,12,.12);
+    --border-strong:rgba(10,10,12,.22); --border-focus:#E00A1C;
+    --brand:#FF1B2D; --brand-hover:#E00A1C;
+    --brand-subtle:#FFF0F1; --brand-on-subtle:#B80816;
+    --state-ok:#087F5B;     --state-ok-subtle:#E6FCF5;
+    --state-warn:#A15C07;   --state-warn-subtle:#FFF9DB;
+    --state-danger:#B80816; --state-danger-subtle:#FFF0F1;
+    --state-info:#1560AC;   --state-info-subtle:#E7F5FF;
+    --state-human:#5231B8;  --state-human-subtle:#F3F0FF;
+    --shadow-md:0 2px 4px rgba(10,10,12,.06), 0 4px 12px rgba(10,10,12,.10);
+
+    color-scheme: light dark;
+  }
+
+  /* Системная настройка без явного выбора → тёмная. Она основная. */
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg-app:#0A0A0C; --bg-surface:#131317; --bg-raised:#1C1C21;
+      --bg-sunken:#070709; --bg-hover:rgba(255,255,255,.05);
+      --text-primary:#F6F6F8; --text-secondary:#9B9BA6; --text-tertiary:#74747F;
+      --text-inverse:#0A0A0C; --text-on-brand:#FFFFFF;
+      --border-subtle:rgba(255,255,255,.07); --border-default:rgba(255,255,255,.12);
+      --border-strong:rgba(255,255,255,.20); --border-focus:#FF1B2D;
+      --brand:#FF1B2D; --brand-hover:#FF5568;
+      --brand-subtle:rgba(255,27,45,.16); --brand-on-subtle:#FF949E;
+      --state-ok:#38D9A9;     --state-ok-subtle:rgba(56,217,169,.14);
+      --state-warn:#FFB84D;   --state-warn-subtle:rgba(255,184,77,.14);
+      --state-danger:#FF5568; --state-danger-subtle:rgba(255,85,104,.16);
+      --state-info:#74C0FC;   --state-info-subtle:rgba(116,192,252,.14);
+      --state-human:#B197FC;  --state-human-subtle:rgba(177,151,252,.14);
+      --shadow-md:0 2px 4px rgba(0,0,0,.30), 0 4px 16px rgba(0,0,0,.44);
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --bg-app:#0A0A0C; --bg-surface:#131317; --bg-raised:#1C1C21;
+    --bg-sunken:#070709; --bg-hover:rgba(255,255,255,.05);
+    --text-primary:#F6F6F8; --text-secondary:#9B9BA6; --text-tertiary:#74747F;
+    --text-inverse:#0A0A0C; --text-on-brand:#FFFFFF;
+    --border-subtle:rgba(255,255,255,.07); --border-default:rgba(255,255,255,.12);
+    --border-strong:rgba(255,255,255,.20); --border-focus:#FF1B2D;
+    --brand:#FF1B2D; --brand-hover:#FF5568;
+    --brand-subtle:rgba(255,27,45,.16); --brand-on-subtle:#FF949E;
+    --state-ok:#38D9A9;     --state-ok-subtle:rgba(56,217,169,.14);
+    --state-warn:#FFB84D;   --state-warn-subtle:rgba(255,184,77,.14);
+    --state-danger:#FF5568; --state-danger-subtle:rgba(255,85,104,.16);
+    --state-info:#74C0FC;   --state-info-subtle:rgba(116,192,252,.14);
+    --state-human:#B197FC;  --state-human-subtle:rgba(177,151,252,.14);
+    --shadow-md:0 2px 4px rgba(0,0,0,.30), 0 4px 16px rgba(0,0,0,.44);
+  }
+
+  :root[data-theme="light"] {
+    --bg-app:#F6F6F8; --bg-surface:#FFFFFF; --bg-raised:#FFFFFF;
+    --bg-sunken:#EEEEF1; --bg-hover:rgba(10,10,12,.04);
+    --text-primary:#1C1C21; --text-secondary:#55555F; --text-tertiary:#74747F;
+    --text-inverse:#FFFFFF; --text-on-brand:#FFFFFF;
+    --border-subtle:rgba(10,10,12,.07); --border-default:rgba(10,10,12,.12);
+    --border-strong:rgba(10,10,12,.22); --border-focus:#E00A1C;
+    --brand:#FF1B2D; --brand-hover:#E00A1C;
+    --brand-subtle:#FFF0F1; --brand-on-subtle:#B80816;
+    --state-ok:#087F5B;     --state-ok-subtle:#E6FCF5;
+    --state-warn:#A15C07;   --state-warn-subtle:#FFF9DB;
+    --state-danger:#B80816; --state-danger-subtle:#FFF0F1;
+    --state-info:#1560AC;   --state-info-subtle:#E7F5FF;
+    --state-human:#5231B8;  --state-human-subtle:#F3F0FF;
+    --shadow-md:0 2px 4px rgba(10,10,12,.06), 0 4px 12px rgba(10,10,12,.10);
+  }
+
+  /* ══════════════════════════════════════════════════════════════════════
+     Страница
+     ══════════════════════════════════════════════════════════════════════ */
+
+  *, *::before, *::after { box-sizing: border-box; }
+  * { margin: 0; }
+
+  body {
+    background: var(--bg-app);
+    color: var(--text-primary);
+    font-family: var(--font-sans);
+    font-size: var(--text-md);
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--border-focus);
+    outline-offset: 2px;
+    border-radius: var(--radius-sm);
+  }
+
+  .wrap {
+    max-width: 1080px;
+    margin: 0 auto;
+    padding: 0 clamp(20px, 5vw, 48px) 96px;
+  }
+
+  /* ── Шапка ─────────────────────────────────────────────────────────── */
+
+  header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 24px;
+    padding: clamp(40px, 8vw, 80px) 0 clamp(32px, 6vw, 56px);
+    border-bottom: 1px solid var(--border-default);
+  }
+
+  .mark {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 24px;
+  }
+  /* Место №1, где брендовый красный вообще появляется: знак продукта. */
+  .mark svg { display: block; }
+  .mark span {
+    font-family: var(--font-mono);
+    font-size: var(--text-sm);
+    font-weight: 700;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    color: var(--text-secondary);
+  }
+
+  h1 {
+    font-size: clamp(1.9rem, 5.2vw, 3rem);
+    line-height: 1.05;
+    letter-spacing: -.03em;
+    font-weight: 700;
+    text-wrap: balance;
+    max-width: 16ch;
+  }
+  .lede {
+    margin-top: 20px;
+    max-width: 58ch;
+    color: var(--text-secondary);
+    font-size: var(--text-lg);
+    line-height: 1.6;
+  }
+  .lede strong { color: var(--text-primary); font-weight: 600; }
+
+  .toggle {
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    letter-spacing: .05em;
+    text-transform: uppercase;
+    color: var(--text-secondary);
+    background: var(--bg-surface);
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-full);
+    padding: 8px 14px;
+    cursor: pointer;
+    transition: background var(--motion-fast) var(--motion-ease),
+                color var(--motion-fast) var(--motion-ease);
+  }
+  .toggle:hover { background: var(--bg-hover); color: var(--text-primary); }
+
+  /* ── Секции ────────────────────────────────────────────────────────── */
+
+  section { padding-top: clamp(48px, 8vw, 76px); }
+
+  .sec-head {
+    display: flex;
+    align-items: baseline;
+    gap: 16px;
+    margin-bottom: 8px;
+  }
+  /* Нумерация здесь означает порядок чтения спецификации, а не украшение:
+     каждое следующее правило опирается на предыдущее. */
+  .num {
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    font-weight: 700;
+    color: var(--brand);
+    letter-spacing: .08em;
+  }
+  h2 {
+    font-size: var(--text-xl);
+    font-weight: 600;
+    letter-spacing: -.015em;
+  }
+  .sec-note {
+    color: var(--text-secondary);
+    max-width: 64ch;
+    margin-bottom: 28px;
+    line-height: 1.6;
+  }
+  .sec-note code, .inline-code {
+    font-family: var(--font-mono);
+    font-size: .88em;
+    background: var(--bg-sunken);
+    border-radius: var(--radius-sm);
+    padding: 1px 5px;
+  }
+
+  /* ── Брендовый красный ─────────────────────────────────────────────── */
+
+  .brand-block {
+    display: grid;
+    grid-template-columns: minmax(0, 260px) minmax(0, 1fr);
+    gap: clamp(20px, 4vw, 40px);
+    align-items: stretch;
+  }
+  @media (max-width: 720px) { .brand-block { grid-template-columns: 1fr; } }
+
+  .brand-chip {
+    background: var(--op-red-500);
+    border-radius: var(--radius-xl);
+    padding: 24px;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+    min-height: 200px;
+    color: #fff;
+  }
+  .brand-chip .hex {
+    font-family: var(--font-mono);
+    font-size: 1.5rem;
+    font-weight: 700;
+    letter-spacing: -.01em;
+  }
+  .brand-chip .role {
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    opacity: .82;
+    margin-top: 4px;
+  }
+
+  .places { display: flex; flex-direction: column; gap: 12px; }
+  .place {
+    display: grid;
+    grid-template-columns: 28px minmax(0, 1fr);
+    gap: 14px;
+    align-items: start;
+    background: var(--bg-surface);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-lg);
+    padding: 16px 18px;
+  }
+  .place-n {
+    font-family: var(--font-mono);
+    font-size: var(--text-sm);
+    font-weight: 700;
+    color: var(--brand);
+    padding-top: 1px;
+  }
+  .place b { font-weight: 600; display: block; }
+  .place p { color: var(--text-secondary); font-size: var(--text-sm); margin-top: 2px; }
+
+  .rule-callout {
+    margin-top: 20px;
+    border-left: 3px solid var(--brand);
+    background: var(--brand-subtle);
+    color: var(--brand-on-subtle);
+    padding: 14px 18px;
+    border-radius: 0 var(--radius-md) var(--radius-md) 0;
+    font-size: var(--text-sm);
+    line-height: 1.6;
+  }
+  .rule-callout b { font-weight: 700; }
+
+  /* ── Роли ──────────────────────────────────────────────────────────── */
+
+  .roles { display: flex; flex-direction: column; gap: 10px; }
+  .role-row {
+    display: grid;
+    grid-template-columns: 6px 128px minmax(0, 1fr) minmax(0, 1.15fr);
+    gap: 18px;
+    align-items: center;
+    background: var(--bg-surface);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-lg);
+    padding: 0;
+    overflow: hidden;
+  }
+  .role-row > .stripe { align-self: stretch; }
+  .role-row > *:not(.stripe) { padding: 15px 0; }
+  .role-row > *:last-child { padding-right: 20px; }
+
+  .role-name {
+    font-family: var(--font-mono);
+    font-size: var(--text-sm);
+    font-weight: 700;
+  }
+  .role-mean { font-size: var(--text-sm); font-weight: 500; }
+  .role-ex {
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    color: var(--text-tertiary);
+    line-height: 1.55;
+    word-break: break-word;
+  }
+
+  @media (max-width: 800px) {
+    .role-row { grid-template-columns: 6px minmax(0, 1fr); gap: 0 16px; padding-bottom: 4px; }
+    .role-row > .stripe { grid-row: 1 / span 3; }
+    .role-row > *:not(.stripe) { padding: 4px 20px 4px 0; }
+    .role-row > *:nth-child(2) { padding-top: 14px; }
+    .role-row > *:last-child { padding-bottom: 14px; }
+  }
+
+  .r-ok    .stripe { background: var(--state-ok); }
+  .r-ok    .role-name { color: var(--state-ok); }
+  .r-warn  .stripe { background: var(--state-warn); }
+  .r-warn  .role-name { color: var(--state-warn); }
+  .r-dang  .stripe { background: var(--state-danger); }
+  .r-dang  .role-name { color: var(--state-danger); }
+  .r-info  .stripe { background: var(--state-info); }
+  .r-info  .role-name { color: var(--state-info); }
+  .r-human .stripe { background: var(--state-human); }
+  .r-human .role-name { color: var(--state-human); }
+
+  .split-note {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 14px;
+    margin-top: 20px;
+  }
+  .sn {
+    border-radius: var(--radius-lg);
+    padding: 16px 18px;
+    font-size: var(--text-sm);
+    line-height: 1.6;
+  }
+  .sn b { display: block; margin-bottom: 4px; font-weight: 700; }
+  .sn--warn { background: var(--state-warn-subtle); color: var(--state-warn); }
+  .sn--dang { background: var(--state-danger-subtle); color: var(--state-danger); }
+
+  /* ── Шкалы ─────────────────────────────────────────────────────────── */
+
+  .scale { margin-bottom: 26px; }
+  .scale-label {
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    color: var(--text-tertiary);
+    margin-bottom: 8px;
+    display: flex;
+    gap: 10px;
+    align-items: baseline;
+  }
+  .scale-label em {
+    font-style: normal;
+    text-transform: none;
+    letter-spacing: 0;
+    font-family: var(--font-sans);
+    color: var(--text-secondary);
+  }
+  .swatches {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(72px, 1fr));
+    gap: 4px;
+  }
+  .sw {
+    border-radius: var(--radius-sm);
+    aspect-ratio: 1 / 1.05;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+    padding: 7px 8px;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    line-height: 1.3;
+    border: 1px solid var(--border-subtle);
+    min-height: 62px;
+  }
+  .sw .step { font-weight: 700; }
+  .sw .val { opacity: .72; font-size: 9px; letter-spacing: -.02em; }
+  .sw[data-brand]::after {
+    content: "бренд";
+    font-size: 9px;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    opacity: .8;
+    margin-top: 2px;
+  }
+
+  /* ── Бейджи домена ─────────────────────────────────────────────────── */
+
+  .group { margin-bottom: 24px; }
+  .group-title {
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    color: var(--text-tertiary);
+    margin-bottom: 10px;
+  }
+  .badges { display: flex; flex-wrap: wrap; gap: 8px; }
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 5px 12px;
+    border-radius: var(--radius-full);
+    font-size: var(--text-xs);
+    font-weight: 500;
+    white-space: nowrap;
+  }
+  .badge .dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: currentColor;
+    flex-shrink: 0;
+  }
+  .badge .mono {
+    font-family: var(--font-mono);
+    opacity: .68;
+    font-size: 10px;
+  }
+  .b-ok    { color: var(--state-ok);     background: var(--state-ok-subtle); }
+  .b-warn  { color: var(--state-warn);   background: var(--state-warn-subtle); }
+  .b-dang  { color: var(--state-danger); background: var(--state-danger-subtle); }
+  .b-info  { color: var(--state-info);   background: var(--state-info-subtle); }
+  .b-human { color: var(--state-human);  background: var(--state-human-subtle); }
+  .b-muted { color: var(--text-tertiary); background: var(--bg-hover); }
+
+  /* ── Таймлайн ──────────────────────────────────────────────────────── */
+
+  .timeline {
+    background: var(--bg-surface);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+  }
+  .tl-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+    padding: 14px 18px;
+    border-bottom: 1px solid var(--border-subtle);
+    background: var(--bg-sunken);
+  }
+  .tl-head .cmd {
+    font-family: var(--font-mono);
+    font-size: var(--text-sm);
+    font-weight: 500;
+  }
+  .tl-row {
+    display: grid;
+    grid-template-columns: 150px 64px minmax(0, 1fr);
+    gap: 14px;
+    align-items: baseline;
+    padding: 9px 18px;
+    border-bottom: 1px solid var(--border-subtle);
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+  }
+  .tl-row:last-child { border-bottom: none; }
+  .tl-stage { color: var(--text-secondary); }
+  .tl-ms { color: var(--text-tertiary); font-variant-numeric: tabular-nums; text-align: right; }
+  .tl-detail { color: var(--text-primary); word-break: break-word; line-height: 1.5; }
+  .tl-row.hit { background: var(--state-warn-subtle); }
+  .tl-row.hit .tl-stage, .tl-row.hit .tl-detail, .tl-row.hit .tl-ms { color: var(--state-warn); }
+  .tl-row.crit { background: var(--state-danger-subtle); }
+  .tl-row.crit .tl-stage, .tl-row.crit .tl-detail, .tl-row.crit .tl-ms { color: var(--state-danger); }
+
+  @media (max-width: 640px) {
+    .tl-row { grid-template-columns: minmax(0, 1fr) 56px; gap: 4px 12px; }
+    .tl-detail { grid-column: 1 / -1; }
+  }
+
+  .banner {
+    background: var(--state-danger-subtle);
+    color: var(--state-danger);
+    border-bottom: 1px solid var(--state-danger);
+    padding: 9px 16px;
+    font-weight: 600;
+    font-size: var(--text-sm);
+    text-align: center;
+  }
+
+  /* ── Типографика ───────────────────────────────────────────────────── */
+
+  .type-grid { display: flex; flex-direction: column; gap: 2px; }
+  .type-row {
+    display: grid;
+    grid-template-columns: 96px 68px minmax(0, 1fr);
+    gap: 18px;
+    align-items: baseline;
+    padding: 11px 0;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+  .type-row:last-child { border-bottom: none; }
+  .type-tok, .type-px {
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    color: var(--text-tertiary);
+    font-variant-numeric: tabular-nums;
+  }
+  @media (max-width: 620px) {
+    .type-row { grid-template-columns: 96px minmax(0, 1fr); }
+    .type-px { display: none; }
+  }
+
+  .mono-demo {
+    margin-top: 24px;
+    background: var(--bg-sunken);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-lg);
+    padding: 18px;
+    overflow-x: auto;
+  }
+  .mono-demo pre {
+    font-family: var(--font-mono);
+    font-size: var(--text-sm);
+    white-space: pre;
+    font-variant-ligatures: none;
+    line-height: 1.7;
+  }
+  .mono-demo .flag { color: var(--state-info); }
+  .mono-demo .bad  { color: var(--state-danger); font-weight: 700; }
+  .mono-demo .cap {
+    display: block;
+    margin-top: 12px;
+    font-family: var(--font-sans);
+    font-size: var(--text-sm);
+    color: var(--text-secondary);
+    white-space: normal;
+    line-height: 1.6;
+  }
+
+  /* ── Форма ─────────────────────────────────────────────────────────── */
+
+  .shape-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+    gap: 12px;
+  }
+  .shape {
+    background: var(--bg-surface);
+    border: 1px solid var(--border-default);
+    padding: 22px 14px 14px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    color: var(--text-tertiary);
+  }
+  .shape b { color: var(--text-primary); font-weight: 500; }
+
+  /* ── Кнопки ────────────────────────────────────────────────────────── */
+
+  .btn-row { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+  .btn {
+    padding: 9px 20px;
+    border-radius: var(--radius-md);
+    font-size: var(--text-md);
+    font-weight: 500;
+    font-family: inherit;
+    border: 1px solid transparent;
+    cursor: pointer;
+    transition: opacity var(--motion-fast) var(--motion-ease),
+                background var(--motion-fast) var(--motion-ease);
+  }
+  .btn-primary { background: var(--text-primary); color: var(--text-inverse); }
+  .btn-primary:hover { opacity: .88; }
+  .btn-secondary { background: transparent; color: var(--text-primary); border-color: var(--border-default); }
+  .btn-secondary:hover { background: var(--bg-hover); }
+  .btn-danger { background: var(--brand); color: var(--text-on-brand); font-weight: 600; }
+  .btn-danger:hover { background: var(--brand-hover); }
+  .btn-note {
+    font-size: var(--text-sm);
+    color: var(--text-secondary);
+    max-width: 46ch;
+    line-height: 1.55;
+  }
+
+  /* ── Правила ───────────────────────────────────────────────────────── */
+
+  .rules { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; }
+  .rule {
+    background: var(--bg-surface);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-lg);
+    padding: 18px 20px;
+  }
+  .rule .tag {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: .09em;
+    text-transform: uppercase;
+    padding: 3px 8px;
+    border-radius: var(--radius-full);
+    display: inline-block;
+    margin-bottom: 10px;
+    font-weight: 700;
+  }
+  .rule.do  .tag { color: var(--state-ok); background: var(--state-ok-subtle); }
+  .rule.dont .tag { color: var(--state-danger); background: var(--state-danger-subtle); }
+  .rule b { display: block; font-weight: 600; margin-bottom: 5px; }
+  .rule p { font-size: var(--text-sm); color: var(--text-secondary); line-height: 1.6; }
+
+  footer {
+    margin-top: clamp(56px, 9vw, 88px);
+    padding-top: 26px;
+    border-top: 1px solid var(--border-default);
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    color: var(--text-tertiary);
+    line-height: 1.9;
+  }
+  footer b { color: var(--text-secondary); font-weight: 500; }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      transition-duration: .01ms !important;
+      animation-duration: .01ms !important;
+    }
+  }
+</style>
+
+<div class="wrap">
+
+  <header>
+    <div>
+      <div class="mark">
+        <svg width="22" height="22" viewBox="0 0 22 22" fill="none" aria-hidden="true">
+          <ellipse cx="11" cy="11" rx="10" ry="10" fill="#FF1B2D"/>
+          <ellipse cx="11" cy="11" rx="4.1" ry="8.4" fill="var(--bg-app)"/>
+        </svg>
+        <span>mcpproxy&nbsp;/&nbsp;design</span>
+      </div>
+      <h1>Opera Red Token Set</h1>
+      <p class="lede">
+        Визуальный язык прокси. Одно правило определяет всю систему:
+        <strong>красный — это семантика, а не украшение.</strong>
+        В приложении, которое наблюдает за безопасностью, красный обязан что-то значить,
+        иначе настоящая критическая строка потеряется среди декора.
+      </p>
+    </div>
+    <button class="toggle" id="themeBtn" type="button">
+      <span id="themeLabel">тема</span>
+    </button>
+  </header>
+
+  <!-- 01 ───────────────────────────────────────────────────────────────── -->
+  <section>
+    <div class="sec-head"><span class="num">01</span><h2>Фирменный красный</h2></div>
+    <p class="sec-note">
+      Палитра построена вокруг красного Opera. Он появляется ровно в трёх местах —
+      и нигде больше. Кнопка «Запустить» красится инверсным нейтральным, а не брендом.
+    </p>
+
+    <div class="brand-block">
+      <div class="brand-chip">
+        <div class="hex">#FF1B2D</div>
+        <div class="role">op-red-500 · opera red</div>
+      </div>
+      <div class="places">
+        <div class="place">
+          <div class="place-n">01</div>
+          <div><b>Знак продукта</b><p>Лого и активный индикатор навигации.</p></div>
+        </div>
+        <div class="place">
+          <div class="place-n">02</div>
+          <div><b>Кольцо фокуса</b><p>Клавиатура — основной способ работы с длинным таймлайном. Кольцо не убирается никогда.</p></div>
+        </div>
+        <div class="place">
+          <div class="place-n">03</div>
+          <div><b>Критические состояния</b><p>Атака прошла, цепочка аудита сломана, сработал mandatory deny.</p></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="rule-callout">
+      <b>Почему так.</b> Если красить брендовым красным кнопки «Сохранить», он перестанет
+      читаться как сигнал. Приложение существует, чтобы человек за долю секунды находил
+      строку, которая требует внимания — а не чтобы выглядеть фирменно.
+    </div>
+  </section>
+
+  <!-- 02 ───────────────────────────────────────────────────────────────── -->
+  <section>
+    <div class="sec-head"><span class="num">02</span><h2>Пять ролей, а не три</h2></div>
+    <p class="sec-note">
+      Стандартная триада «успех / предупреждение / ошибка» здесь ломается. Отказ прокси —
+      это не ошибка, а нормальный рабочий исход: защита сработала. Смешать его с настоящей
+      аварией значит потерять смысл продукта.
+    </p>
+
+    <div class="roles">
+      <div class="role-row r-ok">
+        <div class="stripe"></div>
+        <div class="role-name">ok</div>
+        <div class="role-mean">Прошло штатно</div>
+        <div class="role-ex">тесты выполнены · вызов разрешён · sandbox: seatbelt</div>
+      </div>
+      <div class="role-row r-warn">
+        <div class="stripe"></div>
+        <div class="role-name">warn</div>
+        <div class="role-mean">Отбито — защита сработала</div>
+        <div class="role-ex">network denied: evil.io:443 · отказ валидатора · path вне root</div>
+      </div>
+      <div class="role-row r-dang">
+        <div class="stripe"></div>
+        <div class="role-name">danger</div>
+        <div class="role-mean">Плохо по-настоящему</div>
+        <div class="role-ex">атака прошла в baseline · цепочка разошлась · mandatory deny</div>
+      </div>
+      <div class="role-row r-info">
+        <div class="stripe"></div>
+        <div class="role-name">info</div>
+        <div class="role-mean">Ждём человека</div>
+        <div class="role-ex">апрув в очереди · элицитация · pending_approval</div>
+      </div>
+      <div class="role-row r-human">
+        <div class="stripe"></div>
+        <div class="role-name">human</div>
+        <div class="role-mean">Решение человека действует</div>
+        <div class="role-ex">одобрено вручную · активен TTL 10 мин · scope: recipe+args</div>
+      </div>
+    </div>
+
+    <div class="split-note">
+      <div class="sn sn--warn">
+        <b>Янтарь — система работает</b>
+        «Песочница отбила попытку выхода в сеть» означает, что всё устроено правильно.
+        Это событие для внимания, а не для тревоги.
+      </div>
+      <div class="sn sn--dang">
+        <b>Исключение: mandatory deny</b>
+        Попытка записи в <span class="inline-code">.git/hooks</span> отбита успешно,
+        но сам факт означает, что код пытался закрепиться в системе. Это не рутина.
+      </div>
+    </div>
+  </section>
+
+  <!-- 03 ───────────────────────────────────────────────────────────────── -->
+  <section>
+    <div class="sec-head"><span class="num">03</span><h2>Шкалы</h2></div>
+    <p class="sec-note">
+      Нейтральные слегка холодные, без чистого чёрного — как поверхности Opera One.
+      На OLED чистый <span class="inline-code">#000</span> даёт провалы между модулями.
+    </p>
+
+    <div class="scale">
+      <div class="scale-label">op-red <em>— бренд и критическое</em></div>
+      <div class="swatches" id="sc-red"></div>
+    </div>
+    <div class="scale">
+      <div class="scale-label">op-neutral <em>— поверхности и текст</em></div>
+      <div class="swatches" id="sc-neutral"></div>
+    </div>
+    <div class="scale">
+      <div class="scale-label">op-green <em>— прошло</em></div>
+      <div class="swatches" id="sc-green"></div>
+    </div>
+    <div class="scale">
+      <div class="scale-label">op-amber <em>— отбито</em></div>
+      <div class="swatches" id="sc-amber"></div>
+    </div>
+    <div class="scale">
+      <div class="scale-label">op-blue <em>— ждём человека</em></div>
+      <div class="swatches" id="sc-blue"></div>
+    </div>
+    <div class="scale">
+      <div class="scale-label">op-violet <em>— решение принято</em></div>
+      <div class="swatches" id="sc-violet"></div>
+    </div>
+  </section>
+
+  <!-- 04 ───────────────────────────────────────────────────────────────── -->
+  <section>
+    <div class="sec-head"><span class="num">04</span><h2>Семантика домена</h2></div>
+    <p class="sec-note">
+      Компоненты спрашивают роль, а не цвет — поэтому смена палитры не требует правок
+      в компонентах. Рядом с цветом всегда стоит текст: дальтонизм и проектор на демо
+      ломают чистую цветовую кодировку.
+    </p>
+
+    <div class="group">
+      <div class="group-title">вердикт вызова</div>
+      <div class="badges">
+        <span class="badge b-ok"><i class="dot"></i>разрешено<span class="mono">allowed</span></span>
+        <span class="badge b-warn"><i class="dot"></i>отказано<span class="mono">denied</span></span>
+        <span class="badge b-info"><i class="dot"></i>ждёт апрува<span class="mono">pending_approval</span></span>
+        <span class="badge b-dang"><i class="dot"></i>ошибка<span class="mono">error</span></span>
+      </div>
+    </div>
+
+    <div class="group">
+      <div class="group-title">тир риска — выводится из аннотаций, не задаётся вручную</div>
+      <div class="badges">
+        <span class="badge b-ok"><i class="dot"></i>низкий<span class="mono">low</span></span>
+        <span class="badge b-warn"><i class="dot"></i>средний<span class="mono">medium</span></span>
+        <span class="badge b-dang"><i class="dot"></i>высокий<span class="mono">high</span></span>
+      </div>
+    </div>
+
+    <div class="group">
+      <div class="group-title">режим песочницы</div>
+      <div class="badges">
+        <span class="badge b-dang"><i class="dot"></i>без песочницы<span class="mono">none</span></span>
+        <span class="badge b-ok"><i class="dot"></i>seatbelt<span class="mono">seatbelt</span></span>
+        <span class="badge b-info"><i class="dot"></i>контейнер<span class="mono">container</span></span>
+      </div>
+    </div>
+
+    <div class="group">
+      <div class="group-title">нарушения песочницы</div>
+      <div class="badges">
+        <span class="badge b-warn"><i class="dot"></i>сеть<span class="mono">network</span></span>
+        <span class="badge b-warn"><i class="dot"></i>чтение<span class="mono">file-read</span></span>
+        <span class="badge b-warn"><i class="dot"></i>запись<span class="mono">file-write</span></span>
+        <span class="badge b-warn"><i class="dot"></i>процесс<span class="mono">process</span></span>
+        <span class="badge b-dang"><i class="dot"></i>persistence<span class="mono">mandatory-deny</span></span>
+      </div>
+    </div>
+
+    <div class="group">
+      <div class="group-title">аннотации MCP — роль зависит от значения</div>
+      <div class="badges">
+        <span class="badge b-ok"><i class="dot"></i>только чтение<span class="mono">readOnly: true</span></span>
+        <span class="badge b-muted"><i class="dot"></i>только чтение<span class="mono">readOnly: false</span></span>
+        <span class="badge b-dang"><i class="dot"></i>разрушительный<span class="mono">destructive: true</span></span>
+        <span class="badge b-warn"><i class="dot"></i>внешний мир<span class="mono">openWorld: true</span></span>
+        <span class="badge b-ok"><i class="dot"></i>идемпотентный<span class="mono">idempotent: true</span></span>
+      </div>
+    </div>
+  </section>
+
+  <!-- 05 ───────────────────────────────────────────────────────────────── -->
+  <section>
+    <div class="sec-head"><span class="num">05</span><h2>Как это собирается</h2></div>
+    <p class="sec-note">
+      Таймлайн вызова — главный экран приложения. Здесь видно не «разрешено»,
+      а <em>почему</em> разрешено, и на какой стадии вызов остановился.
+    </p>
+
+    <div class="timeline">
+      <div class="banner">sandbox: none — baseline-режим, защита выключена</div>
+      <div class="tl-head">
+        <span class="cmd">run_tests · pattern: "auth"</span>
+        <span class="badge b-ok"><i class="dot"></i>разрешено</span>
+      </div>
+      <div class="tl-row"><span class="tl-stage">валидация</span><span class="tl-ms">2 мс</span><span class="tl-detail">pattern ✓ ^[\w./-]{0,64}$</span></div>
+      <div class="tl-row"><span class="tl-stage">сборка argv</span><span class="tl-ms">1 мс</span><span class="tl-detail">/opt/homebrew/bin/pnpm test --testPathPattern auth</span></div>
+      <div class="tl-row"><span class="tl-stage">оценка риска</span><span class="tl-ms">0 мс</span><span class="tl-detail">low — readOnly: false, destructive: false</span></div>
+      <div class="tl-row"><span class="tl-stage">запуск</span><span class="tl-ms">11 мс</span><span class="tl-detail">pid 48211 · env: PATH, HOME, CI</span></div>
+      <div class="tl-row crit"><span class="tl-stage">нарушение</span><span class="tl-ms">—</span><span class="tl-detail">исходящее соединение evil.io:443 — 1.2 KB отправлено</span></div>
+      <div class="tl-row crit"><span class="tl-stage">нарушение</span><span class="tl-ms">—</span><span class="tl-detail">прочитан ~/.aws/credentials</span></div>
+      <div class="tl-row"><span class="tl-stage">завершено</span><span class="tl-ms">4.2 с</span><span class="tl-detail">exit 0 · 42 теста пройдено</span></div>
+    </div>
+
+    <div style="height:14px"></div>
+
+    <div class="timeline">
+      <div class="tl-head">
+        <span class="cmd">run_tests · pattern: "auth" · sandbox: seatbelt</span>
+        <span class="badge b-ok"><i class="dot"></i>разрешено</span>
+      </div>
+      <div class="tl-row"><span class="tl-stage">профиль песочницы</span><span class="tl-ms">3 мс</span><span class="tl-detail">read: ./ · write: coverage, .cache · network: ∅</span></div>
+      <div class="tl-row"><span class="tl-stage">запуск</span><span class="tl-ms">14 мс</span><span class="tl-detail">pid 48294 · sandbox-exec</span></div>
+      <div class="tl-row hit"><span class="tl-stage">нарушение</span><span class="tl-ms">—</span><span class="tl-detail">network denied: evil.io:443 — 0 байт</span></div>
+      <div class="tl-row hit"><span class="tl-stage">нарушение</span><span class="tl-ms">—</span><span class="tl-detail">file-read denied: ~/.aws/credentials</span></div>
+      <div class="tl-row"><span class="tl-stage">завершено</span><span class="tl-ms">4.3 с</span><span class="tl-detail">exit 0 · 42 теста пройдено</span></div>
+    </div>
+
+    <p class="sec-note" style="margin-top:18px;margin-bottom:0">
+      Один и тот же валидный вызов, два клика, разный исход. Красный сверху означает
+      «защита не сработала»; янтарь снизу — «сработала». Разные цвета здесь —
+      не стилистика, а единственное, что отличает провал от успеха.
+    </p>
+  </section>
+
+  <!-- 06 ───────────────────────────────────────────────────────────────── -->
+  <section>
+    <div class="sec-head"><span class="num">06</span><h2>Типографика</h2></div>
+    <p class="sec-note">
+      Inter для интерфейса, JetBrains Mono для всего, что пользователь сверяет глазами.
+    </p>
+
+    <div class="type-grid">
+      <div class="type-row"><span class="type-tok">text-2xl</span><span class="type-px">28px / 700</span><span style="font-size:1.75rem;font-weight:700;letter-spacing:-.02em">Подтвердить публикацию</span></div>
+      <div class="type-row"><span class="type-tok">text-xl</span><span class="type-px">20px / 600</span><span style="font-size:1.25rem;font-weight:600;letter-spacing:-.015em">Таймлайн вызова</span></div>
+      <div class="type-row"><span class="type-tok">text-lg</span><span class="type-px">16px / 600</span><span style="font-size:1rem;font-weight:600">Профиль песочницы</span></div>
+      <div class="type-row"><span class="type-tok">text-md</span><span class="type-px">14px / 400</span><span style="font-size:.875rem">Основной текст интерфейса — списки, описания, тела карточек</span></div>
+      <div class="type-row"><span class="type-tok">text-sm</span><span class="type-px">13px / 400</span><span style="font-size:.8125rem">Плотные таблицы и строки таймлайна</span></div>
+      <div class="type-row"><span class="type-tok">text-xs</span><span class="type-px">11px / 600</span><span class="eyebrow" style="font-size:.6875rem;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--text-tertiary)">стадия · тир риска · режим</span></div>
+    </div>
+
+    <div class="mono-demo">
+      <pre>/opt/homebrew/bin/pnpm test <span class="flag">--testPathPattern</span> auth
+/opt/homebrew/bin/pnpm test <span class="flag">--testPathPattern</span> <span class="bad">аuth</span>   ← кириллическая «а»</pre>
+      <span class="cap">
+        Моноширинный здесь не украшение. Пользователь глазами сверяет аргументы команды,
+        а пропорциональный шрифт прячет подмену символа. По этой же причине argv
+        никогда не переносится по словам: разорванный аргумент читается как два разных.
+      </span>
+    </div>
+  </section>
+
+  <!-- 07 ───────────────────────────────────────────────────────────────── -->
+  <section>
+    <div class="sec-head"><span class="num">07</span><h2>Форма и действия</h2></div>
+    <p class="sec-note">
+      Скругления заметно выше среднего — Opera One модульный и круглый.
+    </p>
+
+    <div class="shape-grid">
+      <div class="shape" style="border-radius:6px"><b>6px</b>radius-sm</div>
+      <div class="shape" style="border-radius:10px"><b>10px</b>radius-md</div>
+      <div class="shape" style="border-radius:14px"><b>14px</b>radius-lg</div>
+      <div class="shape" style="border-radius:20px"><b>20px</b>radius-xl</div>
+      <div class="shape" style="border-radius:999px"><b>999px</b>radius-full</div>
+    </div>
+
+    <div style="height:28px"></div>
+
+    <div class="btn-row">
+      <button class="btn btn-primary" type="button">Запустить</button>
+      <button class="btn btn-secondary" type="button">Отмена</button>
+      <button class="btn btn-danger" type="button">Опубликовать релиз</button>
+      <p class="btn-note">
+        Основное действие — инверсный нейтральный. Брендовый красный получает только
+        разрушительное действие: это единственная кнопка, которой он положен.
+      </p>
+    </div>
+  </section>
+
+  <!-- 08 ───────────────────────────────────────────────────────────────── -->
+  <section>
+    <div class="sec-head"><span class="num">08</span><h2>Правила</h2></div>
+
+    <div class="rules">
+      <div class="rule do">
+        <span class="tag">делай</span>
+        <b>Спрашивай роль, а не цвет</b>
+        <p>Компонент берёт <span class="inline-code">roleVars('warn')</span>, а не хекс. Смена палитры тогда не трогает компоненты.</p>
+      </div>
+      <div class="rule do">
+        <span class="tag">делай</span>
+        <b>Ставь текст рядом с цветом</b>
+        <p>Дальтонизм и проектор на демо ломают чистую цветовую кодировку. Цвет — усиление, не носитель.</p>
+      </div>
+      <div class="rule do">
+        <span class="tag">делай</span>
+        <b>Помечай режим без песочницы</b>
+        <p>Баннер во всю ширину, красный. Baseline не должен ни секунды выглядеть как обычная работа.</p>
+      </div>
+      <div class="rule dont">
+        <span class="tag">не делай</span>
+        <b>Не крась красным основные кнопки</b>
+        <p>Он перестанет читаться как сигнал, и критическая строка потеряется среди декора.</p>
+      </div>
+      <div class="rule dont">
+        <span class="tag">не делай</span>
+        <b>Не правь tokens.css руками</b>
+        <p>Он генерируется из <span class="inline-code">src/tokens.ts</span>. Правка молча разъедется с TS и всплывёт через месяц.</p>
+      </div>
+      <div class="rule dont">
+        <span class="tag">не делай</span>
+        <b>Не крась отказ прокси красным</b>
+        <p>Отказ — штатная работа. Красный оставь для случаев, когда защита не сработала.</p>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <b>@mcpproxy/design</b> · источник истины — <b>src/tokens.ts</b> и <b>src/palette.ts</b><br>
+    dist/css/tokens.css генерируется через <b>yarn workspace @mcpproxy/design build</b><br>
+    семантика домена — <b>src/semantic.ts</b> · правила — <b>README.md</b>
+  </footer>
+
+</div>
+
+<script>
+  const SCALES = {
+    red: { 50:'#FFF0F1',100:'#FFDDE0',200:'#FFBFC5',300:'#FF949E',400:'#FF5568',
+           500:'#FF1B2D',600:'#E00A1C',700:'#B80816',800:'#920A15',900:'#740D16',950:'#400308' },
+    neutral: { 0:'#FFFFFF',25:'#FBFBFC',50:'#F6F6F8',100:'#EEEEF1',200:'#E0E0E5',
+               300:'#C6C6CE',400:'#9B9BA6',500:'#74747F',600:'#55555F',700:'#3D3D46',
+               800:'#2A2A31',900:'#1C1C21',950:'#131317',1000:'#0A0A0C' },
+    green: { 50:'#E6FCF5',100:'#C3FAE8',300:'#63E6BE',400:'#38D9A9',500:'#0CA678',600:'#099268',700:'#087F5B',900:'#05513A' },
+    amber: { 50:'#FFF9DB',100:'#FFF3BF',300:'#FFD43B',400:'#FFB84D',500:'#F08C00',600:'#D9480F',700:'#A15C07',900:'#5C3200' },
+    blue:  { 50:'#E7F5FF',100:'#D0EBFF',300:'#74C0FC',400:'#4DABF7',500:'#1C7ED6',600:'#1971C2',700:'#1560AC',900:'#0B3D6B' },
+    violet:{ 50:'#F3F0FF',100:'#E5DBFF',300:'#B197FC',400:'#9775FA',500:'#7048E8',600:'#6741D9',700:'#5231B8',900:'#2F1A6B' },
+  };
+
+  // Порог по относительной яркости — подпись должна читаться на своей плашке.
+  function ink(hex) {
+    const n = parseInt(hex.slice(1), 16);
+    const [r, g, b] = [(n >> 16) & 255, (n >> 8) & 255, n & 255].map(v => {
+      const s = v / 255;
+      return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
+    });
+    return (0.2126 * r + 0.7152 * g + 0.0722 * b) > 0.42 ? '#0A0A0C' : '#FFFFFF';
+  }
+
+  for (const [name, scale] of Object.entries(SCALES)) {
+    const host = document.getElementById('sc-' + name);
+    if (!host) continue;
+    for (const [step, hex] of Object.entries(scale)) {
+      const el = document.createElement('div');
+      el.className = 'sw';
+      el.style.background = hex;
+      el.style.color = ink(hex);
+      if (name === 'red' && step === '500') el.setAttribute('data-brand', '');
+      el.innerHTML = '<span class="step">' + step + '</span><span class="val">' + hex + '</span>';
+      host.appendChild(el);
+    }
+  }
+
+  const root = document.documentElement;
+  const btn = document.getElementById('themeBtn');
+  const label = document.getElementById('themeLabel');
+
+  function current() {
+    const set = root.getAttribute('data-theme');
+    if (set) return set;
+    return matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  }
+  function paint() { label.textContent = current() === 'dark' ? 'тёмная' : 'светлая'; }
+
+  btn.addEventListener('click', () => {
+    root.setAttribute('data-theme', current() === 'dark' ? 'light' : 'dark');
+    paint();
+  });
+
+  matchMedia('(prefers-color-scheme: dark)').addEventListener('change', paint);
+  paint();
+</script>

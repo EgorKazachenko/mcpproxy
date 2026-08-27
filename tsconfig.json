@@ -1,0 +1,11 @@
+{
+  "files": [],
+  "references": [
+    { "path": "packages/contracts" },
+    { "path": "packages/design" },
+    { "path": "packages/core" },
+    { "path": "packages/mcp-server" },
+    { "path": "packages/desktop" },
+    { "path": "packages/bench" }
+  ]
+}
