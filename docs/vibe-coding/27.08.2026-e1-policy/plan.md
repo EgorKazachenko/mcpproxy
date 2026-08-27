@@ -1,7 +1,7 @@
 # E1 — policy engine: план
 
 **Clean-code review:** passed (round 1) (2026-08-27)
-**Plan review:** раунд 1 — REVISE (7B/11M); раунд 2 — REVISE (6B/16M); раунд 3 — REVISE (5B/15M); всё применено (2026-08-28)
+**Plan review:** раунд 1 — REVISE (7B/11M); 2 — REVISE (6B/16M); 3 — REVISE (5B/15M); 4 — REVISE (2B/5M); всё применено (2026-08-28)
 
 ## Goal
 
@@ -315,7 +315,7 @@ No test files found, exiting with code 1
 
 **Commit:** `E1: тест-инфраструктура core, пять характеризаций, топологический корневой test`
 
-**Falsification** — ассертится `check.status`, `check.diff.changed.length`, `mismatched.length`, `denyReason` и `store.current().manifest.digest`:
+### Task 2 — загрузка и сверка (R1, R1a, R2a, R3, R4, R5a, R6, R6a, R6b, R7, R9, R10, R11, R13, R17a)
 
 **Files:** `packages/core/src/policy/lock-check.ts` (Create), `packages/core/src/policy/lock-check.test.ts` (Create), `packages/core/src/policy/store.ts` (Create), `packages/core/src/policy/store.test.ts` (Create)
 
@@ -329,6 +329,7 @@ export interface LockVerdict {
   readonly check: LockCheck;
   readonly diagnostics: readonly Diagnostic[];
   readonly mismatched: readonly string[];
+  readonly digest: { readonly was: string; readonly is: string } | null;
   readonly denyReason: string | null;
 }
 export function checkLock(manifest: LoadedManifest, lock: LoadedLock): LockVerdict;
@@ -364,7 +365,6 @@ export interface LoadedPolicy {
 export interface StoreDeps {
   readonly statSize: (path: string) => Promise<number>;
   readonly readFile: (path: string) => Promise<string>;
-  readonly now: () => string;
 }
 
 export declare function startStore(manifestPath: string, lockPath: string, deps?: Partial<StoreDeps>): Promise<StartResult>;
@@ -393,9 +393,17 @@ export interface StartedStore {
 `lock.present === false` → `absent`, `denyReason` различает три формы, диагностики `'unparsed'`
 переносятся (R17a). Иначе `diffLock`; затем `verifyLockEntries` — `!ok` → `drifted`, `mismatched`
 в вердикт **и** синтезированная диагностика `code: 'lock'` (P1d: дифф в этом случае пуст). Затем
-дайджест. Затем непустые слоты. Иначе `verified`. `deriveRiskTier` не импортируется.
+дайджест: расхождение → `drifted` и **обе стороны кладутся в `digest: {was, is}`**. Затем непустые
+слоты. Иначе `verified`. `deriveRiskTier` не импортируется.
 
-**Falsification:**
+**Почему `digest` — поле, а не локальная переменная (R19a).** Путей «дрифт есть, а дифф пуст»
+два, и у них разные улики. Первый — подделанный `snapshot`: `mismatched` называет записи. Второй
+— lock, пересчитанный целиком под изменённый манифест с прежним `manifestHash`: тогда
+`verifyLockEntries` доволен, `diffLock` чист, `mismatched` **пуст**, и расходится только
+дайджест. Не неси вердикт обе его стороны — и на этом пути рендеру нечего сказать вообще, а это
+ровно тот путь, ради которого существует R11.
+
+**Falsification** — наблюдаемые: `check.status`, `check.diff.changed.length`, `mismatched.length`, `denyReason`, `store.current().manifest.digest`:
 1. правка отсутствует → `verifyLockEntries` не зовётся; кейс «честный snapshot, совравший
    recipeHash»: `checkLock(...).check.status` равно `'verified'`; правка на месте → `'drifted'`.
 2. правка отсутствует → сверка дайджеста удалена; кейс **«lock пересчитан целиком под новый
@@ -410,6 +418,13 @@ export interface StartedStore {
    `0` при `status === 'drifted'`; правка на месте → `1`, значение `run_tests`.
 5. правка отсутствует → `denyReason` не различает три формы `absent`; три кейса дают одинаковую
    строку; правка на месте → три разные.
+5a. правка отсутствует → `verdict.diagnostics` всегда пуст; кейс «lock `version: 1`»: наблюдаемое
+   `verdict.diagnostics.length` равно `0`; правка на месте → `2` (число измерено, P5). Без этого
+   следа R17a не наблюдаем нигде: реализация, теряющая диагностики парсера, проходила все
+   остальные следы задачи.
+5b. правка отсутствует → `digest` не заполняется; кейс «lock пересчитан целиком, дайджест
+   прежний»: наблюдаемое `verdict.digest` равно `null` при `status === 'drifted'`; правка на
+   месте → `{was, is}` с двумя разными значениями.
 6. правка отсутствует → неуспешная перечитка заменяет снимок; кейс «первая загрузка успешна,
    вторая возвращает `invalid`»: наблюдаемое `store.current().manifest.digest` **не равно** `d0`;
    правка на месте → равно `d0`, а `reloadManifest()` вернул `{outcome:'invalid'}` с непустыми
@@ -420,12 +435,12 @@ export interface StartedStore {
 8. правка отсутствует → `statSize` не проверяется до чтения; `readFile` вызывается для файла
    размером `MANIFEST_MAX_BYTES + 1`; правка на месте → `readFile` не вызван вовсе.
 
-**Verification:** `yarn workspace @mcpproxy/core test` зелёный; все восемь следов проверены
+**Verification:** `yarn workspace @mcpproxy/core test` зелёный; все десять следов проверены
 мутацией.
 
 **Commit:** `E1: загрузка и сверка — предел до чтения, перечитка отдаёт диагностики, дифф всегда`
 
-**Falsification** — ассертится счётчик вызовов `onChange` и первый аргумент `WatchPrimitive`:
+### Task 3 — наблюдение за каталогом и коалесценция (R5, R5b, R5c)
 
 **Files:** `packages/core/src/policy/watch.ts` (Create), `packages/core/src/policy/watch.fixture.ts` (Create), `packages/core/src/policy/watch.test.ts` (Create)
 
@@ -448,12 +463,17 @@ export function watchPolicy(
 lock. `WatchPrimitive` инъектируется, чтобы это свойство было **под тестом**, а не только под
 пробой: иначе будущая правка тихо вернёт `fs.watch(filePath)` и сломает R5b/R5c.
 
+Фильтр пропускает событие, если `filename` совпадает с базовым именем **или равен `null`**: на
+части платформ имя не сообщается, и трактовать `null` как «не наше» значило бы потерять
+уведомление совсем. Ложное срабатывание стоит одной лишней перезагрузки, пропущенное — вечного
+`absent`.
+
 `watchPolicy` возвращает `{stop()}`, а не `PathWatcher`: он уже владеет `store` и сам делает
 перезагрузку, поэтому `start(onChange)` у него не имеет смысла.
 
 `debounce` возвращает вызываемое с `cancel()`: без него `stop()` не гасит висящий таймер.
 
-**Falsification:**
+**Falsification** — наблюдаемые: счётчик `onChange` и первый аргумент `WatchPrimitive`:
 1. правка отсутствует → `debounce` возвращает `fn` без таймера; счётчик после двух вызовов и
    `vi.advanceTimersByTime(ms)` равен `2`; правка на месте → `1`.
 2. правка отсутствует → `dirWatcher` зовёт примитив с `filePath`; наблюдаемый первый аргумент
@@ -470,7 +490,7 @@ lock. `WatchPrimitive` инъектируется, чтобы это свойс�
 
 **Commit:** `E1: наблюдается каталог, и это под тестом, а не только под пробой`
 
-**Falsification** — ассертится `Object.hasOwn(event, 'argv')` и `Object.hasOwn(event, 'denyReason')`:
+### Task 4 — событие стадии `lock_check` (R12, R12a, R12b)
 
 **Files:** `packages/core/src/policy/event.ts` (Create), `packages/core/src/policy/event.test.ts` (Create)
 
@@ -478,6 +498,7 @@ lock. `WatchPrimitive` инъектируется, чтобы это свойс�
 ```ts
 export interface LockCheckEventInput {
   readonly verdict: LockVerdict;
+  /** Идёт и в `toolName`, и в `recipe.name`: у `AuditEvent` это два обязательных поля. */
   readonly recipeName: RecipeName;
   readonly recipeDigest: string | undefined;
   readonly protocolVersion: string;
@@ -493,10 +514,14 @@ export function lockCheckEvent(input: LockCheckEventInput): AuditEvent;
 ```
 
 `protocolVersion` приходит входом (R12b). `recipeDigest` берётся из `recipeDigests`.
-`argv` **и** `denyReason` присоединяются условным спредом — для `argv` это следует из типа, для
-`denyReason` **не следует** (§Global Constraints).
 
-**Falsification:**
+Условным спредом присоединяются **три** места: `argv`, `denyReason` и `recipe.hash`. Для `argv`
+это следует из типа; для `denyReason` **не следует** (§Global Constraints); для `recipe.hash` —
+тоже не следует: поле объявлено `hash?: string` внутри обязательного `recipe`
+(`packages/contracts/src/event.ts:85`), и имя, которого нет в манифесте, дайджеста не имеет, а
+`{ hash: undefined }` под `exactOptionalPropertyTypes` не присваивается.
+
+**Falsification** — наблюдаемые: `Object.hasOwn(event, 'argv')`, `Object.hasOwn(event, 'denyReason')`:
 1. правка отсутствует → `argv` пишется как `argv: undefined as never` (голое `argv: undefined`
    не компилируется под `exactOptionalPropertyTypes`, поэтому мутация делается через `as`);
    `Object.hasOwn(event, 'argv')` равно `true`; правка на месте → `false`.
@@ -504,13 +529,16 @@ export function lockCheckEvent(input: LockCheckEventInput): AuditEvent;
    `Object.hasOwn(event, 'denyReason')` равно `true`; правка на месте → `false`.
 3. правка отсутствует → `denyReason` не переносится вовсе; кейс `drifted`: `Object.hasOwn` равно
    `false`; правка на месте → `true` со строкой причины.
+4. правка отсутствует → `recipe.hash` пишется безусловно; кейс «имя, которого нет в манифесте,
+   поэтому `recipeDigest` равен `undefined`»: `Object.hasOwn(event.recipe, 'hash')` равно `true`;
+   правка на месте → `false`.
 
 **Verification:** `yarn workspace @mcpproxy/core test` зелёный; событие отказа прогоняется через
 `toOtlp`, проверяется наличие `mcpproxy.deny_reason`.
 
 **Commit:** `E1: событие lock_check — argv и denyReason только когда им есть что сказать`
 
-**Falsification** — ассертится `dirname(captured)`, флаг `open`, порядок вызовов и `readdirSync(dir).length`:
+### Task 5 — сборка и запись lock (R14, R14a)
 
 **Files:** `packages/core/src/policy/lock-write.ts` (Create), `packages/core/src/policy/lock-write.test.ts` (Create)
 
@@ -534,7 +562,17 @@ export function writeLock(lockPath: string, lock: LockFile, deps?: Partial<Write
 и `fsync` были **фальсифицируемы**: прошлая редакция заявляла их в тексте и не имела ни точки
 внедрения, ни следа. Каталог тоже синхронизируется после `rename` — сам `rename` не долговечен.
 
-**Falsification:**
+Печать — `JSON.stringify(lock, null, 2)` (R14): файл читают глазами в ревью гита, поэтому отступ
+обязателен, а хэши к этому моменту уже посчитаны `buildLock` по канонической форме и от печати не
+зависят — след 4 это и закрепляет.
+
+`statSize` → `readFile` в задаче 2 — формально TOCTOU: между проверкой и чтением файл можно
+подменить на больший. Оставлено сознательно, потому что последствие здесь только ресурсное (у
+`parseYaml` есть собственный предел на уже прочитанной строке, а у lock отказ по размеру не
+означает пропуска проверки — он означает `absent`, то есть отказ). Закрывается парой
+`open`+`fstat` на одном дескрипторе, если понадобится; в объём E1 не входит.
+
+**Falsification** — наблюдаемые: `dirname(captured)`, флаг `open`, порядок вызовов, `readdirSync(dir).length`:
 1. правка отсутствует → `tempPath` строит путь в `os.tmpdir()`; `dirname(captured)` не равно
    `dirname(lockPath)`; правка на месте → равно.
 2. правка отсутствует → `open` зовётся с `'w'` вместо `'wx'`; наблюдаемый флаг равен `'w'`;
@@ -551,7 +589,7 @@ export function writeLock(lockPath: string, lock: LockFile, deps?: Partial<Write
 
 **Commit:** `E1: buildLock от проверенного манифеста; wx, fsync и уборка — под следами`
 
-**Falsification** — ассертится `verdictApplicability(...)` и `request.kind`:
+### Task 6 — формы апрува и связывание с дайджестом (R16, R17)
 
 **Files:** `packages/core/src/policy/approve.ts` (Create), `packages/core/src/policy/approve.test.ts` (Create)
 
@@ -560,7 +598,8 @@ export function writeLock(lockPath: string, lock: LockFile, deps?: Partial<Write
 import type { ApprovalDecision } from '@mcpproxy/contracts';
 
 export type LockApprovalRequest =
-  | { readonly kind: 'drift'; readonly diff: LockDiff; readonly mismatched: readonly string[]; readonly manifestHash: string; readonly requestedAt: string }
+  | { readonly kind: 'first'; readonly recipes: readonly string[]; readonly manifestHash: string; readonly requestedAt: string }
+  | { readonly kind: 'drift'; readonly diff: LockDiff; readonly mismatched: readonly string[]; readonly digest: { readonly was: string; readonly is: string } | null; readonly manifestHash: string; readonly requestedAt: string }
   | { readonly kind: 'unusable'; readonly reason: 'unreadable' | 'unparsed'; readonly diagnostics: readonly Diagnostic[]; readonly manifestHash: string; readonly requestedAt: string };
 
 export interface LockApprovalVerdict {
@@ -573,16 +612,28 @@ export function requestFor(policy: LoadedPolicy, requestedAt: string): LockAppro
 export function verdictApplicability(verdict: LockApprovalVerdict, manifest: LoadedManifest): VerdictApplicability;
 ```
 
-Запрос — **размеченное объединение** (R15b). Прошлая редакция объявляла его тотальным с
-обязательным `diff: LockDiff`, но у `'unreadable'` и `'unparsed'` `LockFile` нет вовсе, диффа
-взять негде, а подстановка пустого диффа столкнулась бы с веткой R19a: «дрифт есть, показать
-нечего» стало бы означать и подделку, и ошибку прав, и человек получил бы текст про подделку на
-ошибке доступа. `null` — для `verified`, где спрашивать нечего.
+Запрос — **размеченное объединение из трёх ветвей** (R15b). Первая редакция объявляла его
+тотальным с обязательным `diff: LockDiff`, но у `'unreadable'` и `'unparsed'` `LockFile` нет
+вовсе, диффа взять негде, а подстановка пустого диффа столкнулась бы с веткой R19a: «дрифт есть,
+показать нечего» стало бы означать и подделку, и ошибку прав, и человек получил бы текст про
+подделку на ошибке доступа.
+
+Ветвь `'first'` появилась потому, что «файла нет» перестало быть беззвучной записью (R15b):
+удалить lock дешевле, чем испортить, а по модели угроз ADR-0006 репозиторий правит в том числе
+сама модель. Последовательность «удалить lock → отравить манифест → человек упирается в
+`denied (absent)` и запускает команду» закрепила бы отравленный манифест, ни разу его не показав.
+Теперь показывается и он — списком рецептов, впервые получающих одобрение.
+
+`digest` в ветви `'drift'` — то, чем рендер объясняет второй путь «дрифт без диффа»: lock,
+пересчитанный целиком с прежним `manifestHash`, оставляет `mismatched` пустым, и без обеих сторон
+дайджеста сказать было бы нечего.
+
+`null` возвращается только для `verified`, где спрашивать не о чем.
 
 Сверка идёт по `manifestHash` и только по нему (§Architecture, третий пункт). Оба поля названы
 одинаково; прецедент — `packages/contracts/src/lock.ts:113`.
 
-**Falsification:**
+**Falsification** — наблюдаемые: `verdictApplicability(...)`, `request.kind`:
 1. правка отсутствует → `verdictApplicability` возвращает `'applies'` при
    `decision === 'approved'` без сверки дайджеста; на манифесте с другим дайджестом наблюдаемое
    равно `'applies'`; правка на месте → `'stale'`.
@@ -596,7 +647,7 @@ export function verdictApplicability(verdict: LockApprovalVerdict, manifest: Loa
 
 **Commit:** `E1: запрос апрува размечен, вердикт связан дайджестом`
 
-**Falsification** — ассертится `outcome.kind`, `outcome.why` и факт вызова `confirm`:
+### Task 7 — команда: показать, спросить, перечитать, записать (R15, R15a, R15b, R18, R19, R19a, R20)
 
 **Files:** `packages/core/src/policy/render-diff.ts` (Create), `packages/core/src/policy/render-diff.test.ts` (Create), `packages/core/src/policy/lock-command.ts` (Create), `packages/core/src/policy/lock-command.test.ts` (Create), `packages/core/src/policy/confirm-tty.ts` (Create), `packages/core/src/policy/confirm-tty.test.ts` (Create), `packages/core/bin/mcpproxy-lock.mjs` (Create), `packages/core/package.json` (Modify)
 
@@ -620,10 +671,17 @@ export function parseExpect(argv: readonly string[]): string | null;
 export function confirmTty(request: LockApprovalRequest, rendered: string): Promise<LockApprovalVerdict>;
 ```
 
-Ветвление: `lock.reason === 'missing'` → писать без подтверждения (R15). `verified` →
-`up-to-date`. Иначе — `requestFor`, `renderRequest`, `confirm`, затем **`reloadManifest()`**;
+Ветвление: `verified` → `up-to-date`, писать нечего. **Во всех остальных случаях, включая
+`missing`** — `requestFor`, `renderRequest`, `confirm`, затем **`reloadManifest()`**;
 `{outcome:'invalid'|'unreadable'}` → `refused: 'reload-failed'` (перечитка, упавшая молча, была бы
 fail-open); затем `verdictApplicability` против **нового** снимка; `'applies'` → писать.
+
+Беззвучной ветки не осталось ни одной, и это правка round 4 (R15b). Прежде `missing` писал без
+показа — а удалить lock дешевле, чем испортить, и по модели угроз ADR-0006 репозиторий правит в
+том числе сама модель. «Удалить lock → отравить манифест → человек упирается в `denied (absent)`
+и запускает команду» закрепляло отравленный манифест, ни разу его не показав. D1 это не нарушает:
+первый lock по-прежнему появляется только по явной команде — команда теперь лишь показывает, что
+именно закрепляет.
 
 **`expectDigest` — это межпроцессная половина R15a, и у неё теперь есть смысл.** `mcpproxy-lock` —
 отдельный процесс от демона, поэтому связать «дайджест, на котором демон отказал» с «манифестом,
@@ -638,8 +696,10 @@ fail-open); затем `verdictApplicability` против **нового** сн
 `\r \n \t \v \f` (`packages/contracts/src/tool.ts:52` — `const INVISIBLE = /[\p{Cc}\p{Cf}]/gu;`
 работает уже после их замены пробелом). Длина мерой против инъекции не называется (R20).
 
-`renderRequest` ветвится по `kind`, и у `'drift'` с пустым диффом свой текст, опирающийся на
-`mismatched` (R19a).
+`renderRequest` ветвится по `kind`, и у `'drift'` с пустым диффом **два** разных текста (R19a):
+непустой `mismatched` — «lock подделан, расходятся такие-то записи»; пустой `mismatched` при
+непустом `digest` — «lock пересчитан целиком, дайджест манифеста был X, стал Y». Второй случай и
+есть тот, ради которого существует R11, и без обеих сторон дайджеста сказать о нём нечего.
 
 **R18 в объёме E1 — закрепление допущения:** тест утверждает, что
 `toTool(asRecipeName('run_tests'), recipe).description` не содержит подставленный U+202E, тогда
@@ -647,10 +707,12 @@ fail-open); затем `verdictApplicability` против **нового** сн
 
 `confirm-tty.ts` несёт разбор `--expect` и чтение ответа человека и **покрыт своим тестом**: это
 два входа, на которых держится весь гейт, и жить им в непроверяемом `.mjs` нельзя.
-`bin/mcpproxy-lock.mjs` — три строки. `package.json` получает `bin` **и** `bin` в `files`, иначе
-`files: ["dist"]` его не отгрузит.
+`bin/mcpproxy-lock.mjs` — три строки, и импортирует он **конкретный** `../dist/policy/lock-command.js`,
+а не корневой баррель: баррель наполняется задачей 8, а ручной прогон этой задачи должен работать
+уже здесь. `package.json` получает `bin` **и** `"bin"` в `files`, иначе `files: ["dist"]` его не
+отгрузит.
 
-**Falsification:**
+**Falsification** — наблюдаемые: `outcome.kind`, `outcome.why`, факт вызова `confirm`:
 1. правка отсутствует → команда пишет при `drifted`, не зовя `confirm`; `confirm` не вызван,
    `kind` равен `'written'`; правка на месте → вызван, и при `decision: 'denied'` файл не
    изменён, `kind` равен `'refused'`.
@@ -670,6 +732,12 @@ fail-open); затем `verdictApplicability` против **нового** сн
 6. правка отсутствует → `'unparsed'` попадает в ветку записи без подтверждения; кейс «битый
    lock»: `'written'` без вызова `confirm`; правка на месте → `confirm` вызван с
    `kind: 'unusable'`.
+6a. правка отсутствует → `missing` пишет без показа; кейс «lock удалён, манифест отравлен»:
+   `confirm` не вызван, `kind` равен `'written'`; правка на месте → `confirm` вызван с
+   `kind: 'first'`, и при `decision: 'denied'` файл не создан.
+8a. правка отсутствует → ветка «пустой `mismatched` при непустом `digest`» отсутствует; кейс
+   «lock пересчитан целиком, дайджест прежний»: рендер не содержит ни одной из двух сторон
+   дайджеста; правка на месте → содержит обе.
 7. правка отсутствует → `renderVisible` применяется только к `description`; кейс «U+202E в
    `exec[0]`»: рендер не содержит `<U+202E>`; правка на месте → содержит.
 8. правка отсутствует → ветка «дрифт без диффа» снята; кейс подделанного lock: рендер не
@@ -677,7 +745,7 @@ fail-open); затем `verdictApplicability` против **нового** сн
 9. правка отсутствует → `parseExpect` берёт `argv[1]` вместо значения после `--expect`; кейс
    `['--expect','abc']` даёт `'--expect'`; правка на месте → `'abc'`.
 
-**Verification:** `yarn workspace @mcpproxy/core test` зелёный; девять следов проверены мутацией.
+**Verification:** `yarn workspace @mcpproxy/core test` зелёный; одиннадцать следов проверены мутацией.
 Плюс ручной прогон во временном каталоге с фикстурой манифеста, лежащей в
 `packages/core/src/policy/` (не в `packages/contracts/recipes/`: тот путь не объявлен в `exports`
 пакета): без lock команда пишет его и `checkLock` даёт `verified`; после правки манифеста команда
@@ -686,7 +754,7 @@ fail-open); затем `verdictApplicability` против **нового** сн
 
 **Commit:** `E1: команда перечитывает манифест после ответа, expectDigest связывает процессы`
 
-**Falsification** — ассертится `new Set(records.map((r) => r.key)).size` и число находок `scanSources`:
+### Task 8 — лог диагностик, границы, публичная поверхность (R2, R8, R23, R24)
 
 **Files:** `packages/core/src/policy/diagnostics-log.ts` (Create), `packages/core/src/policy/diagnostics-log.test.ts` (Create), `packages/core/src/policy/boundary.test.ts` (Create), `packages/core/src/policy/scan.ts` (Create), `packages/core/src/index.ts` (Modify)
 
@@ -704,6 +772,13 @@ export function toLogRecords(diagnostics: readonly Diagnostic[], origin: 'manife
 
 export interface ScanRule { readonly pattern: RegExp; readonly roots: readonly string[]; readonly allow: readonly string[] }
 export function scanSources(repoRoot: string, rule: ScanRule): readonly string[];
+
+/** Обход графа: от входа по относительным импортам, с резолвом `@mcpproxy/*` через `exports`. */
+export interface GraphResult { readonly files: readonly string[]; readonly bare: readonly string[] }
+export function walkGraph(entry: string, resolveWorkspace: (specifier: string) => string | null): GraphResult;
+
+/** Чистая половина проверки R24: пути на вход, нарушения на выход. */
+export function pathViolations(changed: readonly string[], allowList: readonly string[]): readonly string[];
 ```
 
 `toLogRecords` берёт **пачку**, потому что ключ обязан быть уникален, а у диагностик lock
@@ -731,16 +806,22 @@ export function scanSources(repoRoot: string, rule: ScanRule): readonly string[]
 3. `deriveRiskTier` не встречается **нигде в `policy/**`** — не только в `lock-check.ts`: у
    `AuditEvent` есть слот `risk` (`packages/contracts/src/event.ts:96`), и `event.ts` — как раз то
    место, где отображение могло бы всплыть заново.
-4. **R24, исполняемо.** Множество изменённых путей ⊆ списка R24. Берётся
-   `git diff --name-only origin/main...HEAD` (**три точки** — от точки ветвления, иначе коммиты,
-   попавшие в `main` после ответвления, читаются как наши нарушения) **и**
-   `git status --porcelain --untracked-files=all`, потому что `git diff` не видит неотслеживаемых
-   файлов, а все поставки E1 — новые файлы: без второй половины проверка молчала бы ровно там,
-   где должна говорить.
+4. **R24, исполняемо и в две половины.** Логика — чистая `pathViolations(changed, allowList)`,
+   и её кейсы гоняются на **списках-фикстурах**, а не на рабочем дереве: иначе тесту пришлось бы
+   создавать мусор вне списка, звать `git status`, удалять его — гонка между воркерами vitest,
+   мусор после падения и транзиторное нарушение R24 ровно в тот момент, когда R24 проверяется.
+   Тот же довод, что и у `scanSources`.
+   Тонкая половина собирает вход из репозитория: `git diff --name-only origin/main...HEAD`
+   (**три точки** — от точки ветвления; две читали бы коммиты, попавшие в `main` после
+   ответвления, как наши нарушения) **и** `git status --porcelain --untracked-files=all`, потому
+   что `git diff` неотслеживаемых файлов не видит, а все поставки E1 — новые файлы: без второй
+   половины проверка молчала бы ровно там, где должна говорить.
+   Если базу разрешить не удалось (в клоне CI `origin/main` может быть не выкачан) — тест
+   **падает**, а не сообщает ноль нарушений: молчаливый ноль здесь и есть fail-open.
 
 `index.ts` — реэкспорт публичной поверхности; `watch.fixture.ts` в него не входит.
 
-**Falsification:**
+**Falsification** — наблюдаемые: `new Set(records.map((r) => r.key)).size`, число находок `scanSources`:
 1. правка отсутствует → `toLogRecords` строит ключ без порядкового номера; кейс «две враждебные
    записи в одном lock, чьи имена схлопываются санитизацией в один `pointer`»:
    `new Set(records.map(r => r.key)).size` равно `1`; правка на месте → `2`.
@@ -766,7 +847,7 @@ export function scanSources(repoRoot: string, rule: ScanRule): readonly string[]
 |---|---|
 | R1 | Задача 2: `startStore` — единственная загрузка; запрет обхода — правило `parseManifest` по `core/src/**` в задаче 8, п. 2 |
 | R1a | Задача 2: «Размер обоих файлов проверяется `statSize` **до** `readFile`» + след 8 |
-| R2 | Задача 8: «`toLogRecords` берёт **пачку**» + след 1 |
+| R2 | Задача 8: «`toLogRecords` берёт **пачку**» + след 1 — ключ несёт порядковый номер, тройки для lock не хватает |
 | R2a | Задача 2: `ReloadResult` вместо `void` + след 6 |
 | R3 | Задача 2: `invalid-manifest`/`unreadable-manifest` на старте; при перечитке снимок не заменяется; сломанный lock → `absent` |
 | R4 | Задача 2: след 6 |
@@ -782,7 +863,7 @@ export function scanSources(repoRoot: string, rule: ScanRule): readonly string[]
 | R9 | Задача 2: «`lock.present === false` → `absent`» |
 | R10 | Задача 2: следы 1 и 4 |
 | R11 | Задача 2: след 2 — «lock пересчитан целиком, дайджест прежний» |
-| R12 | Задача 4: след 1 |
+| R12 | Задача 4: следы 1 и 4 — `argv` и `recipe.hash` условным спредом |
 | R12a | Задача 4: следы 2 и 3 |
 | R12b | Задача 4: «`protocolVersion` приходит входом» |
 | R13 | Задача 8, п. 3: скан всего `policy/**` |
@@ -790,13 +871,13 @@ export function scanSources(repoRoot: string, rule: ScanRule): readonly string[]
 | R14a | Задача 5: следы 2 (`wx`), 3 (`fsync` до `rename`), 5 (уборка) |
 | R15 | Задача 7: «`missing` → писать без подтверждения» |
 | R15a | Задача 7: следы 3 (перечитка) и 5 (`expectDigest`) |
-| R15b | Задача 7: след 6; форма запроса — задача 6, след 3 |
+| R15b | Задача 7: следы 6 и 6a — беззвучных веток не осталось; форма запроса — задача 6, след 3 |
 | R16 | Задача 6: следы 1 и 2 |
 | R17 | Задача 6: `isHeadless` отсутствует; отказ безусловен в задаче 2 |
-| R17a | Задача 2: след 5 |
+| R17a | Задача 2: след 5a — `verdict.diagnostics.length` на lock `version: 1` |
 | R18 | Задача 7: «`toTool(asRecipeName('run_tests'), recipe).description` не содержит подставленный U+202E» |
 | R19 | Задача 7: след 7 |
-| R19a | Задача 7: след 8 |
+| R19a | Задача 7: следы 8 и 8a — обе ветки «дрифт без диффа»; носитель второй — `LockVerdict.digest` (задача 2, след 5b) |
 | R20 | Задача 7: «Длина мерой против инъекции не называется» |
 | R21 | Задача 1: скрипт, конфиг, `runner.test.ts`, топологический корневой `test` |
 | R22 | Задача 1: пять `describe` |
