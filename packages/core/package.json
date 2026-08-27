@@ -10,7 +10,8 @@
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "bin"
   ],
   "scripts": {
     "build": "tsc -b",
@@ -24,5 +25,8 @@
   "devDependencies": {
     "es-module-lexer": "^2.3.2",
     "vitest": "^3"
+  },
+  "bin": {
+    "mcpproxy-lock": "./bin/mcpproxy-lock.mjs"
   }
 }
