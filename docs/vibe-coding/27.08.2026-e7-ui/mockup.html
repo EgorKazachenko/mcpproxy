@@ -264,6 +264,11 @@ body:not(.raw) #app{margin-top:45px}
    связи зал догадывается об этом сам, а на 90 секунд догадок нет. */
 .pairnote{display:block;margin-top:var(--space-3);font-size:var(--text-xs);
   color:var(--text-secondary);font-style:italic}
+.pending{padding:var(--space-6) var(--space-7);border-bottom:1px solid var(--border-subtle);
+  border-left:3px solid var(--state-info)}
+.pending-top{display:flex;align-items:center;gap:var(--space-5);margin-bottom:var(--space-5)}
+.pending-foot{display:flex;align-items:center;gap:var(--space-5);margin-top:var(--space-5)}
+.pending-foot .spacer{flex:1}
 .empty{padding:var(--space-11) var(--space-7);text-align:center;color:var(--text-tertiary)}
 .empty b{display:block;color:var(--text-secondary);font-weight:var(--weight-semibold);
   margin-bottom:var(--space-3);font-size:var(--text-md)}
@@ -700,6 +705,15 @@ const TOOLS = [
     silent:[], read:['.'], write:[], net:['registry.npmjs.org','api.github.com'] },
 ];
 
+/* Инбокс и окно — разные поверхности. Окно принимает решение по одному
+   запросу и является authoritative; инбокс показывает очередь и решений не
+   принимает. Слить их значило бы сделать рутинную поверхность authoritative
+   — ровно та ошибка, из-за которой 93% запросов разрешения одобряют не глядя. */
+const PENDING = [
+  { requestId:'r-4c1e9a77', recipeName:'publish_release', tier:'high',
+    argv:['./scripts/publish.sh','v2.4.0'], waiting:'2 мин', session:'s-7f3a' },
+];
+
 const ENTRIES = [
   { n:1284, at:'14:22:07', what:'publish_release · подтверждение', hash:'9f2c41ab8e7d5c03…' },
   { n:1283, at:'14:19:44', what:'build_project · завершено',       hash:'3ad0e91f772bb14c…' },
@@ -774,7 +788,7 @@ function stageRole(c, stage, i) {
 
 /* ═══ Отрисовка ═════════════════════════════════════════════════════════ */
 const S = { screen:'timeline', mode:'seatbelt', sel:'c7', overlay:null, loading:false,
-            empty:false, chainBroken:false, typed:'', filter:null, ttl:'call' };
+            empty:false, chainBroken:false, typed:'', filter:null, ttl:'once' };
 
 function groupBar(c) {
   const seen = new Set(c.stages.map((s) => s[0]));
@@ -1088,10 +1102,16 @@ function renderLockModal() {
 /* Срок показывается абсолютным временем — но только тогда, когда оно
    действительно существует. «До конца этого вызова» таймера не имеет, и
    печатать рядом с ним конкретное время значит учить неверному. */
+/* Три значения — ровно те, что объявляет замороженный `ApprovalScope`:
+   once, until, recipe_and_args. Две независимые оси «область × срок» пришли
+   из prior art и читаются лучше, но союз выражает ширину одним значением, и
+   E5 ключует разрешения именно по нему: «только этот вызов на десять минут»
+   пришлось бы отобразить в `until`, выбросив ограничение области и выдав
+   грант шире показанного человеку. */
 const TTL_ABS = {
-  call: 'Истекает вместе с вызовом — таймера нет.',
-  '10m': 'Истекает 27.08.2026, 14:32:07 — время абсолютное, не «десять минут от чего-то».',
-  '1h':  'Истекает 27.08.2026, 15:22:07 — время абсолютное, не «час от чего-то».',
+  once: 'Действует только на этот вызов. Следующий спросит снова.',
+  until: 'Истекает 27.08.2026, 14:32:07 — время абсолютное, не «десять минут от чего-то».',
+  recipe_and_args: 'Действует, пока команда и её аргументы те же. Изменится хоть один — спросит снова.',
 };
 
 function renderApprovalWindow() {
@@ -1133,16 +1153,11 @@ function renderApprovalWindow() {
           : 'Отказать можно сразу — набор нужен только чтобы разрешить.'}</p>
 
         <div class="scopes">
-          <span>Область</span>
-          <select>
-            <option>только этот вызов</option>
-            <option>этот рецепт и этот хэш аргументов</option>
-          </select>
-          <span>Срок</span>
+          <span>Насколько широко</span>
           <select id="ttl">
-            <option value="call">до конца этого вызова</option>
-            <option value="10m">10 минут</option>
-            <option value="1h">1 час</option>
+            <option value="once">разрешить один раз</option>
+            <option value="until">на 10 минут</option>
+            <option value="recipe_and_args">всегда для этого рецепта и этого хэша аргументов</option>
           </select>
           <span></span>
           <span class="abs">${TTL_ABS[S.ttl]}</span>
@@ -1182,6 +1197,29 @@ const SCREENS = {
       <div class="pane-head"><h2>Политика</h2><span class="spacer"></span>
         <span class="eyebrow">4 инструмента · строки команд модели не видны</span></div>
       <div class="pane-scroll">${renderPolicy()}</div></section></div>`,
+  approvals: () => `<div class="main"><section class="pane" style="flex:1" aria-label="Апрувы">
+      <div class="pane-head"><h2>Апрувы</h2><span class="spacer"></span>
+        <span class="eyebrow">решение принимается в отдельном окне</span></div>
+      <div class="pane-scroll">${
+        S.empty || !PENDING.length
+          ? `<div class="empty"><b>Очередь пуста</b>
+              Здесь появится вызов, который прокси не может разрешить сам. Решение по нему
+              принимается в отдельном окне — эта страница только показывает очередь.</div>`
+          : PENDING.map((r) => `<div class="pending">
+              <div class="pending-top">
+                <span class="tool-name">${esc(r.recipeName)}</span>
+                <span class="badge badge--danger">риск ${riskLabel[r.tier]}</span>
+                <span class="badge badge--info">ждёт ${esc(r.waiting)}</span>
+              </div>
+              <div class="argvbox">${r.argv.map((a) => esc(a)).join(' ')}</div>
+              <div class="pending-foot">
+                <span class="chain-anchor">сессия ${esc(r.session)} · запрос ${esc(r.requestId)}</span>
+                <span class="spacer"></span>
+                <button class="btn-primary" type="button" data-overlay="approval"
+                  style="padding:6px 16px">Открыть подтверждение</button>
+              </div>
+            </div>`).join('')
+      }</div></section></div>`,
   audit: () => `<div class="main"><section class="pane" style="flex:1" aria-label="Аудит">
       <div class="pane-head"><h2>Аудит</h2><span class="spacer"></span>
         <button class="btn-secondary" type="button" style="padding:4px 12px">Экспорт JSONL</button></div>
@@ -1195,6 +1233,7 @@ const NAV = [
   ['violations','Нарушения', () => S.loading ? '—' : S.empty ? 0
       : CALLS.reduce((n,c) => n + (c.violations || []).length, 0)],
   ['policy','Политика', () => TOOLS.length],
+  ['approvals','Апрувы', () => S.empty ? 0 : PENDING.length],
   ['audit','Аудит', () => S.loading ? '—' : S.empty ? 0 : 1284],
 ];
 
@@ -1262,6 +1301,8 @@ const STATES = {
   'violations-default':      { screen:'violations', mode:'seatbelt' },
   'violations-empty':        { screen:'violations', mode:'seatbelt', empty:true },
   'policy-default':          { screen:'policy', mode:'seatbelt' },
+  'approvals-default':       { screen:'approvals', mode:'seatbelt' },
+  'approvals-empty':         { screen:'approvals', mode:'seatbelt', empty:true },
   'audit-selfconsistent':    { screen:'audit', mode:'seatbelt' },
   'audit-broken':            { screen:'audit', mode:'seatbelt', chainBroken:true },
   'lock-diff-modal':         { screen:'timeline', mode:'seatbelt', sel:'c5', overlay:'lock' },
@@ -1281,6 +1322,8 @@ const LABELS = {
   'violations-default':'Нарушения',
   'violations-empty':'Нарушения · пусто',
   'policy-default':'Политика',
+  'approvals-default':'Апрувы · очередь',
+  'approvals-empty':'Апрувы · пусто',
   'audit-selfconsistent':'Аудит · самосогласована',
   'audit-broken':'Аудит · цепочка разошлась',
   'lock-diff-modal':'Модалка диффа lock',
@@ -1290,7 +1333,7 @@ const LABELS = {
 window.__listStates = () => Object.keys(STATES).map((id) => ({ id, label:LABELS[id], viewport:'desktop' }));
 window.__setState = (id) => {
   const base = { screen:'timeline', mode:'seatbelt', sel:'c7', overlay:null,
-                 loading:false, empty:false, chainBroken:false, typed:'', filter:null, ttl:'call' };
+                 loading:false, empty:false, chainBroken:false, typed:'', filter:null, ttl:'once' };
   Object.assign(S, base, STATES[id] || {});
   render();
   const sel = document.getElementById('stateSel');
