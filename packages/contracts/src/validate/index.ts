@@ -1,5 +1,7 @@
 import type { ErrorObject } from 'ajv';
 import type { Document, LineCounter } from 'yaml';
+import { canonicalizeJcs } from '../jcs.js';
+import { normalizeManifest } from '../lock.js';
 import type { Manifest } from '../manifest.generated.js';
 import type { Diagnostic, ManifestSource, ParseManifestResult, PatternMatcher } from '../types.js';
 import { matcherKey } from '../types.js';
@@ -63,6 +65,32 @@ function buildMatchers(
   return { matchers, diagnostics };
 }
 
+/**
+ * Манифест, прошедший загрузку, обязан быть хэшируемым.
+ *
+ * Симметрично `parseLockFile`, и по той же причине: `diffLock(lock, manifest)` берёт ДВА
+ * аргумента, парсер lock страховал первый, а второй не страховал никто. Замерено, что
+ * манифест, который схема и `refine` принимают, роняет `manifestHash` и `diffLock`
+ * необработанным `TypeError` — то есть крэшем на стадии `lock_check`, до записи стадийного
+ * события, а отказ без следа в аудите контракт называет багом. Два известных вектора:
+ * одиночный суррогат в любой строке, объявленной голым `string` (`description`, `exec[]`,
+ * `cwd`, `root`, `env.allow[]`, строки песочницы), и `Duration` из четырёхсот цифр, дающая
+ * `Infinity` — её схема теперь ограничивает длиной, но проверка ниже закрывает и её, и любой
+ * следующий вектор, потому что спрашивает ровно то, что нужно: переживёт ли эта форма
+ * канонизацию.
+ *
+ * Побочно она страхует и `normalizeManifest`: `durationToMs` бросает на неизвестной единице.
+ */
+function notHashable(manifest: Manifest): string | null {
+  try {
+    canonicalizeJcs(normalizeManifest(manifest));
+    return null;
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    return `манифест не хэшируется, значит сверка с lock упала бы исключением: ${reason}`;
+  }
+}
+
 export function parseManifest(yamlText: string, source: ManifestSource): ParseManifestResult {
   const parsed = parseYaml(yamlText, source);
   if (!parsed.ok) return { ok: false, diagnostics: parsed.diagnostics };
@@ -76,6 +104,10 @@ export function parseManifest(yamlText: string, source: ManifestSource): ParseMa
   const manifest = parsed.data as Manifest;
   const { matchers, diagnostics } = buildMatchers(manifest, parsed.doc, parsed.lineCounter);
   diagnostics.push(...refine(manifest, source, parsed.doc, parsed.lineCounter));
+  const hashable = notHashable(manifest);
+  if (hashable !== null) {
+    diagnostics.push(diagnosticAt(parsed.doc, parsed.lineCounter, [], 'invariant', hashable));
+  }
   if (diagnostics.length > 0) return { ok: false, diagnostics };
 
   return { ok: true, manifest, matchers };

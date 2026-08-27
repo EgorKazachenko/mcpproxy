@@ -55,6 +55,19 @@ describe('схема манифеста', () => {
     });
   });
 
+  it('ограничивает длину Duration — иначе она выразима как Infinity', () => {
+    // `Number('9'×400) * 1000` даёт `Infinity` без единого броска: `normalizeManifest`
+    // отрабатывает успешно и кладёт `timeoutMs: Infinity` в эффективный профиль, из которого
+    // E5 будет строить таймаут процесса. Инвариант кодируется структурно, в схеме, а не
+    // только страховкой на выходе загрузчика.
+    const defs = schema.$defs as Record<string, { pattern?: string } | undefined>;
+    const pattern = defs.Duration?.pattern;
+    if (pattern === undefined) throw new Error('ветка Duration исчезла из схемы');
+    expect(new RegExp(pattern).test(`${'9'.repeat(400)}s`)).toBe(false);
+    expect(new RegExp(pattern).test('120s')).toBe(true);
+    expect(new RegExp(pattern).test('3600000h')).toBe(true);
+  });
+
   it('требует непустой values у enum', () => {
     expect(schema).toMatchObject({ $defs: { EnumParam: { properties: { values: { minItems: 1 } } } } });
   });

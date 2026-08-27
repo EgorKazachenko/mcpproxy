@@ -178,6 +178,62 @@ describe('правило 6 — рецептный deny не может быть 
   });
 });
 
+describe('манифест, прошедший загрузку, обязан быть хэшируемым', () => {
+  // `diffLock(lock, manifest)` берёт два аргумента. Парсер lock страхует первый; без проверки
+  // ниже второй не страховал никто, и манифест, принятый схемой и `refine`, ронял
+  // `manifestHash` необработанным `TypeError` — крэшем на стадии `lock_check`, до записи
+  // стадийного события. Отказ без следа в аудите контракт называет багом.
+  it('отвергает одиночный суррогат в description', () => {
+    const result = load(`  x:
+    description: "a\ud800b"
+    exec: ["true"]
+`);
+    expect(result.ok).toBe(false);
+    expect(messagesOf(result).join('\n')).toContain('не хэшируется');
+  });
+
+  it('отвергает одиночный суррогат в строке песочницы уровня defaults', () => {
+    const text = `version: 1
+defaults:
+  timeout: 120s
+  output: { maxBytes: 65536, redact: true }
+  env: { allow: ["PATH"] }
+  sandbox:
+    read: { deny: ["~/.ssh\ud800"], allow: ["."] }
+tools:
+  x:
+    description: "x"
+    exec: ["true"]
+`;
+    expect(parseManifest(text, SOURCE).ok).toBe(false);
+  });
+
+  it('и длительность, дающую Infinity, — её же ограничивает и схема', () => {
+    // `Number('9'×400) * 1000` — это `Infinity`, а не бросок: `normalizeManifest` отрабатывает
+    // успешно и возвращает `timeoutMs: Infinity`, отказывает только канонизатор.
+    const text = `version: 1
+defaults:
+  timeout: ${'9'.repeat(400)}s
+  output: { maxBytes: 65536, redact: true }
+  env: { allow: ["PATH"] }
+  sandbox:
+    read: { deny: ["~/.ssh"], allow: ["."] }
+tools:
+  x:
+    description: "x"
+    exec: ["true"]
+`;
+    expect(parseManifest(text, SOURCE).ok).toBe(false);
+  });
+
+  it('нормальный манифест при этом грузится', () => {
+    expect(load(`  x:
+    description: "x"
+    exec: ["true"]
+`).ok).toBe(true);
+  });
+});
+
 describe('код диагностики — каждый член юниона производится своей ситуацией', () => {
   // `DiagnosticCode` замораживается этим контрактом, и потребитель обязан ветвиться по нему.
   // Без исполняемого покрытия перестановка двух кодов местами не роняла ничего: юнион

@@ -1336,7 +1336,7 @@ export declare function parseLockFile(text: string): ParseLockResult;
     "Duration": {
       "description": "Целое число с единицей. Нормализуется в миллисекунды до хэширования, иначе 120s и 2m дают разные дайджесты при одном таймауте.",
       "type": "string",
-      "pattern": "^[0-9]+(ms|s|m|h)$"
+      "pattern": "^[0-9]{1,9}(ms|s|m|h)$"
     },
     "SafeText": {
       "description": "Строка без управляющих и форматирующих символов: \\p{Cc} закрывает C0/C1, \\p{Cf} — zero-width, bidi-переопределения и BOM. Категории вместо перечисления диапазонов: читаемо, ASCII-only в файле схемы и принимается обоими движками.",

@@ -50,7 +50,18 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 const at = (pointer: string, message: string): Diagnostic =>
   // Санитизация по той же причине, что и у диагностик манифеста: `JSON.parse` в V8 эхоит
   // фрагмент разбираемого файла в текст ошибки, а lock — тоже файл с диска.
-  ({ pointer, line: 1, column: 1, code: 'lock', message: sanitizeDescription(message).text });
+  //
+  // `pointer` — тоже недоверенный, и это отличие от манифеста: там сегменты пути ограничены
+  // `propertyNames` схемы ещё до того, как попадут в указатель, а ключ `tools` в lock-файле
+  // до проверки имени не ограничен ничем. А именно `pointer` контракт называет ключом поиска
+  // в структурном логе демона — то есть поле, которым ищут, само несло бы ANSI и bidi.
+  ({
+    pointer: sanitizeDescription(pointer).text,
+    line: 1,
+    column: 1,
+    code: 'lock',
+    message: sanitizeDescription(message).text,
+  });
 
 /**
  * Значение переживёт `canonicalizeJcs` — то есть `diffLock` на нём не бросит.

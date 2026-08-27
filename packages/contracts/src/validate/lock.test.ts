@@ -105,6 +105,18 @@ describe('parseLockFile', () => {
     }
   });
 
+  it('указатель диагностики тоже санитизирован — им ищут в логе', () => {
+    // Сегменты пути манифеста ограничены `propertyNames` ещё до попадания в указатель, а ключ
+    // `tools` в lock-файле — нет. Контракт называет `pointer` ключом поиска в структурном логе
+    // демона, то есть поле, которым ищут, несло бы ANSI и bidi.
+    const ESC = String.fromCharCode(27);
+    const lock = { ...CURRENT, tools: { [`a${ESC}[31mb`]: CURRENT.tools.publish_release } };
+    const result = parseLockFile(JSON.stringify(lock));
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.diagnostics.map((one) => one.pointer).join('')).not.toContain(ESC);
+  });
+
   it('отвергает дайджест не той формы', () => {
     const broken = { ...CURRENT, manifestHash: 'sha256:' + 'a'.repeat(64) };
     const result = parseLockFile(JSON.stringify(broken));
