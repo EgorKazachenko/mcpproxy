@@ -217,22 +217,22 @@ origin в сборке на `loadFile()` не проверяет ничего, �
 тестом без запуска Electron:
 
 ```ts
-export interface WindowKind {
-  readonly role: 'main' | 'approval';
-}
+export type WindowRole = 'main' | 'approval';
 
-export function preloadPath(kind: WindowKind): string;
-
-export function webPreferencesFor(kind: WindowKind): Electron.WebPreferences {
+export function webPreferencesFor(role: WindowRole, preload: string): Electron.WebPreferences {
   return {
     contextIsolation: true,
     sandbox: true,
     nodeIntegration: false,
     webSecurity: true,
-    preload: preloadPath(kind),
+    preload,
   };
 }
 ```
+
+Путь к preload — вход, а не вычисление внутри. Ценность фабрики в том, что четыре флага
+читаются как данные без запуска Electron; композиция с резолвом раскладки сборки эту
+читаемость обнуляет, а имя эмитированного файла план сам помечает `ASSUMED` в F6.
 
 **Шаги.**
 
@@ -246,15 +246,19 @@ export function webPreferencesFor(kind: WindowKind): Electron.WebPreferences {
    запись, то есть `chrome108`.
 3. Разделить tsconfig: главный и preload остаются на `lib: ["ES2023"]`, рендерер добавляет
    `DOM` и `DOM.Iterable`. Корневой `packages/desktop/tsconfig.json` становится ссылочным.
-4. `window.ts` с фабрикой выше и `preloadPath`. Обе роли окна ходят через одну фабрику.
+4. `window.ts` с фабрикой выше. Обе роли окна ходят через неё; путь к preload резолвится
+   в `main/index.ts`, где Electron и так присутствует.
 5. `main/index.ts` создаёт главное окно из фабрики.
 6. Удалить заглушку `packages/desktop/src/index.ts` и снять её из `exports` пакета.
 7. Записать в раздел F6 фактическое имя эмитированного файла preload.
 
-**Falsification:** утверждение — `expect(webPreferencesFor({ role: 'main' })).toMatchObject({ contextIsolation: true, sandbox: true, nodeIntegration: false, webSecurity: true })`.
-Заменить `sandbox: true` на `sandbox: false` в `window.ts` → утверждение расходится по одному
-полю и падает; вернуть → зелено. Тест исполняется в Node под vitest, Electron не
-запускается: фабрика чистая и от рантайма не зависит.
+**Falsification:** утверждение — `expect(webPreferencesFor(role, '/p')).toEqual({ contextIsolation: true, sandbox: true, nodeIntegration: false, webSecurity: true, preload: '/p' })`,
+прогнанное `it.each` по обоим значениям `WindowRole`. Именно `toEqual`, а не `toMatchObject`:
+второй игнорирует лишние ключи, и добавленный позже `webviewTag: true` прошёл бы молча.
+Оба окна обязательны: премисса P6 объявляет гарантию для главного окна и окна апрува,
+а Task 13 переиспользует ту же фабрику — послабление по роли иначе осталось бы незамеченным.
+Заменить `sandbox: true` на `sandbox: false` в `window.ts` → оба случая расходятся.
+Тест в Node, Electron не запускается: фабрика чистая.
 
 **Проверка:** `yarn workspace @mcpproxy/desktop test` и `yarn build` из корня.
 
@@ -274,9 +278,10 @@ export function webPreferencesFor(kind: WindowKind): Electron.WebPreferences {
 
 ```ts
 export const APP_SCHEME = 'app';
-export const APP_ORIGIN = 'app://bundle';
+export const APP_HOST = 'bundle';
+export const APP_ORIGIN = `${APP_SCHEME}://${APP_HOST}`;
 
-export const PRIVILEGES: Electron.Privileges = {
+export const APP_SCHEME_PRIVILEGES: Electron.Privileges = {
   standard: true,
   secure: true,
   supportFetchAPI: true,
@@ -288,7 +293,9 @@ export function cspFor(mode: 'development' | 'production', nonce: string): strin
 
 **Шаги.**
 
-1. Зарегистрировать схему через `registerSchemesAsPrivileged` с константой `PRIVILEGES`.
+1. Зарегистрировать схему через `registerSchemesAsPrivileged` с константой
+   `APP_SCHEME_PRIVILEGES`. Origin выводится из схемы и хоста, а не повторяется вторым
+   литералом: два независимых источника одного значения расходятся молча.
    `corsEnabled` обязателен: `supportFetchAPI` без него — это CVE-2026-70604. `standard`
    обязателен отдельно: без него отключены `localStorage` и относительные ссылки
    разрешаются как у `file:`, что ломает пути `/assets/` из сборки.
@@ -330,34 +337,76 @@ export function cspFor(mode: 'development' | 'production', nonce: string): strin
 **Interfaces.**
 
 ```ts
+export type UiErrorCode =
+  | 'sender-absent'
+  | 'sender-detached'
+  | 'sender-subframe'
+  | 'sender-origin'
+  | 'bad-payload';
+
 export type Result<T> =
   | { readonly ok: true; readonly value: T }
-  | { readonly ok: false; readonly error: { readonly code: string; readonly message: string } };
+  | { readonly ok: false; readonly error: { readonly code: UiErrorCode; readonly message: string } };
 
 export const UI_CHANNEL = 'mcpproxy.ui/1';
 
-export interface UiRequest {
-  readonly kind: 'approval-verdict' | 'player-command';
-  readonly payload: unknown;
-}
+export type UiRequest =
+  | { readonly kind: 'approval-verdict'; readonly verdict: ApprovalVerdict }
+  | { readonly kind: 'player-command'; readonly command: PlayerCommand };
 ```
+
+`code` — закрытый union, а не `string`. Каждый дискриминатор в контрактах закрыт
+(`LockStatus`, `Verdict`, `Stage`, `ApprovalDecision`), и именно это делает возможным
+исчерпывающий `switch` и тест на опечатку в литерале. Четыре причины отказа отправителю
+— это четыре независимых атаки, и сваливать их в один код значит лишить тест возможности
+сказать, какая проверка сработала.
+
+`UiRequest` — настоящий размеченный union, как отгруженный `LockCheck`, а не тег рядом с
+нетипизированным мешком: тег, который ничего не сообщает о полезной нагрузке, не покупает
+никакой типовой безопасности.
 
 Имя `IpcRequest` здесь не используется: оно занято границей shim↔демон
 (`packages/contracts/src/ipc.ts:70`), и переиспользование слило бы два разных периметра
 безопасности в одно имя.
 
 ```ts
+export interface SenderFacts {
+  readonly detached: boolean;
+  readonly parent: unknown;
+  readonly origin: string;
+}
+
+export function senderRejection(frame: SenderFacts | null): UiErrorCode | null {
+  if (frame === null) return 'sender-absent';
+  if (frame.detached) return 'sender-detached';
+  if (frame.parent !== null) return 'sender-subframe';
+  if (frame.origin !== APP_ORIGIN) return 'sender-origin';
+  return null;
+}
+
 export function guarded<T>(
   run: (payload: unknown) => Result<T>,
 ): (event: Electron.IpcMainInvokeEvent, payload: unknown) => Result<T> {
   return (event, payload) => {
     const frame = event.senderFrame;
-    if (frame === null || frame.detached || frame.parent !== null) return DENIED_SENDER;
-    if (frame.origin !== APP_ORIGIN) return DENIED_ORIGIN;
-    return run(payload);
+    const rejection = senderRejection(frame);
+    return rejection === null ? run(payload) : denied(rejection);
   };
 }
 ```
+
+`senderRejection` берёт структурный тип, а не `WebFrameMain`: так каждую ветку можно
+проверить литералом, не подделывая `IpcMainInvokeEvent`.
+
+```ts
+export function parseVerdict(payload: unknown): Result<ApprovalVerdict>;
+```
+
+Реализация собирает объект поле за полем через `asRequestId`, `asSessionId` и
+`asRecipeName` из `@mcpproxy/contracts`, а брошенное конструктором превращает в конверт
+`{ ok: false }`. Приведение `as ApprovalVerdict` запрещено: `packages/contracts/src/approval.ts:52`
+объявляет, что брендирование делает подстановку `sessionId` вместо `requestId` ошибкой
+компиляции, и приведение на границе стёрло бы ровно ту гарантию, ради которой существует `R43`.
 
 `const frame = event.senderFrame` — **первый оператор**. Геттер ленивый и заново резолвит
 фрейм в момент обращения, поэтому любой `await` перед ним обнуляет значение; типы Electron
@@ -366,10 +415,11 @@ export function guarded<T>(
 **Шаги.**
 
 1. `result.ts` и `channel.ts` — общие типы, без зависимостей.
-2. `parse.ts` — разбор полезной нагрузки в объект с нулевым прототипом через `Object.hasOwn`,
-   без чтения унаследованных свойств. Типы здесь не защита: они стираются, а объект из
+2. `parse.ts` — разбор полезной нагрузки в объект с нулевым прототипом, чтение полей
+   только через `Object.hasOwn`. Типы здесь не защита: они стираются, а объект из
    недоверенного содержимого проносит подконтрольный прототип через `contextBridge`
-   даже при включённой contextIsolation.
+   даже при включённой contextIsolation. Брендированные идентификаторы восстанавливаются
+   конструкторами, а не приведением.
 3. `ipc.ts` — обёртка `guarded` и регистрация ровно двух обработчиков через неё.
 4. preload экспонирует один замороженный объект с именованными методами. `ipcRenderer`
    наружу не отдаётся ни целиком, ни отдельным методом.
@@ -380,12 +430,26 @@ export function guarded<T>(
    плагин с таким правилом имеет одного мейнтейнера и в своей же документации признаёт, что
    проверяет факт защиты, а не её корректность.
 
-**Falsification:** утверждение — `expect(guarded(ok)(fakeEvent({ detached: true }), {})).toEqual(DENIED_SENDER)`.
-Убрать проверку `frame.detached` из `guarded` → сообщение от отцепленного фрейма проходит к
-обработчику и утверждение расходится. Второе утверждение —
-`expect(parsePayload(withPollutedPrototype)).not.toHaveProperty('isAdmin')`; убрать
-`Object.hasOwn` → унаследованное свойство протекает. Оба теста в Node, `IpcMainInvokeEvent`
-подменяется литералом: настоящий фрейм здесь не нужен, проверяется ветвление.
+**Falsification:** первое утверждение — `it.each` по пяти случаям
+`senderRejection`: `expect(senderRejection(null)).toBe('sender-absent')`,
+`expect(senderRejection({ detached: true, parent: null, origin: APP_ORIGIN })).toBe('sender-detached')`,
+`expect(senderRejection({ detached: false, parent: {}, origin: APP_ORIGIN })).toBe('sender-subframe')`,
+`expect(senderRejection({ detached: false, parent: null, origin: 'file://' })).toBe('sender-origin')`
+и `expect(senderRejection({ detached: false, parent: null, origin: APP_ORIGIN })).toBe(null)`.
+Удалить любую одну проверку из `senderRejection` → расходится ровно один случай, и он
+называет, какая защита исчезла. Прежняя формулировка сваливала три причины в один код,
+и удаление проверки на подфрейм оставляло все утверждения зелёными.
+
+Второе — `expect(Object.getPrototypeOf(parsePayload(polluted))).toBe(null)` вместе с
+`expect(Object.hasOwn(parsePayload(polluted), 'isAdmin')).toBe(false)`: проверяется
+объявленное свойство, а не симптом, потому что обход цепочки прототипов матчером —
+деталь его реализации, и безопасность границы не может на ней держаться.
+
+Третье — `expect(parseVerdict({ ...verdict, requestId: '' }).ok).toBe(false)`. Заменить
+восстановление брендов приведением → пустой `requestId` проезжает границу, и это закрывает
+ту часть `R55`, которая говорит про полезную нагрузку, не проходящую схему.
+
+Все тесты в Node: `senderRejection` берёт структурный литерал, настоящий фрейм не нужен.
 
 **Проверка:** `yarn workspace @mcpproxy/desktop test`.
 
@@ -400,40 +464,70 @@ export function guarded<T>(
 - Create: `packages/desktop/src/main/trace.ts`
 - Create: `packages/desktop/fixtures/demo.jsonl`
 - Test: `packages/desktop/src/main/trace.test.ts`
+- Test: `packages/desktop/src/main/player.test.ts`
 
 **Interfaces.**
 
 ```ts
 import type { ChainedEvent } from '@mcpproxy/contracts';
 
-export interface Player {
-  readonly step: () => void;
-  readonly pause: () => void;
-  readonly play: (speed: number) => void;
-  readonly reset: () => void;
+export type PlayerCommand =
+  | { readonly kind: 'step' }
+  | { readonly kind: 'pause' }
+  | { readonly kind: 'play'; readonly speed: number }
+  | { readonly kind: 'reset' };
+
+export interface PlayerState {
+  readonly position: number;
+  readonly total: number;
+  readonly playing: boolean;
 }
+
+export interface Player {
+  readonly apply: (command: PlayerCommand) => void;
+  readonly state: () => PlayerState;
+}
+
+export function createPlayer(
+  events: readonly ChainedEvent[],
+  emit: (event: ChainedEvent) => void,
+): Player;
 
 export function readTrace(text: string): Result<readonly ChainedEvent[]>;
 ```
+
+Приёмник событий — аргумент, а не спрятанный внутри модуля побочный эффект: иначе тип
+умалчивает, куда уходят события, и позиция оказывается сплавлена с транспортом в одном
+модуле. `state()` существует, потому что без запроса ни рендерер не нарисует правильную
+кнопку паузы, ни тест не проверит, что пауза остановила выдачу.
 
 **Шаги.**
 
 1. `trace.ts` разбирает JSONL построчно, пустые строки пропускает, битую строку отдаёт
    диагностикой в конверте, а не бросает.
-2. `player.ts` держит позицию и отдаёт события в рендерер по одному. Шаг, пауза, скорость.
-   Тот же механизм — и моки, и демо со сцены, и план Б, если ядро упадёт: поток событий на
-   сцене не стримят вживую, а воспроизводят под управлением клавиши.
+2. `player.ts` держит позицию и отдаёт события в приёмник по одному. Шаг, пауза, скорость,
+   сброс — одной командой из размеченного union, а не четырьмя методами: команда едет
+   через IPC, и её всё равно пришлось бы разбирать как данные. Тот же механизм — и моки,
+   и демо со сцены, и план Б, если ядро упадёт: поток событий на сцене не стримят вживую,
+   а воспроизводят под управлением клавиши.
 3. `fixtures/demo.jsonl` покрывает сценарии S1–S9. Формы полей берутся из
    `packages/contracts/src/event.ts:42`; ключ `argv` у вызова, остановленного на `lock_check`,
    **отсутствует**, а не приезжает пустым массивом.
 4. Хотя бы одно событие несёт `protocolVersion` старой ревизии: значение принадлежит сессии,
    а не сборке, и UI не имеет права его захардкодить.
 
-**Falsification:** утверждение — `expect(Object.hasOwn(lockCheckEvent, 'argv')).toBe(false)`.
+**Falsification:** первое утверждение — `expect(Object.hasOwn(lockCheckEvent, 'argv')).toBe(false)`.
 Дописать `argv: []` в фикстуру остановленного вызова → утверждение расходится, и это ловит
 ровно тот дефект, из-за которого UI отрисовал бы выдуманную пустую команду настоящей.
-Второе — `expect(readTrace('{ broken').ok).toBe(false)`. Тест в Node, файловая система не
-нужна: `readTrace` принимает текст.
+
+Второе — `expect(readTrace('{ broken').ok).toBe(false)`.
+
+Третье, на проигрыватель: `emit` подменяется собирающим массивом, и
+`expect(collected).toHaveLength(1)` после одного `step`, затем
+`expect(player.state().position).toBe(1)`. Убрать инкремент позиции → второе утверждение
+расходится, тогда как первое остаётся зелёным, то есть тест различает две независимые
+ошибки. Четвёртое — шаг за последним событием: `expect(collected).toHaveLength(total)`
+после лишнего `step`. Все тесты в Node, IPC не нужен: приёмник — обычная функция.
 
 **Проверка:** `yarn workspace @mcpproxy/desktop test`.
 
@@ -448,6 +542,11 @@ export function readTrace(text: string): Result<readonly ChainedEvent[]>;
 - Modify: `packages/design/README.md`
 - Modify: `packages/design/package.json`
 - Test: `packages/design/src/semantic.test.ts`
+
+Русские подписи домена живут здесь и только здесь: `packages/design/src/semantic.ts:15`
+объявляет это своей единственной задачей, и пакет уже отгружает `verdictLabel`,
+`stageLabel`, `violationLabel`, `sandboxLabel`. Чеканить новые русские слова в
+`packages/desktop/src/renderer/` значит развести таблицу подписей по двум пакетам.
 
 **Interfaces.**
 
@@ -472,7 +571,17 @@ export function violationRole(type: ViolationType, action: 'denied' | 'allowed')
 2. `mandatory-deny` остаётся красным на обоих исходах: отбито успешно, но сама попытка
    записи в persistence-путь означает, что код пытался закрепиться.
 3. Завести пакету скрипт `test` — сегодня его нет, и первый же тест пакета не запустился бы.
-4. `README.md`: заголовок «Четыре роли, а не три» противоречит собственной таблице, где
+   Добавить `vitest` в его `devDependencies`.
+4. Добавить рядом с существующими записями подписи, которых ещё нет и которые иначе
+   пришлось бы чеканить в рендерере: `outcomeLabel` для исхода нарушения
+   (`blocked` → «Отбито», `passed` → «Прошло»), `axisLabel` для осей регистров политики
+   (`network` → «сеть», `write` → «запись», `read` → «чтение») и `applicabilityLabel`
+   (`not-applicable` → «не применимо»).
+5. Существующий JSDoc про `mandatory-deny` — записанное WHY, а не украшение — переезжает
+   на функцию и дополняется новой осью `action`. Он объясняет единственное исключение из
+   правила «отбито значит янтарь», и потерять его при переписывании записи в функцию
+   означало бы потерять причину.
+6. `README.md`: заголовок «Четыре роли, а не три» противоречит собственной таблице, где
    ролей пять; и строка 73 обещает `stageOrder` из этого пакета, тогда как он живёт в
    `packages/contracts/src/domain.ts:28`.
 
@@ -522,6 +631,26 @@ export function violationRole(type: ViolationType, action: 'denied' | 'allowed')
 - Create: `packages/desktop/src/renderer/timeline/callLine.ts`
 - Test: `packages/desktop/src/renderer/timeline/callLine.test.ts`
 
+**Interfaces.**
+
+```ts
+export type StageGroup = 'checks' | 'setup' | 'execution';
+
+export interface CallLine {
+  readonly role: Role;
+  readonly outcome: 'blocked' | 'passed' | 'denied' | 'awaiting' | 'clean';
+  readonly detail: string;
+}
+
+export function callLine(event: AuditEvent): CallLine;
+export function groupBar(event: AuditEvent): ReadonlyArray<{ group: StageGroup; role: Role }>;
+```
+
+Чистые функции возвращают доменные значения, а не готовые русские слова: подпись берётся
+из `@mcpproxy/design` на отрисовке. Группы именованы, потому что позиция в массиве ничего
+не называет, а при `noUncheckedIndexedAccess` обращение по индексу к укороченному массиву
+даёт `undefined` вместо осмысленного падения.
+
 **Шаги.**
 
 1. Строка вызова: имя, бейдж вердикта, **бейдж режима песочницы**, время. Без режима в
@@ -539,11 +668,14 @@ export function violationRole(type: ViolationType, action: 'denied' | 'allowed')
 6. Скелет повторяет геометрию наполненной строки бокс в бокс, иначе подгрузка даёт скачок
    вёрстки; пустое состояние отдельным текстом.
 
-**Falsification:** утверждение — `expect(callLine(leakedCall).verb).toBe('Прошло')`.
-Убрать учёт `action` из `callLine` → слово становится «Отбито» на вызове, где 1247 байт
-ушло наружу, и утверждение расходится. Второе — `expect(groupBar(mixedCall)[2]).toBe('danger')`;
-вернуть выбор первого нарушения вместо худшего → группа красится янтарём. Оба теста в Node
-над чистыми функциями: DOM не нужен, потому что решение о роли принимается до рендера.
+**Falsification:** первое утверждение — `expect(callLine(leakedCall).outcome).toBe('passed')`.
+Убрать учёт `action` из `callLine` → исход становится `blocked` на вызове, где 1247 байт
+ушло наружу, и утверждение расходится. Второе —
+`expect(groupBar(mixedCall).find((g) => g.group === 'execution')?.role).toBe('danger')`;
+вернуть выбор первого нарушения вместо худшего → группа красится янтарём. Поиск по имени
+группы, а не по индексу: индекс не называет, какая из трёх групп проверяется, и молча
+съезжает, когда группа не нарисована. Оба теста в Node над чистыми функциями: DOM не нужен,
+потому что решение о роли принимается до отрисовки.
 
 **Проверка:** `yarn workspace @mcpproxy/desktop test`.
 
@@ -556,7 +688,24 @@ export function violationRole(type: ViolationType, action: 'denied' | 'allowed')
 **Files:**
 - Create: `packages/desktop/src/renderer/timeline/CallDetail.tsx`
 - Create: `packages/desktop/src/renderer/timeline/StageList.tsx`
-- Create: `packages/desktop/src/renderer/machine.tsx`
+- Create: `packages/desktop/src/renderer/timeline/MachineText.tsx`
+- Create: `packages/desktop/src/renderer/timeline/commandView.ts`
+- Test: `packages/desktop/src/renderer/timeline/commandView.test.ts`
+
+**Interfaces.**
+
+```ts
+export type CommandView =
+  | { readonly kind: 'built'; readonly argv: readonly string[]; readonly fromParams: readonly string[] }
+  | { readonly kind: 'not-built'; readonly stoppedAt: Stage };
+
+export function commandView(event: AuditEvent): CommandView;
+export function stagePresence(event: AuditEvent): ReadonlyArray<{ stage: Stage; present: boolean }>;
+```
+
+`MachineText` — отрисовка машинных фрагментов: путей, регексов, хэшей и элементов argv
+моноширинным и без переноса по словам. Имя называет, что именно рисуется; предыдущее имя
+не называло ничего.
 
 **Шаги.**
 
@@ -569,14 +718,25 @@ export function violationRole(type: ViolationType, action: 'denied' | 'allowed')
 4. Вызов без ключа `argv` рисует объяснение «команда не собиралась», а не пустую команду.
 5. Стадии, которых не было, перечислены отдельной строкой: пользователь должен отличать
    «прошло мгновенно» от «до стадии не дошло». Ноль длительности рисуется прочерком.
-6. Пути, регексы и argv внутри деталей стадии — моноширинные и без переноса по словам:
-   разорванный аргумент читается как два разных.
+6. Пути, регексы и argv внутри деталей стадии рисуются через `MachineText` — моноширинным
+   и без переноса по словам: разорванный аргумент читается как два разных, а кириллическая
+   «а» в `--flаg` пропорциональным шрифтом неотличима от латинской.
 7. Оверхед берётся из `duration.overheadMs` события `complete`, а не считается в UI.
    Множество исключённых стадий — часть определения метрики
    (`packages/contracts/src/event.ts:149`), и второе его определение неизбежно разъедется.
 8. Поля деталей кликабельны и работают фильтром по списку.
 
-**Проверка:** `yarn build` из корня.
+**Falsification:** утверждение — `expect(commandView(lockCheckEvent).kind).toBe('not-built')`.
+Заменить `Object.hasOwn(event, 'argv')` на проверку истинности `event.argv?.length` →
+вызов, остановленный на `lock_check`, и вызов с пустым `argv` становятся неразличимы, и
+`commandView` возвращает `built` с пустой командой; утверждение расходится. Это ровно тот
+дефект, ради предотвращения которого написана премисса P1, и без этого теста план проверял
+бы, что **фикстура** не пишет ключ, оставляя **читателю** свободу ветвиться по истинности.
+Второе — `expect(stagePresence(lockCheckEvent).find((x) => x.stage === 'spawn')?.present).toBe(false)`
+при том, что стадия с нулевой длительностью даёт `present: true`: «прошло мгновенно» и
+«до стадии не дошло» обязаны различаться. Тесты в Node над чистыми функциями.
+
+**Проверка:** `yarn workspace @mcpproxy/desktop test`.
 
 **Коммит:** «E7: детали вызова; отсутствие стадии — факт, а не ноль».
 
@@ -611,6 +771,27 @@ export function violationRole(type: ViolationType, action: 'denied' | 'allowed')
 - Create: `packages/desktop/src/renderer/policy/registers.ts`
 - Test: `packages/desktop/src/renderer/policy/registers.test.ts`
 
+**Interfaces.**
+
+```ts
+export type PolicyAxis = 'network' | 'write' | 'read';
+
+export interface Register {
+  readonly axis: PolicyAxis;
+  readonly claimed: string;
+  readonly enforced: string;
+  readonly diverges: boolean;
+  readonly defaulted: boolean;
+}
+
+export function registers(tool: Tool): Readonly<Record<PolicyAxis, Register>>;
+```
+
+Ключ — доменное значение, а не русское слово. Подпись оси берётся из
+`@mcpproxy/design`; если ключом сделать отображаемую строку, переименование слова в
+интерфейсе молча ломает вычисление расхождения. Возврат — запись, а не массив: поиск по
+несуществующей оси обязан падать, а не отдавать `undefined` в `?.diverges`.
+
 **Шаги.**
 
 1. Карточка инструмента: имя, риск-тир, **одно предложение по-человечески**. Сжатие
@@ -627,11 +808,13 @@ export function violationRole(type: ViolationType, action: 'denied' | 'allowed')
    `packages/contracts/src/annotations.ts:37`.
 6. Рецепт с `*` в домене или с ослабляющим флагом помечается «ослабленный режим».
 
-**Falsification:** утверждение — `expect(registers(analyzeLogs).find((r) => r.axis === 'сеть')?.diverges).toBe(true)`.
+**Falsification:** первое утверждение — `expect(registers(analyzeLogs).network.diverges).toBe(true)`.
 Убрать учёт молчащих аннотаций → заявленное станет «нет», расхождения не будет, утверждение
-расходится. Второе — `expect(badges(analyzeLogs).destructiveHint).toBe('не применимо')`;
-убрать ветку `readOnly` → бейдж вернётся к «да», что противоречит спеке. Тесты в Node над
-чистыми функциями.
+расходится. Второе — `expect(badges(analyzeLogs).destructiveHint).toBe('not-applicable')`;
+убрать ветку `readOnly` → бейдж вернётся к `true`, что противоречит оговорке спеки,
+записанной в `packages/contracts/src/annotations.ts:37`. Оба сравнения — с доменными
+значениями, а не с русскими словами: тест не должен ломаться от правки подписи.
+Тесты в Node над чистыми функциями.
 
 **Проверка:** `yarn workspace @mcpproxy/desktop test`.
 
@@ -662,10 +845,24 @@ export function violationRole(type: ViolationType, action: 'denied' | 'allowed')
    утверждения.
 6. Экспорт JSONL.
 
-**Falsification:** утверждение — `expect(render(verifyOf(forgedFirstEntry)).status).toBe('broken')`.
-Заменить ветвление `if (!result.ok)` на `if (result.brokenAt)` → подделка записи №0 даст
-ложь и экран покажет «самосогласована» на сломанной цепочке; утверждение расходится.
-Тест в Node: `verifyChain` — чистая функция над массивом.
+**Interfaces.**
+
+```ts
+export function chainBadge(verification: ChainVerification): {
+  readonly status: 'consistent' | 'broken';
+  readonly brokenAt: number | null;
+};
+```
+
+Имя называет то, что функция делает: она возвращает описание бейджа и исполняется в Node
+без DOM. `render` и соврало бы про это, и столкнулось бы с одноимённой функцией из
+библиотеки тестирования React в том же пакете.
+
+**Falsification:** утверждение — `expect(chainBadge(verifyOf(forgedFirstEntry)).status).toBe('broken')`.
+Заменить ветвление `if (!verification.ok)` на `if (verification.brokenAt)` → подделка
+записи №0 даёт `brokenAt: 0`, ложный как число, экран показывает «самосогласована» на
+сломанной цепочке, и утверждение расходится. Тест в Node: `verifyChain` — чистая функция
+над массивом.
 
 **Проверка:** `yarn workspace @mcpproxy/desktop test`.
 
@@ -703,6 +900,25 @@ export function violationRole(type: ViolationType, action: 'denied' | 'allowed')
 - Create: `packages/desktop/src/renderer/approval/confirmToken.ts`
 - Test: `packages/desktop/src/renderer/approval/confirmToken.test.ts`
 
+**Interfaces.**
+
+```ts
+export interface ConfirmChallenge {
+  readonly token: string;
+  readonly typed: string;
+}
+
+export function confirmState(challenge: ConfirmChallenge): {
+  readonly approve: 'blocked' | 'ready';
+  readonly deny: 'ready';
+};
+```
+
+Один запрос вместо двух предикатов. Мгновенность отказа выражена типом: `deny` не имеет
+второго значения, поэтому «отказ не советуется с набранным» — факт сигнатуры, а не
+поведение, которое реализующий обязан не сломать. Пара `token` и `typed` названа: она
+ходила бы вместе по двум сигнатурам без имени, а это и есть признак недостающего понятия.
+
 **Шаги.**
 
 1. Отдельный `BrowserWindow` через ту же фабрику настроек из Task 1. Смысл механизма в том,
@@ -726,11 +942,12 @@ export function violationRole(type: ViolationType, action: 'denied' | 'allowed')
 8. Отсутствие окна означает отказ, а не ожидание.
 9. Каждая строка окна берётся из макета дословно.
 
-**Falsification:** утверждение — `expect(canApprove({ token: 'v2.4.0', typed: 'v2.4.1' })).toBe(false)`.
-Заменить сравнение на проверку непустоты → любой набранный текст разблокирует разрешение, и
-утверждение расходится. Второе — `expect(canDeny({ token: 'v2.4.0', typed: '' })).toBe(true)`,
-оно удерживает мгновенность отказа: если набор потребуется и для отказа, механизм начнёт
-подталкивать к разрешению. Тесты в Node над чистой функцией.
+**Falsification:** утверждение — `expect(confirmState({ token: 'v2.4.0', typed: 'v2.4.1' }).approve).toBe('blocked')`.
+Заменить сравнение на проверку непустоты → любой набранный текст разблокирует разрешение,
+и утверждение расходится. Второе — `expect(confirmState({ token: 'v2.4.0', typed: 'v2.4.0' }).approve).toBe('ready')`,
+оно отделяет «блокирует всегда» от «блокирует до совпадения»: без него реализация
+`return { approve: 'blocked', deny: 'ready' }` прошла бы первое утверждение. Мгновенность
+отказа тестом не проверяется, потому что она выражена типом. Тесты в Node.
 
 **Проверка:** `yarn workspace @mcpproxy/desktop test`.
 
