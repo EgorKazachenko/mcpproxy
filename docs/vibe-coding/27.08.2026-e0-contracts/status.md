@@ -4,9 +4,16 @@
 - branch: `v2/e0-contracts`
 - mode: attended
 - track: full
-- codeTree: `8a2f87eb2676`
+- codeTree: `b22e0e3403f5`
 - kill-review due: 2026-10-26
+- handoff: prompt recorded, no carrier spawned (attended) — SessionStart re-injects it after /clear
 
 | gate | status | artifacts |
 |---|---|---|
 | plan-approved | pass | 1 file(s) |
+| build-test | **NOT RUN** | — |
+| review-internal | **NOT RUN** | — |
+| review-scan | **NOT RUN** | — |
+| review-bc | **NOT RUN** | — |
+| review-tests | **NOT RUN** | — |
+| review-errors | **NOT RUN** | — |
