@@ -227,6 +227,27 @@ function checkRootConfinement(
   }
 }
 
+function checkBoundsSatisfiable(recipe: Recipe, at: readonly Segment[], report: (path: Segment[], message: string) => void) {
+  for (const [paramName, param] of Object.entries(recipe.params ?? {})) {
+    if (param.type !== 'number') continue;
+    const { min, max } = param;
+    if (min === undefined || max === undefined) continue;
+    const path = [...at, 'params', paramName];
+
+    if (min > max) {
+      report(path, `границы числа не выполнимы: min ${min} больше max ${max}`);
+      continue;
+    }
+    // `integer: true` сужает отрезок до целых, и на дробном отрезке целых может не быть
+    // вовсе: 1.2..1.8 — форма верна, min меньше max, проходящих значений нет. Отдельная
+    // ветка, а не общее сообщение: «min больше max» здесь было бы прямым враньём, и автор
+    // манифеста искал бы дефект в тех двух числах, между которыми его нет.
+    if (param.integer === true && Math.ceil(min) > Math.floor(max)) {
+      report(path, `границы числа не содержат ни одного целого: min ${min}, max ${max} при integer: true`);
+    }
+  }
+}
+
 export function refine(
   manifest: Manifest,
   source: ManifestSource,
@@ -249,6 +270,7 @@ export function refine(
     checkArgvSlots(recipe, at, report);
     checkDenyNonEmpty(recipe, at, report);
     checkRootConfinement(recipe, at, source, report);
+    checkBoundsSatisfiable(recipe, at, report);
     checkEnvCeiling(recipe, manifest.defaults.env.allow, at, report);
     checkOutputFloor(recipe, manifest.defaults.output, at, report);
     checkDuration(recipe.timeout, [...at, 'timeout'], report);

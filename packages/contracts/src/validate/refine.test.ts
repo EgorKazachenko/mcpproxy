@@ -262,6 +262,50 @@ tools:
   });
 });
 
+describe('правило 10 — границы number обязаны быть выполнимыми', () => {
+  const withBounds = (bounds: string) => `  x:
+    description: "x"
+    exec: ["true"]
+    params:
+      n:
+        type: number
+${bounds}
+        argv: ["{}"]
+`;
+
+  it('отвергает min больше max — схема их пропускает', () => {
+    // Схема выражает «min — число» и «max — число», но не отношение между двумя полями,
+    // а ветка NumberParam доборных проверок не имела. В зазор попадал рецепт, который
+    // грузится, показывается в tools/list и отвергает ЛЮБОЕ значение на стадии validate:
+    // снаружи это неотличимо от сломанного инструмента, потому что диагностики не было.
+    const result = load(withBounds('        min: 10\n        max: 1'));
+    expect(result.ok).toBe(false);
+    expect(messagesOf(result).join('\n')).toContain('не выполнимы');
+  });
+
+  it('принимает min равный max — ровно одно законное значение', () => {
+    expect(load(withBounds('        min: 5\n        max: 5')).ok).toBe(true);
+  });
+
+  it('принимает нормальный отрезок и одностороннюю границу', () => {
+    expect(load(withBounds('        min: 1\n        max: 10')).ok).toBe(true);
+    expect(load(withBounds('        min: 1')).ok).toBe(true);
+    expect(load(withBounds('        max: 10')).ok).toBe(true);
+  });
+
+  it('отвергает дробный отрезок без целых при integer: true', () => {
+    // Тот же исход — не проходит ни одно значение, — но другая причина, поэтому и
+    // сообщение другое: «min больше max» здесь было бы враньём, min меньше max.
+    const result = load(withBounds('        min: 1.2\n        max: 1.8\n        integer: true'));
+    expect(result.ok).toBe(false);
+    expect(messagesOf(result).join('\n')).toContain('ни одного целого');
+  });
+
+  it('дробный отрезок, целое в котором есть, остаётся законным', () => {
+    expect(load(withBounds('        min: 1.2\n        max: 2.8\n        integer: true')).ok).toBe(true);
+  });
+});
+
 describe('код диагностики — каждый член юниона производится своей ситуацией', () => {
   // `DiagnosticCode` замораживается этим контрактом, и потребитель обязан ветвиться по нему.
   // Без исполняемого покрытия перестановка двух кодов местами не роняла ничего: юнион
