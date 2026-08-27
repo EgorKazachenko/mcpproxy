@@ -1,0 +1,20 @@
+{
+  "gate": "plan-approved",
+  "status": "pass",
+  "exit_code": 0,
+  "codeTree": "dcbcf4139e6421bf7ff2ee9cc09df74d1cec13f5",
+  "codeDirty": false,
+  "headSha": "c88cbc63f9cc76dde85d39a4b4a8401682352a1c",
+  "startedAt": "2026-08-27T23:06:41.120Z",
+  "command": "node .claude/skills/vibe-code-developing-v2/scripts/plan-approved-verify.mjs --feature docs/vibe-coding/27.08.2026-e3-sandbox --evidence docs/vibe-coding/27.08.2026-e3-sandbox/.review/plan.md --plan-hash 41c42537e38341082a5c2a502537a688d5332a45",
+  "evidencePath": "docs/vibe-coding/27.08.2026-e3-sandbox/.review/plan.md",
+  "artifacts": [
+    {
+      "path": "docs/vibe-coding/27.08.2026-e3-sandbox/.review/plan.md",
+      "size": 8471,
+      "mtime": 1787871995929
+    }
+  ],
+  "planHash": "41c42537e38341082a5c2a502537a688d5332a45",
+  "planDirty": false
+}
