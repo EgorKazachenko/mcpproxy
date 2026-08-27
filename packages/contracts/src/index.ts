@@ -5,5 +5,9 @@ export * from './domain.js';
 export * from './annotations.js';
 export * from './manifest.generated.js';
 export * from './types.js';
+export * from './mcp.js';
+export * from './approval.js';
+export * from './event.js';
+export * from './otlp.js';
 
-// TODO(E0): схема события (OTel GenAI), lock, IPC, четыре рецепта-заглушки.
+// TODO(E0): lock, IPC, четыре рецепта-заглушки.
