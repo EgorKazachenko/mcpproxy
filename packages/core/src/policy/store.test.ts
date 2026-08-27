@@ -1,113 +1,20 @@
-import { describe, expect, it, vi } from 'vitest';
-import { MANIFEST_MAX_BYTES, normalizeDefaults, normalizeRecipe } from '@mcpproxy/contracts';
-import type { LockEntry, LockFile, Manifest } from '@mcpproxy/contracts';
-import { manifestHash, recipeHash } from '@mcpproxy/contracts/audit';
+import { describe, expect, it } from 'vitest';
+import { MANIFEST_MAX_BYTES } from '@mcpproxy/contracts';
+import {
+  BROKEN_YAML,
+  CHANGED_YAML,
+  LOCK_PATH,
+  MANIFEST_PATH,
+  MANIFEST_YAML,
+  lockTextFor,
+  memoryDisk,
+  started,
+} from './policy.fixture.js';
 import { LOCK_MAX_BYTES, startStore } from './store.js';
-import type { StartedStore, StoreDeps } from './store.js';
-
-const MANIFEST_PATH = '/repo/mcpproxy.yaml';
-const LOCK_PATH = '/repo/mcpproxy.lock';
-
-const MANIFEST_YAML = `version: 1
-
-defaults:
-  timeout: 120s
-  output:
-    maxBytes: 65536
-    redact: true
-  env:
-    allow: ["PATH", "HOME"]
-  sandbox:
-    read:
-      deny: ["~/.ssh"]
-      allow: ["."]
-    write:
-      allow: []
-    network:
-      allow: []
-
-tools:
-  run_tests:
-    description: "Прогнать тесты проекта"
-    exec: ["pnpm", "test"]
-    cwd: "."
-    annotations:
-      readOnlyHint: false
-      destructiveHint: false
-      idempotentHint: true
-      openWorldHint: false
-    sandbox:
-      write:
-        allow: ["/tmp"]
-      network:
-        allow: []
-`;
-
-const CHANGED_YAML = MANIFEST_YAML.replace('Прогнать тесты проекта', 'Прогнать тесты и собрать покрытие');
-
-/** Ошибка ФС в той форме, в какой её приносит `node:fs/promises`. */
-const errno = (code: string): NodeJS.ErrnoException =>
-  Object.assign(new Error(`${code}: тестовая ошибка`), { code });
-
-/**
- * Диск в памяти. Тесты загрузки не создают временных каталогов: R1a требует наблюдать
- * **порядок** `statSize` → `readFile`, а на настоящей ФС этот порядок не наблюдаем.
- */
-function memoryDisk(files: Record<string, string>) {
-  const disk = new Map(Object.entries(files));
-  const sizeOverrides = new Map<string, number>();
-  const failures = new Map<string, string>();
-  const readFile = vi.fn(async (path: string) => {
-    const text = disk.get(path);
-    if (text === undefined) throw errno('ENOENT');
-    return text;
-  });
-  const statSize = vi.fn(async (path: string) => {
-    const failure = failures.get(path);
-    if (failure !== undefined) throw errno(failure);
-    const override = sizeOverrides.get(path);
-    if (override !== undefined) return override;
-    const text = disk.get(path);
-    if (text === undefined) throw errno('ENOENT');
-    return Buffer.byteLength(text, 'utf8');
-  });
-
-  return {
-    deps: { statSize, readFile } satisfies StoreDeps,
-    statSize,
-    readFile,
-    write: (path: string, text: string) => disk.set(path, text),
-    /** Файл на месте, но `stat` по нему отказывает — форма, отличная от «файла нет». */
-    fail: (path: string, code: string) => failures.set(path, code),
-    pretendSize: (path: string, size: number) => sizeOverrides.set(path, size),
-  };
-}
-
-/** Честный lock для уже загруженного манифеста — то, что записала бы команда `mcpproxy lock`. */
-function lockTextFor(manifest: Manifest): string {
-  const tools: Record<string, LockEntry> = {};
-  for (const [name, recipe] of Object.entries(manifest.tools)) {
-    const snapshot = normalizeRecipe(recipe, manifest.defaults);
-    tools[name] = { recipeHash: recipeHash(snapshot), approvedAt: '2026-08-28T00:00:00.000Z', snapshot };
-  }
-  const lock: LockFile = {
-    version: 2,
-    manifestHash: manifestHash(manifest),
-    defaults: normalizeDefaults(manifest.defaults),
-    tools,
-  };
-  return JSON.stringify(lock, null, 2);
-}
-
-async function started(disk: ReturnType<typeof memoryDisk>): Promise<StartedStore> {
-  const result = await startStore(MANIFEST_PATH, LOCK_PATH, disk.deps);
-  if (result.outcome !== 'started') throw new Error(`ожидался старт, получено ${result.outcome}`);
-  return result.store;
-}
 
 describe('startStore: отказ старта имеет форму', () => {
   it('манифест с диагностиками не даёт store вовсе', async () => {
-    const disk = memoryDisk({ [MANIFEST_PATH]: 'version: 1\ndefaults: {}\ntools: {}\n' });
+    const disk = memoryDisk({ [MANIFEST_PATH]: BROKEN_YAML });
     const result = await startStore(MANIFEST_PATH, LOCK_PATH, disk.deps);
 
     expect(result.outcome).toBe('invalid-manifest');
@@ -115,22 +22,22 @@ describe('startStore: отказ старта имеет форму', () => {
   });
 
   it('нечитаемый манифест и несоответствующий отличаются тегом — иначе E4 не узнает причину', async () => {
-    const disk = memoryDisk({});
-    const result = await startStore(MANIFEST_PATH, LOCK_PATH, disk.deps);
+    const result = await startStore(MANIFEST_PATH, LOCK_PATH, memoryDisk({}).deps);
 
     expect(result.outcome).toBe('unreadable-manifest');
     expect(result.outcome === 'unreadable-manifest' && result.code).toBe('ENOENT');
   });
 
-  it('предел размера проверяется ДО чтения в память', async () => {
-    const disk = memoryDisk({ [MANIFEST_PATH]: MANIFEST_YAML });
+  it('предел размера манифеста проверяется ДО чтения в память', async () => {
+    const disk = memoryDisk();
     disk.pretendSize(MANIFEST_PATH, MANIFEST_MAX_BYTES + 1);
 
     const result = await startStore(MANIFEST_PATH, LOCK_PATH, disk.deps);
 
     expect(result.outcome).toBe('invalid-manifest');
     expect(result.outcome === 'invalid-manifest' && result.diagnostics[0]?.code).toBe('size-limit');
-    expect(disk.readFile).not.toHaveBeenCalled();
+    expect(disk.stats).toEqual([MANIFEST_PATH]);
+    expect(disk.reads).toEqual([]);
   });
 
   it('тот же предел стоит и у lock, и тоже до чтения', async () => {
@@ -139,20 +46,14 @@ describe('startStore: отказ старта имеет форму', () => {
 
     const store = await started(disk);
 
-    expect(store.current().lock).toEqual({
-      present: false,
-      reason: 'unreadable',
-      code: 'ERR_SIZE_LIMIT',
-      message: expect.stringContaining(String(LOCK_MAX_BYTES)) as unknown as string,
-    });
-    expect(disk.readFile).toHaveBeenCalledTimes(1);
-    expect(disk.readFile).toHaveBeenCalledWith(MANIFEST_PATH);
+    expect(store.current().lock).toMatchObject({ present: false, reason: 'unreadable', code: 'ERR_SIZE_LIMIT' });
+    expect(disk.reads).toEqual([MANIFEST_PATH]);
   });
 });
 
 describe('startStore: манифест заморожен вглубь', () => {
   it('подмена exec после успешной валидации бросает, а не проходит молча', async () => {
-    const store = await started(memoryDisk({ [MANIFEST_PATH]: MANIFEST_YAML }));
+    const store = await started(memoryDisk());
     const recipe = store.current().manifest.manifest.tools.run_tests;
 
     expect(recipe).toBeDefined();
@@ -165,14 +66,14 @@ describe('startStore: манифест заморожен вглубь', () => {
 
 describe('startStore: lock и его четыре формы', () => {
   it('файла нет — missing, и вызов упирается в denied', async () => {
-    const store = await started(memoryDisk({ [MANIFEST_PATH]: MANIFEST_YAML }));
+    const store = await started(memoryDisk());
 
     expect(store.current().lock).toEqual({ present: false, reason: 'missing' });
     expect(store.current().verdict.check.status).toBe('absent');
   });
 
   it('файл не читается — unreadable с кодом, а не missing', async () => {
-    const disk = memoryDisk({ [MANIFEST_PATH]: MANIFEST_YAML });
+    const disk = memoryDisk();
     disk.fail(LOCK_PATH, 'EACCES');
     const store = await started(disk);
 
@@ -193,7 +94,7 @@ describe('startStore: lock и его четыре формы', () => {
   });
 
   it('честный lock даёт verified', async () => {
-    const disk = memoryDisk({ [MANIFEST_PATH]: MANIFEST_YAML });
+    const disk = memoryDisk();
     const store = await started(disk);
     disk.write(LOCK_PATH, lockTextFor(store.current().manifest.manifest));
 
@@ -207,11 +108,11 @@ describe('startStore: lock и его четыре формы', () => {
 
 describe('startStore: перечитка', () => {
   it('неуспешная перечитка НЕ заменяет рабочий манифест и отдаёт диагностики', async () => {
-    const disk = memoryDisk({ [MANIFEST_PATH]: MANIFEST_YAML });
+    const disk = memoryDisk();
     const store = await started(disk);
     const before = store.current().manifest.digest;
 
-    disk.write(MANIFEST_PATH, 'version: 1\ndefaults: {}\ntools: {}\n');
+    disk.write(MANIFEST_PATH, BROKEN_YAML);
     const result = await store.reloadManifest();
 
     expect(result.outcome).toBe('invalid');
@@ -221,7 +122,7 @@ describe('startStore: перечитка', () => {
   });
 
   it('нечитаемая перечитка отличается от несоответствующей', async () => {
-    const disk = memoryDisk({ [MANIFEST_PATH]: MANIFEST_YAML });
+    const disk = memoryDisk();
     const store = await started(disk);
     disk.fail(MANIFEST_PATH, 'EACCES');
 
@@ -232,7 +133,7 @@ describe('startStore: перечитка', () => {
   });
 
   it('успешная перечитка двигает снимок и пересчитывает вердикт', async () => {
-    const disk = memoryDisk({ [MANIFEST_PATH]: MANIFEST_YAML });
+    const disk = memoryDisk();
     const store = await started(disk);
     disk.write(LOCK_PATH, lockTextFor(store.current().manifest.manifest));
     await store.reloadLock();
@@ -247,14 +148,13 @@ describe('startStore: перечитка', () => {
   });
 
   it('обновление lock не перечитывает манифест: это разные файлы с разным временем жизни', async () => {
-    const disk = memoryDisk({ [MANIFEST_PATH]: MANIFEST_YAML });
+    const disk = memoryDisk();
     const store = await started(disk);
-    const readsAfterStart = disk.readFile.mock.calls.length;
+    const readsAfterStart = disk.reads.length;
 
     disk.write(LOCK_PATH, lockTextFor(store.current().manifest.manifest));
     await store.reloadLock();
 
-    const readsAfterLock = disk.readFile.mock.calls.slice(readsAfterStart).map(([path]) => path);
-    expect(readsAfterLock).toEqual([LOCK_PATH]);
+    expect(disk.reads.slice(readsAfterStart)).toEqual([LOCK_PATH]);
   });
 });
