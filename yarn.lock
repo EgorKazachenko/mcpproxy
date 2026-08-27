@@ -248,6 +248,9 @@ __metadata:
   resolution: "@mcpproxy/core@workspace:packages/core"
   dependencies:
     "@mcpproxy/contracts": "workspace:*"
+    es-module-lexer: "npm:^2.3.2"
+    re2: "npm:1.26.1"
+    vitest: "npm:^3"
   languageName: unknown
   linkType: soft
 
