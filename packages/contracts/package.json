@@ -8,6 +8,10 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
+    "./validate": {
+      "types": "./dist/validate/index.d.ts",
+      "default": "./dist/validate/index.js"
+    },
     "./schema": "./schema/mcpproxy.schema.json"
   },
   "files": [
@@ -22,8 +26,13 @@
     "clean": "rm -rf dist *.tsbuildinfo"
   },
   "devDependencies": {
-    "ajv": "8.20.0",
+    "es-module-lexer": "^2.3.2",
     "json-schema-to-typescript": "15.0.4",
     "vitest": "^3"
+  },
+  "dependencies": {
+    "ajv": "8.20.0",
+    "re2": "1.26.1",
+    "yaml": "2.9.0"
   }
 }
