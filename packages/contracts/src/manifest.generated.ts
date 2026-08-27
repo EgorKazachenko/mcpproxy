@@ -80,6 +80,8 @@ export interface Recipe {
   annotations?: Annotations;
   sandbox?: SandboxProfile;
   timeout?: Duration;
+  env?: EnvPolicy;
+  output?: OutputPolicy;
 }
 export interface StringParam {
   type: 'string';

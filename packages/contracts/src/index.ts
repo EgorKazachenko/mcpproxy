@@ -10,5 +10,6 @@ export * from './approval.js';
 export * from './event.js';
 export * from './otlp.js';
 export * from './jcs.js';
+export * from './lock.js';
 
 // TODO(E0): lock, IPC, четыре рецепта-заглушки.

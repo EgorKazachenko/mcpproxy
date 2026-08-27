@@ -61,7 +61,9 @@
         },
         "annotations": { "$ref": "#/$defs/Annotations" },
         "sandbox": { "$ref": "#/$defs/SandboxProfile" },
-        "timeout": { "$ref": "#/$defs/Duration" }
+        "timeout": { "$ref": "#/$defs/Duration" },
+        "env": { "$ref": "#/$defs/EnvPolicy" },
+        "output": { "$ref": "#/$defs/OutputPolicy" }
       }
     },
     "Param": {

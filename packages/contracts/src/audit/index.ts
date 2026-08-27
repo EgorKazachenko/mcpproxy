@@ -6,3 +6,4 @@
  * граф корневого входа и не находит в нём `node:crypto`.
  */
 export * from './chain.js';
+export * from './lock.js';
