@@ -18,6 +18,7 @@
     "clean": "rm -rf dist *.tsbuildinfo"
   },
   "dependencies": {
+    "@anthropic-ai/sandbox-runtime": "^0.0.74",
     "@mcpproxy/contracts": "workspace:*"
   }
 }
