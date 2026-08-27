@@ -1,6 +1,6 @@
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import type { Document, LineCounter } from 'yaml';
-import { OUTPUT_MAX_BYTES_DEFAULT } from '../lock.js';
+import { DURATION_MAX_MS, durationToMs, OUTPUT_MAX_BYTES_DEFAULT } from '../lock.js';
 import type { AccessRule, Defaults, Manifest, Recipe, SandboxProfile } from '../manifest.generated.js';
 import type { Diagnostic, ManifestSource } from '../types.js';
 import { diagnosticAt, type Segment } from './locate.js';
@@ -149,6 +149,22 @@ function checkOutputFloor(
   }
 }
 
+/**
+ * Длительность обязана быть исполнимой.
+ *
+ * Схема ограничивает `Duration` девятью цифрами — этого хватает, чтобы значение осталось
+ * безопасным целым, но не хватает, чтобы оно осталось таймером: `999999999h` — законные девять
+ * цифр и 3.6·10¹² мс, а выше `DURATION_MAX_MS` Node клампит таймаут к 1 мс. Манифест,
+ * просящий «почти никогда не прерывать», получил бы прерывание немедленно — молча.
+ */
+function checkDuration(value: string | undefined, path: Segment[], report: (path: Segment[], message: string) => void) {
+  if (value === undefined) return;
+  const ms = durationToMs(value);
+  if (ms > DURATION_MAX_MS) {
+    report(path, `длительность больше максимума таймера платформы: ${ms} мс при ${DURATION_MAX_MS}`);
+  }
+}
+
 function checkArgvSlots(recipe: Recipe, at: readonly Segment[], report: (path: Segment[], message: string) => void) {
   for (const [paramName, param] of Object.entries(recipe.params ?? {})) {
     (param.argv ?? []).forEach((element, index) => {
@@ -214,6 +230,7 @@ export function refine(
   // Уровень `defaults`: та же ветка `SandboxProfile`, то же правило. Пустой `defaults.deny`
   // при этом остаётся законным — там он означает «запретов нет», а не «снять запрет».
   checkProfileNoSubstitution(manifest.defaults.sandbox, ['defaults', 'sandbox'], report);
+  checkDuration(manifest.defaults.timeout, ['defaults', 'timeout'], report);
 
   for (const [recipeName, recipe] of Object.entries(manifest.tools)) {
     const at: Segment[] = ['tools', recipeName];
@@ -224,6 +241,7 @@ export function refine(
     checkRootConfinement(recipe, at, source, report);
     checkEnvCeiling(recipe, manifest.defaults.env.allow, at, report);
     checkOutputFloor(recipe, manifest.defaults.output, at, report);
+    checkDuration(recipe.timeout, [...at, 'timeout'], report);
   }
 
   return diagnostics;

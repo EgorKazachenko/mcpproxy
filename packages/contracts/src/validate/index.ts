@@ -1,7 +1,6 @@
 import type { ErrorObject } from 'ajv';
 import type { Document, LineCounter } from 'yaml';
 import { canonicalizeJcs } from '../jcs.js';
-import { normalizeManifest } from '../lock.js';
 import type { Manifest } from '../manifest.generated.js';
 import type { Diagnostic, ManifestSource, ParseManifestResult, PatternMatcher } from '../types.js';
 import { matcherKey } from '../types.js';
@@ -18,12 +17,12 @@ import { parseYaml } from './yaml.js';
 
 function diagnose(error: ErrorObject, doc: Document, lineCounter: LineCounter): Diagnostic {
   const segments = segmentsOf(error.instancePath);
-  return {
-    pointer: pointerOf(segments),
-    ...positionOf(doc, lineCounter, segments),
-    code: 'schema',
-    message: error.message ?? error.keyword,
-  };
+  // Через `diagnosticAt`, а не собственным литералом: это был единственный конструктор
+  // диагностики, не проходивший санитизацию, и ключи манифеста попадали в `pointer` сырыми.
+  // «Схема ограничивает имена `propertyNames`» — неверный довод: при `allErrors: true` ajv
+  // продолжает валидировать значение под плохим ключом, поэтому ключ с ESC и bidi доезжает
+  // до указателя вместе со своей же диагностикой об этом ключе.
+  return diagnosticAt(doc, lineCounter, segments, 'schema', error.message ?? error.keyword);
 }
 
 /**
@@ -79,11 +78,15 @@ function buildMatchers(
  * следующий вектор, потому что спрашивает ровно то, что нужно: переживёт ли эта форма
  * канонизацию.
  *
- * Побочно она страхует и `normalizeManifest`: `durationToMs` бросает на неизвестной единице.
+ * Канонизируется **сырой** манифест, а не `normalizeManifest(manifest)`: замерено, что вторая
+ * форма стоит 2.2 с CPU на манифесте в 258 КБ, потому что строит эффективный профиль каждого
+ * рецепта, чтобы тут же его выбросить. Покрытие при этом то же самое: нормализация переносит
+ * строки дословно (значит одиночный суррогат виден и здесь), а единственное вычисляемое число
+ * — `timeoutMs` — ограничено сверху `checkDuration`, и `maxBytes` в JSON нечислом быть не может.
  */
 function notHashable(manifest: Manifest): string | null {
   try {
-    canonicalizeJcs(normalizeManifest(manifest));
+    canonicalizeJcs(manifest);
     return null;
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);

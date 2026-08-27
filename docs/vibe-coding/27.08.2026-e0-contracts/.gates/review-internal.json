@@ -1,11 +1,11 @@
 {
   "gate": "review-internal",
-  "status": "pass",
-  "exit_code": 0,
-  "codeTree": "b22e0e3403f5617eeecf45230738961c4d616da5",
+  "status": "fail",
+  "exit_code": 1,
+  "codeTree": "ad6df6fb22de2b60aac0af2d9f1dd1a1aafd26be",
   "codeDirty": false,
-  "headSha": "def7d010ff21e2535e414486f5cd3ec6f8f7a166",
-  "startedAt": "2026-08-27T18:10:51.122Z",
+  "headSha": "c0ff75d6f88a09591f5e4c5fc5076ab8e868180d",
+  "startedAt": "2026-08-27T19:22:51.327Z",
   "command": "node .claude/skills/vibe-code-developing-v2/scripts/review-verify.mjs --kind internal --feature docs/vibe-coding/27.08.2026-e0-contracts",
   "evidencePath": null,
   "artifacts": []

@@ -208,12 +208,22 @@ tools:
     expect(parseManifest(text, SOURCE).ok).toBe(false);
   });
 
-  it('и длительность, дающую Infinity, — её же ограничивает и схема', () => {
-    // `Number('9'×400) * 1000` — это `Infinity`, а не бросок: `normalizeManifest` отрабатывает
-    // успешно и возвращает `timeoutMs: Infinity`, отказывает только канонизатор.
-    const text = `version: 1
+  it('нормальный манифест при этом грузится', () => {
+    expect(load(`  x:
+    description: "x"
+    exec: ["true"]
+`).ok).toBe(true);
+  });
+});
+
+describe('правило 9 — длительность обязана быть исполнимой', () => {
+  // Схема ограничивает `Duration` девятью цифрами, но это предел ДЛИНЫ, а не значения:
+  // `999999999h` — законные девять цифр и 3.6·10¹² мс, а выше максимума таймера платформы
+  // Node клампит таймаут к 1 мс. Манифест, просящий «почти никогда не прерывать», получил бы
+  // прерывание немедленно и молча. Два кейса ниже краснеют от РАЗНЫХ защит: этой и схемы.
+  const withTimeout = (timeout: string) => `version: 1
 defaults:
-  timeout: ${'9'.repeat(400)}s
+  timeout: ${timeout}
   output: { maxBytes: 65536, redact: true }
   env: { allow: ["PATH"] }
   sandbox:
@@ -223,14 +233,29 @@ tools:
     description: "x"
     exec: ["true"]
 `;
-    expect(parseManifest(text, SOURCE).ok).toBe(false);
+
+  it('отвергает длительность выше максимума таймера — схема её пропускает', () => {
+    expect(new RegExp('^[0-9]{1,9}(ms|s|m|h)$').test('999999999h')).toBe(true);
+    const result = parseManifest(withTimeout('999999999h'), SOURCE);
+    expect(result.ok).toBe(false);
+    expect(messagesOf(result).join('\n')).toContain('таймера платформы');
   });
 
-  it('нормальный манифест при этом грузится', () => {
-    expect(load(`  x:
+  it('и рецептную тоже', () => {
+    const result = load(`  x:
     description: "x"
     exec: ["true"]
-`).ok).toBe(true);
+    timeout: 999999999h
+`);
+    expect(result.ok).toBe(false);
+    expect(messagesOf(result).join('\n')).toContain('таймера платформы');
+  });
+
+  it('граница пиннится соседними входами', () => {
+    // В миллисекундах максимум платформы (2147483647) — десять цифр, а схема даёт девять,
+    // поэтому граница берётся в секундах, где обе стороны выразимы.
+    expect(parseManifest(withTimeout('2147483s'), SOURCE).ok).toBe(true);
+    expect(parseManifest(withTimeout('2147484s'), SOURCE).ok).toBe(false);
   });
 });
 
@@ -300,6 +325,25 @@ describe('текст диагностики безопасен для отрис
     expect(result.ok).toBe(false);
     expect(unsafe(result)).not.toContain(ESC);
     expect(unsafe(result)).not.toContain(BIDI);
+  });
+
+  it('и указатель диагностики схемы — тоже, хотя ключ отвергает propertyNames', () => {
+    // Довод «схема ограничивает имена, значит указатель чист» неверен: при `allErrors: true`
+    // ajv продолжает валидировать значение под плохим ключом, поэтому ключ доезжает до
+    // `pointer` вместе с собственной диагностикой о себе. А `pointer` — ключ поиска в логе.
+    // Рецепт под плохим ключом обязан быть ещё и НЕВАЛИДНЫМ: пока он валиден, ajv жалуется
+    // только на само имя и даёт `pointer: "tools"` — то есть кейс проходил бы, ничего не
+    // проверив. Дефект внутри значения заставляет ajv выдать диагностику ПОД этим ключом,
+    // и тогда ключ попадает в указатель.
+    const result = load(`  "a${ESC}[31m${BIDI}b":
+    description: "x"
+`);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    const pointers = result.diagnostics.map((one) => one.pointer);
+    expect(pointers.some((one) => one.startsWith('tools.'))).toBe(true);
+    expect(pointers.join('')).not.toContain(ESC);
+    expect(pointers.join('')).not.toContain(BIDI);
   });
 
   it('и имя переменной окружения из манифеста — тоже', () => {

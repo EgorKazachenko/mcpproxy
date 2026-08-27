@@ -63,9 +63,12 @@ describe('схема манифеста', () => {
     const defs = schema.$defs as Record<string, { pattern?: string } | undefined>;
     const pattern = defs.Duration?.pattern;
     if (pattern === undefined) throw new Error('ветка Duration исчезла из схемы');
+    // Граница пиннится ровно на девяти цифрах: с `{1,19}` прежняя тройка утверждений
+    // оставалась зелёной, а `timeoutMs` доходил до 3.6·10²⁵.
+    expect(new RegExp(pattern).test(`${'9'.repeat(9)}s`)).toBe(true);
+    expect(new RegExp(pattern).test(`${'9'.repeat(10)}s`)).toBe(false);
     expect(new RegExp(pattern).test(`${'9'.repeat(400)}s`)).toBe(false);
     expect(new RegExp(pattern).test('120s')).toBe(true);
-    expect(new RegExp(pattern).test('3600000h')).toBe(true);
   });
 
   it('требует непустой values у enum', () => {

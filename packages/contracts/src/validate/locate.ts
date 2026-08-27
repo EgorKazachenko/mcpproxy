@@ -51,7 +51,11 @@ export function diagnosticAt(
   message: string,
 ): Diagnostic {
   return {
-    pointer: pointerOf(segments),
+    // `pointer` санитизируется наравне с `message`: сегменты приходят из ключей недоверенного
+    // манифеста, а при `allErrors: true` ключ, отвергнутый `propertyNames`, всё равно доезжает
+    // сюда — вместе с собственной диагностикой о себе. А `pointer` контракт называет ключом
+    // поиска в логе, то есть полем, по которому ищут.
+    pointer: sanitizeDescription(pointerOf(segments)).text,
     ...positionOf(doc, lineCounter, segments),
     code,
     message: sanitizeDescription(message).text,
