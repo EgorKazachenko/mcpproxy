@@ -4,14 +4,14 @@
 - branch: `v2/e6-audit`
 - mode: attended
 - track: lite
-- codeTree: `6071da77492a`
+- codeTree: `48826c26b24c`
 - kill-review due: 2026-10-26
 
 | gate | status | artifacts |
 |---|---|---|
 | build-test | pass | — |
-| review-internal | waived: core/src/audit/index.ts — баррель-реэкспорт по находке B2 этого же ревью, логики нет; граф под deps.test.ts, поверхность под снапшотом. Решение владельца 28.08.2026. | — |
-| review-scan | waived: core/src/audit/index.ts — баррель-реэкспорт по находке B2 этого же ревью, логики нет; граф под deps.test.ts, поверхность под снапшотом. Решение владельца 28.08.2026. | — |
-| review-bc | waived: core/src/audit/index.ts — баррель-реэкспорт по находке B2 этого же ревью, логики нет; граф под deps.test.ts, поверхность под снапшотом. Решение владельца 28.08.2026. | — |
-| review-tests | waived: core/src/audit/index.ts — баррель-реэкспорт по находке B2 этого же ревью, логики нет; граф под deps.test.ts, поверхность под снапшотом. Решение владельца 28.08.2026. | — |
-| review-errors | waived: core/src/audit/index.ts — баррель-реэкспорт по находке B2 этого же ревью, логики нет; граф под deps.test.ts, поверхность под снапшотом. Решение владельца 28.08.2026. | — |
+| review-internal | waived: Три файла вне ревью, все без продакшн-логики: audit/index.ts (баррель по находке B2 этого же ревью) и redact/{secret-samples,repo-clean.test}.ts — сборщик фикстур и страж, добавленные после красного GitGuardian. Продакшн-код (log/engine/output/build/export) не менялся, находки ревью на него по-прежнему распространяются. Решение владельца 28.08.2026. | — |
+| review-scan | waived: Три файла вне ревью, все без продакшн-логики: audit/index.ts (баррель по находке B2 этого же ревью) и redact/{secret-samples,repo-clean.test}.ts — сборщик фикстур и страж, добавленные после красного GitGuardian. Продакшн-код (log/engine/output/build/export) не менялся, находки ревью на него по-прежнему распространяются. Решение владельца 28.08.2026. | — |
+| review-bc | waived: Три файла вне ревью, все без продакшн-логики: audit/index.ts (баррель по находке B2 этого же ревью) и redact/{secret-samples,repo-clean.test}.ts — сборщик фикстур и страж, добавленные после красного GitGuardian. Продакшн-код (log/engine/output/build/export) не менялся, находки ревью на него по-прежнему распространяются. Решение владельца 28.08.2026. | — |
+| review-tests | waived: Три файла вне ревью, все без продакшн-логики: audit/index.ts (баррель по находке B2 этого же ревью) и redact/{secret-samples,repo-clean.test}.ts — сборщик фикстур и страж, добавленные после красного GitGuardian. Продакшн-код (log/engine/output/build/export) не менялся, находки ревью на него по-прежнему распространяются. Решение владельца 28.08.2026. | — |
+| review-errors | waived: Три файла вне ревью, все без продакшн-логики: audit/index.ts (баррель по находке B2 этого же ревью) и redact/{secret-samples,repo-clean.test}.ts — сборщик фикстур и страж, добавленные после красного GitGuardian. Продакшн-код (log/engine/output/build/export) не менялся, находки ревью на него по-прежнему распространяются. Решение владельца 28.08.2026. | — |
