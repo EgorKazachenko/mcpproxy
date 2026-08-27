@@ -73,7 +73,8 @@ describe('правила ловят свою форму', () => {
     ['slack-webhook-url', `https://hooks.slack.com/services/${'A1b2C3d4E5'.repeat(4)}`],
     ['stripe-secret-key', 'sk_live_ABCdefGHIjklMNOpqrSTUvwx'],
     ['anthropic-api-key', `sk-ant-api03-${'A1b2C3d4E5'.repeat(9)}AA`],
-    ['openai-api-key', 'sk-proj-ABCdefGHIjklMNOpqrSTUvwxYZ0123456789'],
+    ['openai-api-key-classic', `sk-${'A1b2C3d4E5'.repeat(2)}T3BlbkFJ${'F6g7H8i9J0'.repeat(2)}`],
+    ['openai-project-key', `sk-proj-${'A1b2C3d4E5'.repeat(5)}`],
     ['google-api-key', 'AIzaSyA1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q'],
     ['npm-access-token', 'npm_016ABCdefGHIjklMNOpqrSTUvwxYZ0123456'],
     ['pypi-upload-token', `pypi-AgEIcHlwaS5vcmc${'A1b2C3d4E5'.repeat(6)}`],
@@ -100,6 +101,15 @@ describe('правила не ловят обычный вывод', () => {
   // чёрные прямоугольники вместо вывода тестов.
   const benign = [
     'PASS src/validate/refine.test.ts (34 tests) 12ms',
+    // Ложняк, воспроизведённый ревью на РЕАЛЬНОМ выводе `git`: правило `openai-api-key`
+    // не имело ни маркера формата, ни границы слова, и `sk-` внутри `task-` давало
+    // 'On branch fix/ta[redacted:openai-api-key]'. Отредактированный stdout — это то,
+    // что видит модель, поэтому вырезанное имя ветки ломает вызов молча.
+    'On branch fix/task-scheduler-race-condition-in-worker',
+    'risk-management-and-compliance-framework-v2',
+    'disk-space-monitor-daemon-restart-policy',
+    // Идентификаторы принципалов IAM — не креденшлы, и `aws iam` печатает их штатно.
+    'arn:aws:iam::123456789012:user/deploy AIDAIOSFODNN7EXAMPLE AROAJQABLZS4A3QDU576Q',
     'node_modules/.cache/vite/deps',
     'Resolved 412 packages in 1.2s',
     'commit e40b7defb42add5ade60cc85192e63ad42aa7b4a',

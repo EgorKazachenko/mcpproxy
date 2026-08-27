@@ -33,7 +33,8 @@ export type {
 } from './redact/output.js';
 
 // Журнал: append-only JSONL с хэш-цепочкой. Формула — из `@mcpproxy/contracts/audit`.
-export { defaultAuditLogPath, openAuditLog, readLog, verifyLog } from './audit/log.js';
-export type { AuditLog, LogVerification, OpenAuditLogOptions, ReadLogResult } from './audit/log.js';
-export { exportJsonl, exportOtlp } from './audit/export.js';
-export type { ExportManifest, ExportOptions, ExportResult } from './audit/export.js';
+//
+// Реэкспорт из барреля `./audit`, а не из модулей напрямую: тот же набор доступен вторым
+// входом пакета — `@mcpproxy/core/audit`, — который НЕ тянет нативный `re2`. Потребителю
+// журнала (E7, проверка чужого экспорта) хватает его; корневой вход остаётся полным.
+export * from './audit/index.js';

@@ -106,7 +106,16 @@ describe('redactOutput', () => {
   it('R14: redact: false пропускает вывод как есть', () => {
     const result = redactOutput(redactor, { stdout: `out ${PAT}`, stderr: '' }, { maxBytes: null, redact: false });
     expect(result.stdout).toBe(`out ${PAT}`);
-    expect(result.redactions).toEqual([]);
+  });
+
+  it('R14: но отчёт пишется даже при redact: false — журнал обязан знать, что ключ печатали', () => {
+    // Раньше ветка `if (limits.redact)` выключала и замену, и ПОДСЧЁТ: запись аудита не
+    // содержала следа того, что процесс напечатал ключ. R14 требует выключить редакцию и про
+    // отчёт не высказывается, а принцип записан этажом выше: отчёт — о том, ЧТО ПРОИЗОШЛО.
+    // E0 держит пол, поэтому `redact: false` — явное решение владельца манифеста, и именно
+    // тогда сигнал в журнале нужнее всего.
+    const result = redactOutput(redactor, { stdout: `out ${PAT}`, stderr: '' }, { maxBytes: null, redact: false });
+    expect(result.redactions).toEqual([{ rule: 'github-pat', count: 1, stream: 'stdout' }]);
   });
 
   it('R14: redact: false НЕ отменяет обрезку — это разные ограничения', () => {

@@ -3,6 +3,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { init, parse } from 'es-module-lexer';
 import { beforeAll, describe, expect, it } from 'vitest';
+import { specifiersOf as declarationSpecifiers } from './api-surface.js';
 
 /**
  * R27 — исполняемая проверка двух архитектурных заявлений о `core`:
@@ -60,9 +61,8 @@ function specifiersOf(source: string, extension: '.js' | '.d.ts'): string[] {
     const [imports] = parse(source);
     return imports.map((one) => one.n).filter((n): n is string => n !== undefined);
   }
-  return [...source.matchAll(/(?:from|import)\s*\(?\s*['"]([^'"]+)['"]/g)]
-    .map((match) => match[1])
-    .filter((n): n is string => n !== undefined);
+  // Регулярка не набирается здесь в третий раз — она одна, в `api-surface.ts`.
+  return declarationSpecifiers(source);
 }
 
 describe('граф зависимостей core', () => {
@@ -103,6 +103,19 @@ describe('граф зависимостей core', () => {
   it('R24: сетевых модулей в графе нет — экспорт пишет файлы, отправляет человек', () => {
     const { bare } = walk(resolve(distRoot, 'index.js'), '.js');
     expect(bare.filter((one) => NETWORK.includes(one))).toEqual([]);
+  });
+
+  it('B2: вход ./audit НЕ тянет нативный re2 — ради этого он и заведён', () => {
+    // Потребителю журнала (вкладка аудита E7; человек, проверяющий вердикт чужого экспорта)
+    // нужны `readLog`/`verifyLog`, а не движок редакции. `re2` собран под ABI Node, и в
+    // Electron тот же бинарь не загрузится без `electron-rebuild`.
+    const { bare } = walk(resolve(distRoot, 'audit', 'index.js'), '.js');
+    expect(bare).not.toContain('re2');
+    expect(bare).toContain('@mcpproxy/contracts/audit');
+  });
+
+  it('B2: а корневой вход re2 тянет — иначе проверка выше зелена по другой причине', () => {
+    expect(walk(resolve(distRoot, 'index.js'), '.js').bare).toContain('re2');
   });
 
   it('re2 не уезжает в декларации — потребителю он не нужен для компиляции', () => {

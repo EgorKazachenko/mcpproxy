@@ -1,10 +1,10 @@
-import { copyFileSync, mkdirSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import type { ChainedEvent, OtlpSpan } from '@mcpproxy/contracts';
 import { toOtlp } from '@mcpproxy/contracts';
 import { unchain } from '@mcpproxy/contracts/audit';
 import type { LogVerification } from './log.js';
-import { readLog, verifyLog } from './log.js';
+import { AuditLogError, readLog, verifyLog } from './log.js';
 
 /**
  * Экспорт журнала — то, что S9 показывает сразу после бейджа «цепочка верифицирована».
@@ -15,7 +15,8 @@ import { readLog, verifyLog } from './log.js';
  * так что вердикт он перепроверяет сам. Сайдкар — это заявление экспортёра, а не пломба.
  *
  * **Наружу ничего не уходит (R24).** Функции пишут файлы в указанный каталог; отправку
- * запускает человек. Сетевых зависимостей у модуля нет.
+ * запускает человек. Сетевых зависимостей у модуля нет, и это проверяется по графу в
+ * `deps.test.ts`, а не обещанием здесь.
  */
 
 export interface ExportManifest {
@@ -31,8 +32,18 @@ export interface ExportManifest {
   readonly verification: LogVerification;
   /** Последняя строка была недописана: демон убит на середине. Не подделка (R19). */
   readonly trailingPartial: boolean;
+  /**
+   * Первая неразобранная строка, если она есть.
+   *
+   * В сайдкаре отдельным полем, а не только внутри `verification`: получателю нужно знать,
+   * что за точкой разрыва в файле **лежат ещё байты**, которых нет в `count`. Без этого поля
+   * экспорт порченого журнала выглядит как экспорт короткого целого.
+   */
+  readonly malformedAt: number | null;
   /** Индексы записей, чья версия формы новее известной нам (R20). */
   readonly future: readonly number[];
+  /** Индексы записей, чья версия формы старее нашей. */
+  readonly legacy: readonly number[];
 }
 
 export interface ExportResult {
@@ -53,11 +64,22 @@ export interface ExportOptions {
  * прогнала бы каждую запись через `JSON.stringify` этой версии кода, порядок ключей мог бы
  * поехать, а вместе с ним — и дайджесты, которые получатель считает сам. Экспорт обязан
  * отдавать те же байты, на которых цепочка сходилась у нас.
+ *
+ * **Порядок операций — копия, ПОТОМ чтение копии.** Демон дописывает журнал на каждой стадии
+ * каждого вызова, поэтому «прочитать оригинал → скопировать» оставляет окно: `count`, `first`,
+ * `last` и, главное, `verification` описывали бы префикс, а рядом лежал бы файл длиннее.
+ * Получатель, который по замыслу перепроверяет вердикт сам, получил бы другое число записей —
+ * то есть терялось бы ровно то свойство, ради которого сайдкар и существует. Читая КОПИЮ,
+ * гонку убираем по построению, без блокировок.
  */
 export function exportJsonl(logPath: string, destDir: string, options: ExportOptions = {}): ExportResult {
+  // Проверка ДО `mkdirSync`: иначе отсутствующий журнал оставлял бы за собой созданный каталог
+  // назначения и падал сырым `ENOENT` из `node:fs`, мимо диагностик модуля.
+  if (!existsSync(logPath)) {
+    throw new AuditLogError('corrupt', logPath, `журнала ${logPath} не существует: экспортировать нечего`);
+  }
+
   const now = options.now ?? (() => new Date());
-  const log = readLog(logPath);
-  const verification = verifyLog(log);
 
   mkdirSync(destDir, { recursive: true, mode: 0o700 });
 
@@ -65,16 +87,26 @@ export function exportJsonl(logPath: string, destDir: string, options: ExportOpt
   const copiedPath = join(destDir, name);
   copyFileSync(logPath, copiedPath);
 
+  // Момент снимка — сразу после копии. Он же делает окно «копия сделана, но ещё не прочитана»
+  // НАБЛЮДАЕМЫМ: тест, дописывающий журнал изнутри этих часов, обязан не сдвинуть ни одного
+  // поля манифеста, потому что читается копия. Реализация, читающая оригинал, на этом краснеет.
+  const verifiedAt = now().toISOString();
+
+  const log = readLog(copiedPath);
+  const verification = verifyLog(log);
+
   const manifest: ExportManifest = {
     manifest: 'mcpproxy.audit.export/1',
     source: name,
     count: log.records.length,
     first: log.records[0]?.chain.self ?? null,
     last: log.records.at(-1)?.chain.self ?? null,
-    verifiedAt: now().toISOString(),
+    verifiedAt,
     verification,
     trailingPartial: log.trailingPartial,
+    malformedAt: log.malformedAt,
     future: log.future,
+    legacy: log.legacy,
   };
 
   const manifestPath = join(destDir, `${name}.manifest.json`);

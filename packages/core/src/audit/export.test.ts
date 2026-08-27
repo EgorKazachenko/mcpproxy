@@ -1,11 +1,12 @@
-import { appendFileSync, mkdtempSync, readFileSync, statSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdtempSync, readFileSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { AuditEvent } from '@mcpproxy/contracts';
+import type { AuditEvent, ChainedEvent } from '@mcpproxy/contracts';
 import { MCP_PROTOCOL_VERSION } from '@mcpproxy/contracts';
+import { unchain } from '@mcpproxy/contracts/audit';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { type ExportManifest, exportJsonl, exportOtlp } from './export.js';
-import { openAuditLog, readLog } from './log.js';
+import { AuditLogError, openAuditLog, readLog } from './log.js';
 
 let dir: string;
 let path: string;
@@ -93,7 +94,11 @@ describe('exportJsonl', () => {
     seed(['received']);
     appendFileSync(path, 'не json\n');
     const { manifest } = exportJsonl(path, dest, { now: FROZEN });
-    expect(manifest.verification).toEqual({ ok: false, brokenAt: 1, count: 1 });
+    expect(manifest.verification).toEqual({ ok: false, brokenAt: 1, count: 1, kind: 'corrupt' });
+    // EO3: получателю нужно знать, что ЗА точкой разрыва в файле лежат ещё байты,
+    // которых нет в `count`. Без этого поля экспорт порченого журнала выглядит как
+    // экспорт короткого целого.
+    expect(manifest.malformedAt).toBe(1);
   });
 
   it('оборванный хвост попадает в сайдкар отдельным полем, а не разрывом', () => {
@@ -127,6 +132,37 @@ describe('exportJsonl', () => {
   });
 });
 
+describe('гонка с пишущим демоном', () => {
+  it('M4: сайдкар описывает те байты, что скопированы, а не префикс', () => {
+    // Демон дописывает журнал на каждой стадии каждого вызова. Порядок «прочитать оригинал →
+    // скопировать» оставлял окно: `count`, `first`, `last` и, главное, `verification`
+    // описывали префикс, а рядом лежал файл длиннее. Получатель, который по замыслу
+    // перепроверяет вердикт сам, считал бы другое число записей — то есть терялось ровно то
+    // свойство, ради которого сайдкар и существует.
+    //
+    // Инжектированные часы здесь и есть тот самый момент «между чтением и копированием»:
+    // запись, добавленная из них, попадёт в копию, если копия делается ПОСЛЕ.
+    seed(['received']);
+
+    // Часы вызываются ровно в окне «копия сделана, но ещё не прочитана», поэтому запись,
+    // добавленная отсюда, попадает в ОРИГИНАЛ и не попадает в копию. Реализация, читающая
+    // оригинал, насчитает 2 при одной записи в копии.
+    const { manifest, logPath } = exportJsonl(path, dest, {
+      now: () => {
+        const log = openAuditLog({ path });
+        log.append(event('lock_check'));
+        log.close();
+        return new Date('2026-08-27T12:00:00.000Z');
+      },
+    });
+
+    expect(readLog(path).records).toHaveLength(2);
+    expect(readLog(logPath).records).toHaveLength(1);
+    expect(manifest.count).toBe(1);
+    expect(manifest.last).toBe(readLog(logPath).records.at(-1)?.chain.self);
+  });
+});
+
 describe('exportOtlp', () => {
   it('отдаёт по спану на запись', () => {
     seed(['received', 'lock_check']);
@@ -150,5 +186,37 @@ describe('exportOtlp', () => {
 
   it('пустой вход даёт пустой выход, а не падение', () => {
     expect(exportOtlp([])).toEqual([]);
+  });
+
+  it('R23: chain снимает unchain E6, а не поведение toOtlp', () => {
+    // Утверждение «в спане нет chain» само по себе слабое: `toOtlp` контракта и так не знает
+    // про это поле. Проверяем именно СВОЁ решение — что на вход экспортёру уходит событие
+    // без цепочки, а не `ChainedEvent`, у которого лишнее поле просто игнорируется.
+    seed(['received']);
+    const [record] = readLog(path).records;
+    expect(record).toBeDefined();
+    expect(unchain(record as ChainedEvent)).not.toHaveProperty('chain');
+  });
+});
+
+describe('отказы экспорта', () => {
+  it('несуществующий журнал — внятный отказ, и каталог назначения НЕ создан', () => {
+    // Раньше `readLog` отсутствие терпел, `mkdirSync` успевал создать каталог, и падало
+    // тремя строками ниже сырым `ENOENT: … copyfile` из `node:fs`, мимо диагностик модуля.
+    expect(() => exportJsonl(join(dir, 'нет-такого.jsonl'), dest, { now: FROZEN })).toThrow(AuditLogError);
+    expect(existsSync(dest)).toBe(false);
+  });
+
+  it('T5: часы по умолчанию — это исполняемая ветка, а не мёртвый код', () => {
+    // Все остальные вызовы передают `FROZEN`, поэтому `options.now ?? (() => new Date())`
+    // не исполнялся ни разу: ветка была зелёной ни на чём.
+    seed(['received']);
+    const before = Date.now();
+    const { manifest } = exportJsonl(path, dest);
+    const stamped = Date.parse(manifest.verifiedAt);
+
+    expect(Number.isNaN(stamped)).toBe(false);
+    expect(stamped).toBeGreaterThanOrEqual(before - 1000);
+    expect(stamped).toBeLessThanOrEqual(Date.now() + 1000);
   });
 });

@@ -41,7 +41,12 @@ export const SECRET_RULES: readonly SecretRule[] = [
     id: 'aws-access-key-id',
     source: 'gitleaks:aws-access-token',
     description: 'AWS Access Key ID',
-    pattern: '(?:A3T[A-Z0-9]|AKIA|AGPA|AIDA|AROA|AIPA|ANPA|ANVA|ASIA)[A-Z0-9]{16}',
+    // Список префиксов — тот, что у названного в `source` набора, и только он. Прежний
+    // девятипрефиксный вариант был из другого набора и ловил AIDA/AROA/AGPA/AIPA/ANPA/ANVA —
+    // это идентификаторы ПРИНЦИПАЛОВ IAM, а не креденшлы: они штатно печатаются выводом
+    // `aws iam`, и вырезать их — ложняк. Поле `source` существует ради построчной сверки при
+    // обновлении набора; строка, называющая не тот набор, эту сверку ломает.
+    pattern: '(?:A3T[A-Z0-9]|AKIA|ASIA|ABIA|ACCA)[A-Z0-9]{16}',
   },
   {
     id: 'aws-secret-access-key',
@@ -103,7 +108,7 @@ export const SECRET_RULES: readonly SecretRule[] = [
     id: 'stripe-secret-key',
     source: 'gitleaks:stripe-access-token',
     description: 'Stripe Secret / Restricted Key',
-    pattern: '(?:sk|rk)_(?:live|test)_[A-Za-z0-9]{24,99}',
+    pattern: '\\b(?:sk|rk)_(?:live|test)_[A-Za-z0-9]{24,99}',
   },
   {
     id: 'anthropic-api-key',
@@ -112,10 +117,25 @@ export const SECRET_RULES: readonly SecretRule[] = [
     pattern: 'sk-ant-[A-Za-z0-9]{4,12}-[A-Za-z0-9_\\-]{80,120}',
   },
   {
-    id: 'openai-api-key',
-    source: 'Secrets-Patterns-DB:openai-api-key',
-    description: 'OpenAI API Key',
-    pattern: 'sk-(?:proj-)?[A-Za-z0-9_\\-]{32,}',
+    id: 'openai-api-key-classic',
+    source: 'gitleaks:openai-api-key',
+    description: 'OpenAI API Key, классическая форма с маркером T3BlbkFJ',
+    // Якорь — маркер `T3BlbkFJ` внутри ключа, как у апстрима. Предыдущая версия правила
+    // (`sk-(?:proj-)?[A-Za-z0-9_-]{32,}`) не имела ни маркера, ни границы слова, и `sk-`
+    // внутри обычных слов давало ложняк на реальном выводе `git`:
+    //   'On branch fix/task-scheduler-race-condition-in-worker'
+    //     → 'On branch fix/ta[redacted:openai-api-key]'
+    // Отредактированный stdout — это то, что ВИДИТ МОДЕЛЬ: вырезанное имя ветки ломает
+    // легитимный вызов молча. `\b` тут несущий: в `task-` перед `sk` границы слова нет.
+    pattern: '\\bsk-[A-Za-z0-9]{20}T3BlbkFJ[A-Za-z0-9]{20}',
+  },
+  {
+    id: 'openai-project-key',
+    source: 'Secrets-Patterns-DB:openai-api-key (проектная форма)',
+    description: 'OpenAI Project API Key',
+    // Префикс `sk-proj-` целиком плюс граница слова: настоящие проектные ключи длиной
+    // за сотню символов, нижняя граница взята с большим запасом вниз.
+    pattern: '\\bsk-proj-[A-Za-z0-9_\\-]{48,}',
   },
   {
     id: 'google-api-key',

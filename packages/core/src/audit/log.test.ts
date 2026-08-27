@@ -1,11 +1,11 @@
-import { appendFileSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { appendFileSync, chmodSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { isAbsolute, join } from 'node:path';
 import type { AuditEvent, ChainedEvent } from '@mcpproxy/contracts';
 import { MCP_PROTOCOL_VERSION } from '@mcpproxy/contracts';
 import { chainHash, unchain } from '@mcpproxy/contracts/audit';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { defaultAuditLogPath, openAuditLog, readLog, verifyLog } from './log.js';
+import { AuditLogError, defaultAuditLogPath, openAuditLog, readLog, verifyLog } from './log.js';
 
 // Только временные каталоги: чек-лист приватности, и заодно два прогона рядом не дерутся.
 let dir: string;
@@ -82,11 +82,17 @@ describe('запись', () => {
     expect(readFileSync(path, 'utf8').endsWith('\n')).toBe(true);
   });
 
-  it('запись после close отвергается, а не уходит в никуда', () => {
+  it('запись после close отвергается кодом closed, а не уходит в никуда', () => {
     const log = openAuditLog({ path });
     log.append(event());
     log.close();
-    expect(() => log.append(event('lock_check'))).toThrow(/закрыт/);
+    try {
+      log.append(event('lock_check'));
+      expect.unreachable('запись в закрытый журнал обязана отвергаться');
+    } catch (error) {
+      expect(error).toBeInstanceOf(AuditLogError);
+      expect((error as AuditLogError).code).toBe('closed');
+    }
   });
 
   it('повторный close безвреден', () => {
@@ -163,7 +169,7 @@ describe('R21: верификация', () => {
     const records = lines().map((line) => JSON.parse(line) as ChainedEvent);
     rewrite(records.map((one, i) => (i === 2 ? { ...one, cwd: '/подменено' } : one)));
 
-    expect(verifyLog(readLog(path))).toEqual({ ok: false, brokenAt: 2, count: 4 });
+    expect(verifyLog(readLog(path))).toEqual({ ok: false, brokenAt: 2, count: 4, kind: 'chain' });
   });
 
   it('S9: правка с ПЕРЕСЧЁТОМ self всплывает на следующей записи', () => {
@@ -180,7 +186,7 @@ describe('R21: верификация', () => {
     };
     rewrite(records.map((one, i) => (i === 2 ? resealed : one)));
 
-    expect(verifyLog(readLog(path))).toEqual({ ok: false, brokenAt: 3, count: 4 });
+    expect(verifyLog(readLog(path))).toEqual({ ok: false, brokenAt: 3, count: 4, kind: 'chain' });
   });
 
   it('подделка ПЕРВОЙ записи ловится, а не проваливается в ложный ноль', () => {
@@ -235,13 +241,11 @@ describe('неразобранная строка В СЕРЕДИНЕ', () => {
     log.append(event('received'));
     log.close();
     appendFileSync(path, 'не json\n');
-    const tail = openAuditLog({ path: join(dir, 'other.jsonl') });
-    tail.close();
 
     const result = readLog(path);
     expect(result.malformedAt).toBe(1);
     expect(result.records).toHaveLength(1);
-    expect(verifyLog(result)).toEqual({ ok: false, brokenAt: 1, count: 1 });
+    expect(verifyLog(result)).toEqual({ ok: false, brokenAt: 1, count: 1, kind: 'corrupt' });
   });
 
   it('строка без блока chain — тоже порча, а не «событие без цепочки»', () => {
@@ -267,13 +271,24 @@ describe('неразобранная строка В СЕРЕДИНЕ', () => {
     const chained = { ...event(), chain: { prev: 'a'.repeat(64), self: 'b'.repeat(64) } };
     rewrite([chained]);
     expect(readLog(path).malformedAt).toBeNull();
-    expect(verifyLog(readLog(path))).toEqual({ ok: false, brokenAt: 0, count: 1 });
+    expect(verifyLog(readLog(path))).toEqual({ ok: false, brokenAt: 0, count: 1, kind: 'chain' });
   });
 
-  it('дозапись в порченый журнал отвергается', () => {
-    open().append(event());
+  it('дозапись в порченый журнал отвергается кодом corrupt, а не прозой', () => {
+    const log = openAuditLog({ path });
+    log.append(event());
+    log.close();
     appendFileSync(path, 'не json\n');
-    expect(() => openAuditLog({ path })).toThrow(/повреждён/);
+
+    // Ветвиться потребитель обязан по коду: решение «останавливать ли вызовы без аудита»
+    // не имеет права зависеть от формулировки сообщения (конвенция `DiagnosticCode` из E0).
+    expect(() => openAuditLog({ path })).toThrow(AuditLogError);
+    try {
+      openAuditLog({ path });
+      expect.unreachable('порченый журнал обязан отвергаться');
+    } catch (error) {
+      expect((error as AuditLogError).code).toBe('corrupt');
+    }
   });
 });
 
@@ -336,6 +351,262 @@ describe('честная граница: обрезание хвоста НЕ л
   });
 });
 
+describe('C1: дозапись после оборванного хвоста', () => {
+  const tear = (): void => {
+    const log = openAuditLog({ path });
+    log.append(event('received'));
+    log.append(event('lock_check'));
+    log.close();
+    // Ровно то, что оставляет после себя убитый на середине `write` демон: строка без `\n`.
+    appendFileSync(path, '{"schema":"mcpproxy.audit/1","operat');
+  };
+
+  it('журнал остаётся целым — огрызок срезается, а не наследуется', () => {
+    // Дыра, которую нашла мутационная проверка: поведение писателя на оборванном хвосте не
+    // было закреплено НИ В ОДНУ сторону — попытка «починить» его дописыванием `\n` не
+    // покрасила ни одного из 166 тестов. Без этого теста дескриптор на `'a'` приклеивал
+    // первую же новую запись к огрызку.
+    tear();
+    const log = openAuditLog({ path });
+    log.append(event('validate'));
+    log.close();
+
+    expect(verifyLog(readLog(path))).toEqual({ ok: true, count: 3 });
+  });
+
+  it('дописанное событие не теряется внутри порченой строки', () => {
+    // `07-contracts.md`: «отказ без записи в аудит — баг, а не оптимизация». Событие,
+    // ушедшее внутрь неразбираемой строки, — это отказ без записи.
+    tear();
+    const log = openAuditLog({ path });
+    log.append(event('validate'));
+    log.close();
+
+    expect(readLog(path).records.map((one) => one.stage)).toEqual(['received', 'lock_check', 'validate']);
+  });
+
+  it('починка сообщается наружу, а не молчит', () => {
+    // Молчание тут неотличимо от «ничего не случилось», а случилось аварийное завершение.
+    tear();
+    const log = openAuditLog({ path });
+    expect(log.repairedTornTail).toBe(true);
+    log.close();
+  });
+
+  it('на целом журнале флаг починки не поднимается', () => {
+    const first = openAuditLog({ path });
+    first.append(event());
+    first.close();
+
+    const second = openAuditLog({ path });
+    expect(second.repairedTornTail).toBe(false);
+    second.close();
+  });
+
+  it('следующее открытие уже не встречает порчи', () => {
+    // Раньше третий запуск демона бросал «повреждён» и журнал был забетонирован навсегда:
+    // демон больше не мог писать аудит вообще.
+    tear();
+    for (const stage of ['validate', 'build_argv'] as const) {
+      const log = openAuditLog({ path });
+      log.append(event(stage));
+      log.close();
+    }
+    expect(verifyLog(readLog(path))).toEqual({ ok: true, count: 4 });
+  });
+
+  it('файл целиком из одного огрызка обнуляется, а не превращается в запись', () => {
+    writeFileSync(path, '{"schema":"mcpproxy.audit/1","opera');
+    const log = openAuditLog({ path });
+    const genesis = log.append(event());
+    log.close();
+
+    expect(genesis.chain.prev).toBeNull();
+    expect(verifyLog(readLog(path))).toEqual({ ok: true, count: 1 });
+  });
+
+  it('срез считается в БАЙТАХ: многобайтовый cwd в последней записи не режется пополам', () => {
+    const log = openAuditLog({ path });
+    log.append({ ...event(), cwd: '/Пользователи/разработчик/проект' });
+    log.close();
+    appendFileSync(path, '{"sche');
+
+    const next = openAuditLog({ path });
+    next.append(event('lock_check'));
+    next.close();
+
+    expect(verifyLog(readLog(path))).toEqual({ ok: true, count: 2 });
+    expect(readLog(path).records[0]?.cwd).toBe('/Пользователи/разработчик/проект');
+  });
+});
+
+describe('два писателя на один файл', () => {
+  it('второе открытие отвергается кодом already-open', () => {
+    // Два экземпляра держат каждый свой `previous` и, чередуя записи, ломают цепочку
+    // необратимо и молча — бейдж потом показывает подделку на ошибке интеграции.
+    const first = openAuditLog({ path });
+    try {
+      openAuditLog({ path });
+      expect.unreachable('второе открытие того же журнала обязано отвергаться');
+    } catch (error) {
+      expect((error as AuditLogError).code).toBe('already-open');
+    } finally {
+      first.close();
+    }
+  });
+
+  it('после close журнал можно открыть снова', () => {
+    openAuditLog({ path }).close();
+    const again = openAuditLog({ path });
+    expect(again.head()).toBeNull();
+    again.close();
+  });
+
+  it('реестр ключуется разрешённым путём, а не строкой аргумента', () => {
+    const first = openAuditLog({ path });
+    try {
+      // Тот же файл, другая строка пути.
+      expect(() => openAuditLog({ path: join(dir, '.', 'audit.jsonl') })).toThrow(AuditLogError);
+    } finally {
+      first.close();
+    }
+  });
+});
+
+describe('R18: каталог с чужими правами', () => {
+  it('открытие отвергается кодом insecure-directory', () => {
+    // Файл `0600` закрывает содержимое, но каталог, доступный на запись группе или всем,
+    // позволяет соседу ПЕРЕИМЕНОВАТЬ audit.jsonl и положить свой — то есть переписать
+    // журнал целиком, не имея прав на файл.
+    const loose = join(dir, 'loose');
+    mkdirSync(loose, { recursive: true });
+    chmodSync(loose, 0o755);
+
+    try {
+      openAuditLog({ path: join(loose, 'audit.jsonl') });
+      expect.unreachable('каталог с правами 0755 обязан отвергаться');
+    } catch (error) {
+      expect(error).toBeInstanceOf(AuditLogError);
+      expect((error as AuditLogError).code).toBe('insecure-directory');
+      expect((error as AuditLogError).message).toContain('chmod 700');
+    }
+  });
+
+  it('свой каталог 0700 проходит — иначе проверка выше запрещала бы всё подряд', () => {
+    const tight = join(dir, 'tight');
+    openAuditLog({ path: join(tight, 'audit.jsonl') }).close();
+    expect(statSync(tight).mode & 0o777).toBe(0o700);
+  });
+});
+
+describe('B1: версия формы сравнивается по ПОРЯДКУ, а не по неравенству', () => {
+  const withSchema = (schema: string, prev: string | null): ChainedEvent => {
+    const body = { ...event(), schema } as unknown as AuditEvent;
+    return { ...body, chain: { prev, self: chainHash(body as never, prev) } };
+  };
+
+  it('запись старее нашей — legacy, а не future', () => {
+    // Иначе в день выпуска писателя `mcpproxy.audit/2` новая сборка прочитает ВСЮ историю
+    // установки и пометит каждую запись как «форма новее меня», а сайдкар экспорта сообщит
+    // то же получателю. Лог append-only — снять такую пометку перегенерацией нельзя.
+    const older = withSchema('mcpproxy.audit/0', null);
+    rewrite([older]);
+
+    const result = readLog(path);
+    expect(result.legacy).toEqual([0]);
+    expect(result.future).toEqual([]);
+    expect(verifyLog(result)).toEqual({ ok: true, count: 1 });
+  });
+
+  it('запись новее нашей — future', () => {
+    rewrite([withSchema('mcpproxy.audit/2', null)]);
+    const result = readLog(path);
+    expect(result.future).toEqual([0]);
+    expect(result.legacy).toEqual([]);
+  });
+
+  it('три поколения в одном файле разложены верно', () => {
+    const first = withSchema('mcpproxy.audit/0', null);
+    const second = withSchema('mcpproxy.audit/1', first.chain.self);
+    const third = withSchema('mcpproxy.audit/2', second.chain.self);
+    rewrite([first, second, third]);
+
+    const result = readLog(path);
+    expect(result.legacy).toEqual([0]);
+    expect(result.future).toEqual([2]);
+    expect(verifyLog(result)).toEqual({ ok: true, count: 3 });
+  });
+
+  it('нечисловая версия — «новее меня», а не порча: форма-то читается', () => {
+    rewrite([withSchema('mcpproxy.audit/next', null)]);
+    expect(readLog(path).future).toEqual([0]);
+    expect(readLog(path).malformedAt).toBeNull();
+  });
+});
+
+describe('M3: запись, враждебная канонизации, даёт вердикт, а не исключение', () => {
+  const hostile = (extra: Record<string, unknown>): void =>
+    writeFileSync(path, `${JSON.stringify({ ...event(), ...extra, chain: { prev: null, self: 'a'.repeat(64) } })}\n`);
+
+  it('одиночный суррогат в cwd', () => {
+    // `canonicalizeJcs` бросает на нём. Функция, чей единственный смысл — отдать вердикт по
+    // возможно ПОДДЕЛАННОМУ файлу, на подделанном файле вердикта не отдавала.
+    hostile({ cwd: '\ud800' });
+    expect(() => verifyLog(readLog(path))).not.toThrow();
+    expect(verifyLog(readLog(path)).ok).toBe(false);
+  });
+
+  it('вложенность глубже 128', () => {
+    let deep: unknown = 'дно';
+    for (let i = 0; i < 200; i += 1) deep = [deep];
+    hostile({ cwd: '/tmp', extra: deep });
+    expect(() => verifyLog(readLog(path))).not.toThrow();
+    expect(readLog(path).malformedAt).toBe(0);
+  });
+
+  it('и exportJsonl на таком файле тоже не падает — он нужен именно тогда', () => {
+    hostile({ cwd: '\ud800' });
+    expect(() => readLog(path)).not.toThrow();
+    expect(readLog(path).malformedAt).toBe(0);
+  });
+});
+
+describe('запись без обязательного поля ядра', () => {
+  it('это порча, а не «форма новее меня»', () => {
+    // `07-contracts.md` объявляет `schema` обязательным. Запись без обязательного поля
+    // вводила оператора в заблуждение через `ExportManifest.future` ровно там, где сайдкар
+    // обязан быть точным.
+    writeFileSync(path, `${JSON.stringify({ toolName: 'x', chain: { prev: null, self: 'a'.repeat(64) } })}\n`);
+    const result = readLog(path);
+    expect(result.malformedAt).toBe(0);
+    expect(result.future).toEqual([]);
+  });
+
+  it('B3: запись БЕЗ необязательного поля и запись С ним лежат в одной цепочке', () => {
+    // Исполняемая половина правила эволюции, записанного в `07-contracts.md`: добавлять в
+    // `AuditEvent` можно только необязательные поля, и тогда старые записи остаются
+    // верифицируемыми рядом с новыми. Без этого теста следующий эпик прочитает правило как
+    // обещание и заплатит ротацией файла, которая рвёт цепочку между файлами.
+    const log = openAuditLog({ path });
+    log.append(event('received'));
+    log.append({ ...event('build_argv'), argv: ['/opt/homebrew/bin/pnpm', 'test'], cwd: '/proj' });
+    log.close();
+
+    expect(verifyLog(readLog(path))).toEqual({ ok: true, count: 2 });
+    expect(readLog(path).records[0]).not.toHaveProperty('argv');
+    expect(readLog(path).records[1]).toHaveProperty('argv');
+  });
+
+  it('лишние неизвестные поля порчей НЕ считаются — запись более новой сборки читается', () => {
+    const body = { ...event(), somethingNew: { weDoNotKnow: true } } as unknown as AuditEvent;
+    const self = chainHash(body as never, null);
+    writeFileSync(path, `${JSON.stringify({ ...body, chain: { prev: null, self } })}\n`);
+
+    expect(readLog(path).malformedAt).toBeNull();
+    expect(verifyLog(readLog(path))).toEqual({ ok: true, count: 1 });
+  });
+});
+
 describe('defaultAuditLogPath', () => {
   it('MCPPROXY_HOME перекрывает домашний каталог', () => {
     expect(defaultAuditLogPath({ MCPPROXY_HOME: '/tmp/mcp-home' })).toBe('/tmp/mcp-home/audit.jsonl');
@@ -343,5 +614,13 @@ describe('defaultAuditLogPath', () => {
 
   it('без переменной ложится в ~/.mcpproxy', () => {
     expect(defaultAuditLogPath({})).toMatch(/[/\\]\.mcpproxy[/\\]audit\.jsonl$/);
+  });
+
+  it('ПУСТАЯ переменная трактуется как незаданная, а не как значение', () => {
+    // `??` пропустил бы `''` дальше, и путь стал бы ОТНОСИТЕЛЬНЫМ: журнал с `argv` и `cwd`
+    // приземлился бы в текущий каталог демона, а `mkdirSync(dirname)` создал бы `.` вместо
+    // защищённого каталога. Единственное место, где общее правило R2 не действует.
+    expect(defaultAuditLogPath({ MCPPROXY_HOME: '' })).toBe(defaultAuditLogPath({}));
+    expect(isAbsolute(defaultAuditLogPath({ MCPPROXY_HOME: '' }))).toBe(true);
   });
 });

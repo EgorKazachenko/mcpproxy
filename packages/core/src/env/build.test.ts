@@ -82,6 +82,66 @@ describe('buildEnv', () => {
     expect(allowed.join('')).not.toContain('/Users/dev');
   });
 
+  it('R2: унаследованные свойства прототипа НЕ считаются заданными', () => {
+    // `source[name]` идёт по цепочке прототипов: `allow: ['toString']` при пустом окружении
+    // клал в результат ФУНКЦИЮ. То есть имя, которого в окружении нет, приезжало ключом —
+    // прямое нарушение R2, — да ещё с нестроковым значением в типе `Record<string, string>`,
+    // который E3 отдаёт `spawn`, а запись аудита при этом утверждала, что такая переменная
+    // у процесса была.
+    const { env, allowed } = buildEnv(['toString', 'constructor', 'hasOwnProperty', 'valueOf'], {});
+    expect(Object.keys(env)).toEqual(['PATH']);
+    expect(allowed).toEqual(['PATH']);
+  });
+
+  it('R2: унаследованная СТРОКА тоже не считается заданной', () => {
+    // Проверка типа значения ловит унаследованные функции, но не строки: при загрязнённом
+    // `Object.prototype` имя, которого в окружении нет, снова приезжало бы ключом. Владение,
+    // а не тип, — вот что здесь несущее.
+    const source = Object.create({ INHERITED: 'из прототипа' }) as Record<string, string>;
+    source.OWN = 'своё';
+
+    const { env, allowed } = buildEnv(['OWN', 'INHERITED'], source);
+    expect(Object.keys(env).sort()).toEqual(['OWN', 'PATH']);
+    expect(allowed).toEqual(['OWN', 'PATH']);
+  });
+
+  it('R2: собственное свойство с тем же именем проходит — запрет не по имени, а по владению', () => {
+    const { env } = buildEnv(['toString'], { toString: '/usr/bin/toString' });
+    expect(env.toString).toBe('/usr/bin/toString');
+  });
+
+  it('нестроковое значение отбрасывается, а не уезжает в spawn', () => {
+    // `source`, пришедший из `JSON.parse`, строками не ограничен.
+    const { env } = buildEnv(['A', 'B'], { A: 'ок', B: 42 as unknown as string });
+    expect(Object.keys(env).sort()).toEqual(['A', 'PATH']);
+  });
+
+  it('__proto__ в allowlist не задевает прототип и не появляется ключом', () => {
+    // Манифест весь остальной E6 считает недоверенным входом; `allow` приезжает оттуда.
+    const source = JSON.parse('{"__proto__": {"polluted": true}}') as Record<string, string>;
+    const { env } = buildEnv(['__proto__'], source);
+
+    expect(Object.keys(env)).toEqual(['PATH']);
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+  });
+
+  it('EO5: провенанс PATH отдаётся наружу', () => {
+    // Без него запись аудита утверждает, что у процесса был `PATH`, и умалчивает, ЧЕЙ.
+    // Разбор инцидента «под-вызов не нашёл бинарь» начинается ровно с этого вопроса.
+    expect(buildEnv(['PATH'], { PATH: '/opt/homebrew/bin' }).pathSubstituted).toBe(false);
+    expect(buildEnv([], {}).pathSubstituted).toBe(true);
+    expect(buildEnv(['HOME'], { HOME: '/h', PATH: '/leak' }).pathSubstituted).toBe(true);
+  });
+
+  it('R3: пустой PATH из окружения заменяется минимальным, а не отдаётся как есть', () => {
+    // Единственное место, где общее правило R2 («пустая строка — заданное значение») не
+    // действует: `PATH: ''` ломает под-вызовы дочернего процесса ровно так же, как
+    // отсутствующий, а `MINIMAL_PATH` заведён именно для этого случая.
+    const { env, pathSubstituted } = buildEnv(['PATH'], { PATH: '' });
+    expect(env.PATH).toBe(MINIMAL_PATH);
+    expect(pathSubstituted).toBe(true);
+  });
+
   it('исходное окружение не мутируется', () => {
     const source = { HOME: '/Users/dev' };
     const { env } = buildEnv(['HOME'], source);

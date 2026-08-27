@@ -7,7 +7,9 @@ import { fileURLToPath } from 'node:url';
  *
  * Тот же приём, что в `contracts`, и по той же причине: `core/src/index.ts` — контрактная
  * поверхность в смысле `review-bc`, её импортируют E3, E4 и E7, и новый экспорт уезжает к
- * ним молча. Разница одна — у `core` вход один, и файла схемы у него нет.
+ * ним молча. Разница одна — файла схемы у `core` нет.
+ *
+ * Оба входа пакета попадают в снапшот: подпуть `./audit` тоже публичен и тоже заморожен.
  *
  * Модуль **не** экспортируется из `index.ts`: он инструмент гейта, а не контракт, и потому
  * в собственный снапшот не попадает. Обновляет снапшот только `scripts/update-api-surface.mjs`;
@@ -18,10 +20,15 @@ import { fileURLToPath } from 'node:url';
 const packageRoot = fileURLToPath(new URL('..', import.meta.url));
 export const distRoot = resolve(packageRoot, 'dist');
 
-const ENTRIES = ['index.d.ts'];
+const ENTRIES = ['index.d.ts', 'audit/index.d.ts'];
 
-/** Специфаеры `from '…'` и `import('…')`: es-module-lexer TS-синтаксис в `.d.ts` не разбирает. */
-const specifiersOf = (source: string): string[] =>
+/**
+ * Специфаеры `from '…'` и `import('…')`: es-module-lexer TS-синтаксис в `.d.ts` не разбирает.
+ *
+ * Экспортируется, чтобы `deps.test.ts` не держал третью копию этой регулярки. Модуль
+ * намеренно вне `index.ts`, поэтому публичная поверхность и снапшот от экспорта не двигаются.
+ */
+export const specifiersOf = (source: string): string[] =>
   [...source.matchAll(/(?:from|import)\s*\(?\s*['"]([^'"]+)['"]/g)]
     .map((match) => match[1])
     .filter((one): one is string => one !== undefined);

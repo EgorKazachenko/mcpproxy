@@ -11,6 +11,8 @@
  * знает, окружение какого процесса он передаёт, а тест не имеет права зависеть от машины.
  */
 
+import type { AuditEvent } from '@mcpproxy/contracts';
+
 /**
  * Значение `PATH` для дочернего процесса, когда своего у него нет.
  *
@@ -26,7 +28,17 @@ export interface BuiltEnv {
   /** Окружение дочернего процесса. Свежий объект: мутация не достаёт до источника. */
   readonly env: Record<string, string>;
   /**
-   * Имена для `AuditEvent.env.allowed` — отсортированные, без дублей.
+   * `PATH` дочернего процесса — наш минимальный, а не унаследованный из окружения.
+   *
+   * Провенанс отдаётся наружу, потому что без него запись аудита утверждает, что у процесса
+   * был `PATH`, и умалчивает, ЧЕЙ. Разбор инцидента «под-вызов не нашёл бинарь» начинается
+   * ровно с этого вопроса, а `env.allowed` в контракте несёт только имена.
+   */
+  readonly pathSubstituted: boolean;
+  /**
+   * Ссылкой на контракт, а не повторением его формы: структурная копия совпадала бы сегодня
+   * и разошлась бы молча, когда E0 сдвинет форму. Имена для `AuditEvent.env.allowed` —
+   * отсортированные, без дублей.
    *
    * Это то, что процесс **получил**, а не то, что было запрошено: разрешённое, но не
    * заданное имя сюда не попадает. Запись аудита читают через месяцы, и вопрос к ней
@@ -35,7 +47,7 @@ export interface BuiltEnv {
    *
    * **Только имена.** Значение переменной не попадает в событие ни при каких условиях.
    */
-  readonly allowed: readonly string[];
+  readonly allowed: NonNullable<AuditEvent['env']>['allowed'];
 }
 
 /**
@@ -48,22 +60,41 @@ export interface BuiltEnv {
  * @param source — окружение, из которого берутся значения; обычно `process.env` демона.
  */
 export function buildEnv(allow: readonly string[], source: Readonly<Record<string, string | undefined>>): BuiltEnv {
-  const env: Record<string, string> = {};
+  // `Object.create(null)`, а не литерал: имя `__proto__`, пришедшее из манифеста, иначе
+  // попало бы в СЕТТЕР `Object.prototype` вместо ключа — значение молча исчезло бы, а при
+  // недоброжелательном `source` (например, разобранном из JSON) присваивание задело бы
+  // прототип. Манифест весь остальной E6 считает недоверенным входом; здесь так же.
+  const env: Record<string, string> = Object.create(null);
 
   for (const name of allow) {
+    // `Object.hasOwn`, а не `source[name]`: индексирование идёт по ЦЕПОЧКЕ ПРОТОТИПОВ, и
+    // `allow: ['toString']` при пустом окружении клало в результат функцию — то есть имя,
+    // которого в окружении нет, приезжало ключом (прямое нарушение R2), да ещё с
+    // нестроковым значением в типе `Record<string, string>`, который E3 отдаёт `spawn`,
+    // а запись аудита при этом утверждала, что у процесса была такая переменная.
+    if (!Object.hasOwn(source, name)) continue;
+
     const value = source[name];
     // `undefined` — «имя не задано», и оно обязано ОТСУТСТВОВАТЬ как ключ, а не приезжать
     // пустой строкой: `spawn` различает эти два случая, и потребители тоже — `git` с
     // `GIT_DIR=''` ведёт себя не как `git` без `GIT_DIR`. Пустая строка, наоборот, —
-    // заданное значение, и она проходит.
-    if (value === undefined) continue;
+    // заданное значение, и она проходит. Не-строка отбрасывается по той же причине, что и
+    // унаследованное свойство: в окружении процесса строк не бывает других типов.
+    if (typeof value !== 'string') continue;
     env[name] = value;
   }
 
   // Всегда последним и без оглядки на лист: `PATH` вне листа не имеет права протечь из
   // окружения демона (его собирает direnv из каталога проекта и туда заезжают приватные
   // тулчейны), но и отсутствовать он не может — см. `MINIMAL_PATH`.
-  env.PATH = allow.includes('PATH') ? (source.PATH ?? MINIMAL_PATH) : MINIMAL_PATH;
+  //
+  // `||`, а не `??`, и это единственное место, где общее правило R2 «пустая строка —
+  // заданное значение» сознательно не действует: `PATH: ''` ломает под-вызовы дочернего
+  // процесса ровно так же, как отсутствующий `PATH`, а `MINIMAL_PATH` заведён именно для
+  // этого случая.
+  const inherited = allow.includes('PATH') ? (Object.hasOwn(source, 'PATH') ? source.PATH : undefined) : undefined;
+  const pathSubstituted = !(typeof inherited === 'string' && inherited !== '');
+  env.PATH = pathSubstituted ? MINIMAL_PATH : (inherited as string);
 
-  return { env, allowed: Object.keys(env).sort() };
+  return { env, allowed: Object.keys(env).sort(), pathSubstituted };
 }

@@ -10,6 +10,14 @@ import {
 /** Синтетический токен: форма настоящая, значение выдумано. Энтропия 5.39 — замерена. */
 const TOKEN = 'kR7pQz2XvN4mB8sT1wY6uH0jL5gC3fD9eA+oI/xZbn';
 
+/**
+ * Строка из РАЗЛИЧНЫХ символов base64-алфавита — максимум энтропии для своей длины.
+ * Генерируется, а не набирается литералом: литерал молча отстаёт от константы, когда порог
+ * двигают, и граничные тесты начинают проверять не ту длину, что написана в их заголовке.
+ */
+const distinct = (length: number): string =>
+  'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'.slice(0, length);
+
 describe('shannonEntropy', () => {
   it('нулевая на одном повторяющемся символе', () => {
     expect(shannonEntropy('aaaaaaaa')).toBe(0);
@@ -70,7 +78,10 @@ describe('findHighEntropyRuns', () => {
   });
 
   it(`ран короче ${BASE64_MIN_RUN} символов недостижим для порога, а не «редко ловится»`, () => {
-    const longest = 'abcdefghijklmnopqrstuv'.slice(0, BASE64_MIN_RUN - 1);
+    const longest = distinct(BASE64_MIN_RUN - 1);
+    // Фикстура не отстала от константы — иначе заголовок утверждает про одну длину, а
+    // проверяется другая, и граница перестаёт проверяться молча.
+    expect(longest).toHaveLength(BASE64_MIN_RUN - 1);
     // Все символы различны — это максимум энтропии для такой длины. Он всё равно ниже порога.
     expect(new Set(longest).size).toBe(longest.length);
     expect(shannonEntropy(longest)).toBeLessThan(BASE64_ENTROPY_THRESHOLD);
@@ -78,7 +89,7 @@ describe('findHighEntropyRuns', () => {
   });
 
   it(`ран ровно в ${BASE64_MIN_RUN} символов уже проверяется — граница включающая`, () => {
-    const exact = 'abcdefghijklmnopqrstuvw'.slice(0, BASE64_MIN_RUN);
+    const exact = distinct(BASE64_MIN_RUN);
     expect(exact).toHaveLength(BASE64_MIN_RUN);
     expect(shannonEntropy(exact)).toBeGreaterThanOrEqual(BASE64_ENTROPY_THRESHOLD);
     expect(findHighEntropyRuns(exact)).toHaveLength(1);
@@ -102,6 +113,9 @@ describe('findHighEntropyRuns', () => {
   it('раны не пересекаются и не идут вспять — на этом строится замена', () => {
     const text = `x ${TOKEN} y ${TOKEN} z`;
     const runs = findHighEntropyRuns(text);
+    // Мощность фиксируется ДО цикла: без неё реализация, вернувшая `[]` или один ран,
+    // проходит тест — тело цикла просто не выполняется, и утверждение о порядке вакуумно.
+    expect(runs).toHaveLength(2);
     for (let i = 1; i < runs.length; i += 1) {
       expect(runs[i]?.start ?? 0).toBeGreaterThanOrEqual(runs[i - 1]?.end ?? 0);
     }

@@ -10,7 +10,8 @@ import type { LogVerification } from './log.js';
  * так что вердикт он перепроверяет сам. Сайдкар — это заявление экспортёра, а не пломба.
  *
  * **Наружу ничего не уходит (R24).** Функции пишут файлы в указанный каталог; отправку
- * запускает человек. Сетевых зависимостей у модуля нет.
+ * запускает человек. Сетевых зависимостей у модуля нет, и это проверяется по графу в
+ * `deps.test.ts`, а не обещанием здесь.
  */
 export interface ExportManifest {
     /** Версия формы сайдкара. Своя, не контрактная: `AuditEvent` этой формы не описывает. */
@@ -25,8 +26,18 @@ export interface ExportManifest {
     readonly verification: LogVerification;
     /** Последняя строка была недописана: демон убит на середине. Не подделка (R19). */
     readonly trailingPartial: boolean;
+    /**
+     * Первая неразобранная строка, если она есть.
+     *
+     * В сайдкаре отдельным полем, а не только внутри `verification`: получателю нужно знать,
+     * что за точкой разрыва в файле **лежат ещё байты**, которых нет в `count`. Без этого поля
+     * экспорт порченого журнала выглядит как экспорт короткого целого.
+     */
+    readonly malformedAt: number | null;
     /** Индексы записей, чья версия формы новее известной нам (R20). */
     readonly future: readonly number[];
+    /** Индексы записей, чья версия формы старее нашей. */
+    readonly legacy: readonly number[];
 }
 export interface ExportResult {
     readonly logPath: string;
@@ -44,6 +55,13 @@ export interface ExportOptions {
  * прогнала бы каждую запись через `JSON.stringify` этой версии кода, порядок ключей мог бы
  * поехать, а вместе с ним — и дайджесты, которые получатель считает сам. Экспорт обязан
  * отдавать те же байты, на которых цепочка сходилась у нас.
+ *
+ * **Порядок операций — копия, ПОТОМ чтение копии.** Демон дописывает журнал на каждой стадии
+ * каждого вызова, поэтому «прочитать оригинал → скопировать» оставляет окно: `count`, `first`,
+ * `last` и, главное, `verification` описывали бы префикс, а рядом лежал бы файл длиннее.
+ * Получатель, который по замыслу перепроверяет вердикт сам, получил бы другое число записей —
+ * то есть терялось бы ровно то свойство, ради которого сайдкар и существует. Читая КОПИЮ,
+ * гонку убираем по построению, без блокировок.
  */
 export declare function exportJsonl(logPath: string, destDir: string, options?: ExportOptions): ExportResult;
 /**
@@ -59,6 +77,26 @@ export declare function exportJsonl(logPath: string, destDir: string, options?: 
  * едет» держалось бы на том, что `toOtlp` про неё не знает, — а не на этой строке.
  */
 export declare const exportOtlp: (events: readonly ChainedEvent[]) => readonly OtlpSpan[];
+
+// ==== audit/index.d.ts ====
+/**
+ * Вход `./audit` — журнал и его экспорт, **без движка редакции**.
+ *
+ * Причина отдельного входа измерена, а не предположена: корневой вход тянет `re2` — нативный
+ * аддон, собранный под ABI Node (`node-gyp`, prebuild). Потребитель, которому нужны только
+ * `readLog` / `verifyLog` / `ChainedEvent` — вкладка аудита и бейдж в E7, или человек,
+ * проверяющий вердикт ЧУЖОГО экспортированного лога на своей машине, — не должен ради этого
+ * собирать RE2. Electron несёт собственный `process.versions.modules`, поэтому тот же бинарь
+ * в нём не загрузится без `electron-rebuild`: ADR-0001 запрещает `core` импортировать Electron,
+ * но не мешал `core` навязывать Electron-потребителю нативный ребилд.
+ *
+ * Добавление чисто аддитивное: `'.'` продолжает экспортировать всё, что экспортировал.
+ * Границу «здесь нет `re2`» держит `deps.test.ts`, а не это предложение.
+ */
+export { AuditLogError, defaultAuditLogPath, openAuditLog, readLog, verifyLog } from './log.js';
+export type { AuditLog, AuditLogErrorCode, LogVerification, OpenAuditLogOptions, ReadLogResult } from './log.js';
+export { exportJsonl, exportOtlp } from './export.js';
+export type { ExportManifest, ExportOptions, ExportResult } from './export.js';
 
 // ==== audit/log.d.ts ====
 import type { AuditEvent, ChainedEvent } from '@mcpproxy/contracts';
@@ -76,10 +114,30 @@ import type { AuditEvent, ChainedEvent } from '@mcpproxy/contracts';
  * согласованным, потому что предикат связывает запись с предыдущей, а не с внешним якорем.
  * Против обоих нужен Merkle-корень наружу, и его тут нет.
  */
-/** Один `write` на запись; `fsync` не делается — см. `appendEvent`. */
+/**
+ * Код отказа. Ветвиться потребитель обязан по нему, а не по тексту `message`.
+ *
+ * Конвенция взята не с потолка: `packages/contracts/src/types.ts` заводит `DiagnosticCode`
+ * ровно с этим обоснованием — «без кода семь эпиков ветвились бы `String.includes` по прозе,
+ * и первая же правка формулировки тихо ломала бы ветвление, не уронив ни одного теста».
+ * Решения у вызывающего разные и несводимые: `corrupt` — вмешательство оператора, вызовы
+ * без аудита пускать нельзя; `closed` и `already-open` — ошибка программиста, чинится кодом;
+ * `insecure-directory` — конфигурация прав; `short-write` — диск.
+ */
+export type AuditLogErrorCode = 'corrupt' | 'closed' | 'already-open' | 'short-write' | 'insecure-directory';
+export declare class AuditLogError extends Error {
+    readonly code: AuditLogErrorCode;
+    readonly path: string;
+    constructor(code: AuditLogErrorCode, path: string, message: string);
+}
 export interface AuditLog {
     readonly path: string;
-    /** Дописывает событие, возвращая то, что реально легло в файл. */
+    /**
+     * Журнал был восстановлен при открытии: предыдущий запуск убили на середине записи, и
+     * недописанный хвост срезан. Флаг отдаётся наружу, чтобы E7 показал «восстановлен после
+     * аварийного завершения», а не молчал: молчание тут неотличимо от «ничего не случилось».
+     */
+    readonly repairedTornTail: boolean;
     readonly append: (event: AuditEvent & {
         chain?: never;
     }) => ChainedEvent;
@@ -90,6 +148,12 @@ export interface AuditLog {
 /**
  * Путь по умолчанию. `MCPPROXY_HOME` перекрывает домашний каталог — им пользуются тесты и
  * им же пользуется тот, у кого `$HOME` на сетевом диске.
+ *
+ * Пустая строка трактуется как **незаданная**, а не как значение. Это единственное место
+ * в E6, где правило R2 («пустая строка — заданное значение») сознательно не применяется:
+ * `??` пропустил бы `''` дальше, и `join('', 'audit.jsonl')` дал бы ОТНОСИТЕЛЬНЫЙ путь —
+ * журнал с `argv` и `cwd` приземлился бы в текущий каталог демона, а `mkdirSync(dirname)`
+ * создал бы `.` вместо защищённого `0700`-каталога.
  */
 export declare function defaultAuditLogPath(env?: Readonly<Record<string, string | undefined>>): string;
 export interface ReadLogResult {
@@ -107,11 +171,21 @@ export interface ReadLogResult {
     /** Первая строка, которая не разобралась и при этом не является оборванным хвостом. */
     readonly malformedAt: number | null;
     /**
-     * Индексы записей, чей `schema` нам неизвестен: читаются, помечаются «форма новее меня».
-     * Требование `07-contracts.md`: одна запись из будущего не имеет права сделать нечитаемым
-     * весь предшествующий лог, перегенерировать который нельзя.
+     * Индексы записей, чья версия формы **новее** нашей: читаются, помечаются «форма новее
+     * меня». Требование `07-contracts.md`: одна запись из будущего не имеет права сделать
+     * нечитаемым весь предшествующий лог, перегенерировать который нельзя.
      */
     readonly future: readonly number[];
+    /**
+     * Индексы записей, чья версия формы **старее** нашей.
+     *
+     * Отдельно от `future`, потому что `future` — утверждение о ПОРЯДКЕ, а не о неравенстве.
+     * Пока это различие считалось через `!==`, в тот день, когда проект выпустит писателя
+     * `mcpproxy.audit/2`, новая сборка прочитала бы весь существующий журнал — всю историю
+     * установки — и пометила бы КАЖДУЮ запись как «форма новее меня», а сайдкар экспорта
+     * сообщил бы то же получателю. Лог append-only: снять такую пометку перегенерацией нельзя.
+     */
+    readonly legacy: readonly number[];
 }
 /**
  * Читает журнал целиком.
@@ -129,6 +203,13 @@ export type LogVerification = {
     readonly ok: false;
     readonly brokenAt: number;
     readonly count: number;
+    /**
+     * Порча файла или подделка цепочки. Оператору это разные события: `corrupt` — строка,
+     * которую не разобрать (правка руками, обрезанный `write`, битый диск); `chain` —
+     * запись разобралась, но дайджест или связь не сходятся. Одна вывеска на оба
+     * предъявляла бы сбой носителя как взлом.
+     */
+    readonly kind: 'corrupt' | 'chain';
 };
 /**
  * Вердикт по журналу — тот самый бейдж «цепочка верифицирована» из S9.
@@ -138,7 +219,8 @@ export type LogVerification = {
  * проверка «каждая запись самосогласована» даёт ноль доказательной силы: формула публична,
  * и атакующий, правящий запись, пересчитывает её `self` сам.
  *
- * Оборванный хвост вердикт **не** роняет: это падение демона, а не подделка.
+ * Оборванный хвост вердикт **не** роняет: это падение демона, а не подделка. Функция никогда
+ * не бросает — форма каждой записи проверена на границе чтения (`isReadableRecord`).
  */
 export declare function verifyLog(log: ReadLogResult): LogVerification;
 export interface OpenAuditLogOptions {
@@ -152,15 +234,24 @@ export interface OpenAuditLogOptions {
  * права выглядеть как генезис: иначе после каждого рестарта в логе лежит разрыв, неотличимый
  * от подделки, и бейдж S9 краснеет на штатной операции.
  *
+ * **Оборванный хвост чинится, а не наследуется.** R17 сознательно отказывается от `fsync`,
+ * то есть файл, оканчивающийся недописанной строкой, — спроектированный исход падения демона.
+ * Дескриптор на `'a'` приклеил бы первую же новую запись к огрызку: событие потерялось бы
+ * внутри порченой строки (а `07-contracts.md` называет отказ без записи в аудит багом), бейдж
+ * показал бы разрыв на штатном падении, и каждое следующее открытие бросало бы «повреждён» —
+ * журнал забетонирован навсегда. Срезаемые байты никогда не были записью и в цепочку не
+ * входят, поэтому после среза цепочка ровно та же, что вернул `readLog`.
+ *
  * Восстановление читает файл целиком — O(n) на старте. Для среза это дёшево (лог живёт одну
  * демонстрацию); на длинном логе сюда просится чтение с конца, и это записано как известная
  * цена, а не как сделанное.
  *
- * **Права.** Каталог создаётся `0700`, файл — `0600`. Лог несёт `argv`, `cwd` и имена
- * переменных окружения; читаемый всем файл — тот же A12 через другую дверь. `mode` у
- * `openSync` — это ПОТОЛОК: umask может снять биты, но не добавить, поэтому файл никогда не
- * окажется доступнее. Права уже существующего файла не трогаются: это может быть осознанная
- * настройка владельца, а молча менять чужие права — не наше дело.
+ * **Права.** Каталог создаётся `0700`, файл — `0600`. `mode` у `openSync` — это ПОТОЛОК:
+ * umask может снять биты, но не добавить, поэтому файл никогда не окажется доступнее. Права
+ * уже существующего файла не трогаются: это может быть осознанная настройка владельца.
+ * А вот КАТАЛОГ проверяется: `mkdirSync` на существующем каталоге права не меняет, и каталог,
+ * открытый на запись группе, позволяет соседу **переименовать** `audit.jsonl` и положить свой,
+ * не имея прав на файл. Отказ, а не молчаливый `chmod` чужого каталога.
  */
 export declare function openAuditLog(options?: OpenAuditLogOptions): AuditLog;
 
@@ -177,6 +268,7 @@ export declare function openAuditLog(options?: OpenAuditLogOptions): AuditLog;
  * Функция чистая и берёт окружение аргументом, а не читает `process.env`: вызывающий (E3)
  * знает, окружение какого процесса он передаёт, а тест не имеет права зависеть от машины.
  */
+import type { AuditEvent } from '@mcpproxy/contracts';
 /**
  * Значение `PATH` для дочернего процесса, когда своего у него нет.
  *
@@ -191,7 +283,17 @@ export interface BuiltEnv {
     /** Окружение дочернего процесса. Свежий объект: мутация не достаёт до источника. */
     readonly env: Record<string, string>;
     /**
-     * Имена для `AuditEvent.env.allowed` — отсортированные, без дублей.
+     * `PATH` дочернего процесса — наш минимальный, а не унаследованный из окружения.
+     *
+     * Провенанс отдаётся наружу, потому что без него запись аудита утверждает, что у процесса
+     * был `PATH`, и умалчивает, ЧЕЙ. Разбор инцидента «под-вызов не нашёл бинарь» начинается
+     * ровно с этого вопроса, а `env.allowed` в контракте несёт только имена.
+     */
+    readonly pathSubstituted: boolean;
+    /**
+     * Ссылкой на контракт, а не повторением его формы: структурная копия совпадала бы сегодня
+     * и разошлась бы молча, когда E0 сдвинет форму. Имена для `AuditEvent.env.allowed` —
+     * отсортированные, без дублей.
      *
      * Это то, что процесс **получил**, а не то, что было запрошено: разрешённое, но не
      * заданное имя сюда не попадает. Запись аудита читают через месяцы, и вопрос к ней
@@ -200,7 +302,7 @@ export interface BuiltEnv {
      *
      * **Только имена.** Значение переменной не попадает в событие ни при каких условиях.
      */
-    readonly allowed: readonly string[];
+    readonly allowed: NonNullable<AuditEvent['env']>['allowed'];
 }
 /**
  * Собирает окружение дочернего процесса по allowlist.
@@ -237,10 +339,7 @@ export { SECRET_RULES } from './redact/rules.js';
 export type { SecretRule } from './redact/rules.js';
 export { redactInbound, redactOutput } from './redact/output.js';
 export type { InboundInput, OutputLimits, ProcessOutput, RedactedInbound, RedactedOutput, } from './redact/output.js';
-export { defaultAuditLogPath, openAuditLog, readLog, verifyLog } from './audit/log.js';
-export type { AuditLog, LogVerification, OpenAuditLogOptions, ReadLogResult } from './audit/log.js';
-export { exportJsonl, exportOtlp } from './audit/export.js';
-export type { ExportManifest, ExportOptions, ExportResult } from './audit/export.js';
+export * from './audit/index.js';
 
 // ==== redact/engine.d.ts ====
 import type { SecretRule } from './rules.js';
@@ -265,10 +364,11 @@ export interface ScanOptions {
 }
 export interface RedactedText {
     readonly text: string;
-    /** `rule → сколько раз сработало`. Порядок вставки — порядок первого срабатывания. */
+    /** `rule → сколько раз сработало`. */
     readonly counts: ReadonlyMap<string, number>;
 }
 export interface Redactor {
+    /** Отрезки, которые будут заменены. Отсортированы по `start`, не пересекаются. */
     readonly scan: (text: string, options: ScanOptions) => readonly SecretMatch[];
     readonly redact: (text: string, options: ScanOptions) => RedactedText;
 }
@@ -367,7 +467,7 @@ export declare function shannonEntropy(text: string): number;
 export declare function findHighEntropyRuns(text: string): readonly EntropySpan[];
 
 // ==== redact/output.d.ts ====
-import type { Redaction } from '@mcpproxy/contracts';
+import type { AuditEvent, NormalizedDefaults, Redaction } from '@mcpproxy/contracts';
 import type { Redactor } from './engine.js';
 /**
  * Стадия `redact` целиком: что уезжает в модель и что уезжает в запись аудита.
@@ -378,11 +478,14 @@ import type { Redactor } from './engine.js';
  * рецепт с параметром-токеном получил бы `[redacted:…]` вместо значения и сломался бы молча,
  * а вердикт вызова эвристика с ложняками менять не должна (D4).
  */
-/** Эффективный `output`-профиль из `normalizeRecipe(...).effective`. Пересчитывать нечего. */
-export interface OutputLimits {
-    readonly maxBytes: number | null;
-    readonly redact: boolean;
-}
+/**
+ * Эффективный `output`-профиль из `normalizeRecipe(...).effective`. Пересчитывать нечего.
+ *
+ * Псевдоним контрактного типа, а не структурная копия: копия совпадала бы сегодня и разошлась
+ * бы молча в тот день, когда E0 добавит поле или сдвинет `maxBytes`. Тождество утверждает
+ * компилятор, а не комментарий рядом.
+ */
+export type OutputLimits = NormalizedDefaults['output'];
 export interface ProcessOutput {
     readonly stdout: string;
     readonly stderr: string;
@@ -390,11 +493,8 @@ export interface ProcessOutput {
 export interface RedactedOutput {
     readonly stdout: string;
     readonly stderr: string;
-    /** Ровно `AuditEvent['output']`. */
-    readonly output: {
-        readonly bytes: number;
-        readonly truncated: boolean;
-    };
+    /** Ровно `AuditEvent['output']` — ссылкой на контракт, а не повторением его формы. */
+    readonly output: NonNullable<AuditEvent['output']>;
     readonly redactions: readonly Redaction[];
 }
 export interface InboundInput {

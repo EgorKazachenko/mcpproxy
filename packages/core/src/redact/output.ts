@@ -1,4 +1,4 @@
-import type { Redaction } from '@mcpproxy/contracts';
+import type { AuditEvent, NormalizedDefaults, Redaction } from '@mcpproxy/contracts';
 import type { Redactor } from './engine.js';
 
 /**
@@ -11,11 +11,14 @@ import type { Redactor } from './engine.js';
  * а вердикт вызова эвристика с ложняками менять не должна (D4).
  */
 
-/** Эффективный `output`-профиль из `normalizeRecipe(...).effective`. Пересчитывать нечего. */
-export interface OutputLimits {
-  readonly maxBytes: number | null;
-  readonly redact: boolean;
-}
+/**
+ * Эффективный `output`-профиль из `normalizeRecipe(...).effective`. Пересчитывать нечего.
+ *
+ * Псевдоним контрактного типа, а не структурная копия: копия совпадала бы сегодня и разошлась
+ * бы молча в тот день, когда E0 добавит поле или сдвинет `maxBytes`. Тождество утверждает
+ * компилятор, а не комментарий рядом.
+ */
+export type OutputLimits = NormalizedDefaults['output'];
 
 export interface ProcessOutput {
   readonly stdout: string;
@@ -25,8 +28,8 @@ export interface ProcessOutput {
 export interface RedactedOutput {
   readonly stdout: string;
   readonly stderr: string;
-  /** Ровно `AuditEvent['output']`. */
-  readonly output: { readonly bytes: number; readonly truncated: boolean };
+  /** Ровно `AuditEvent['output']` — ссылкой на контракт, а не повторением его формы. */
+  readonly output: NonNullable<AuditEvent['output']>;
   readonly redactions: readonly Redaction[];
 }
 
@@ -55,6 +58,8 @@ const STREAM_ORDER: readonly Redaction['stream'][] = ['stdout', 'stderr', 'argv'
  * (`10xxxxxx`), пока не встанем на начало символа.
  */
 function truncateUtf8(text: string, maxBytes: number): { text: string; truncated: boolean } {
+  // Клампинг сознательный: отрицательный потолок сюда доехать не должен (схема манифеста его
+  // не пропускает), но если доедет — он обязан значить «ничего не отдавать», а не «отдать всё».
   const limit = Math.max(0, maxBytes);
   const buffer = Buffer.from(text, 'utf8');
   if (buffer.length <= limit) return { text, truncated: false };
@@ -95,14 +100,19 @@ export function redactOutput(redactor: Redactor, output: ProcessOutput, limits: 
   const redactions: Redaction[] = [];
   const cleaned: Record<'stdout' | 'stderr', string> = { stdout: output.stdout, stderr: output.stderr };
 
-  if (limits.redact) {
-    for (const stream of ['stdout', 'stderr'] as const) {
-      // Энтропия включена только здесь — это единственные два потока, где встречаются блобы
-      // без формы, и единственные, где ложняк не ломает вызов, а лишь портит строку лога.
-      const result = redactor.redact(output[stream], { entropy: true });
-      cleaned[stream] = result.text;
-      redactions.push(...toRedactions(result.counts, stream));
-    }
+  for (const stream of ['stdout', 'stderr'] as const) {
+    // Энтропия включена только здесь — это единственные два потока, где встречаются блобы
+    // без формы, и единственные, где ложняк не ломает вызов, а лишь портит строку лога.
+    const result = redactor.redact(output[stream], { entropy: true });
+
+    // СКАНИРУЕМ ВСЕГДА, заменяем только при `redact: true`. Раньше `redact: false` выключал
+    // и подсчёт, и запись аудита не содержала следа того, что процесс напечатал ключ. R14
+    // требует выключить РЕДАКЦИЮ и про отчёт не высказывается, а принцип записан рядом же,
+    // в `output.test.ts`: отчёт обязан быть о том, ЧТО ПРОИЗОШЛО, а не о том, что доехало.
+    // Поскольку E0 держит пол (`redact: false` возможен только явным решением владельца
+    // манифеста), это ровно тот случай, когда сигнал в журнале нужнее всего.
+    cleaned[stream] = limits.redact ? result.text : output[stream];
+    redactions.push(...toRedactions(result.counts, stream));
   }
 
   const limit = limits.maxBytes;
