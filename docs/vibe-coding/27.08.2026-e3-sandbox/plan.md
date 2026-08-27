@@ -5,7 +5,7 @@
 Вторая линия обороны из `docs/03-threat-model.md:17-45`: валидатор контролирует, **что**
 запускается, песочница — **что запущенное может сделать**. Реализовать `packages/core/src/exec`:
 обёртку над `@anthropic-ai/sandbox-runtime`, доменный allowlist сети, ресурсные ограничители,
-cap на вывод, поток violations в шину событий. Требования — `spec.md`, `R1..R51`.
+cap на вывод, поток violations в шину событий. Требования — `spec.md`, `R1..R55`.
 
 ## Architecture
 
@@ -14,7 +14,7 @@ cap на вывод, поток violations в шину событий. Треб�
 ```
 profile.ts      NormalizedSandbox → ResolvedSandboxPolicy   (чистая, R5-R11, R14, R36, R40)
 violation.ts    строка лога → ParsedLine                    (чистая, R27-R28, R39)
-netpolicy.ts    хост + commandId → allow/deny                (чистая, R12-R13)
+netpolicy.ts    валидатор шаблонов + конформанс с srt        (чистая, R13)
 env.ts          EnvPolicy → ProcessEnv                      (чистая, R23-R25)
 limits.ts       spawn + таймаут + cap                       (I/O, R16-R21)
 srt-manager.ts  синглтон srt: initialize · subscribe · семафор  (I/O, R21, R29, R37)
@@ -25,9 +25,12 @@ index.ts        реэкспорт наружу пакета
 ```
 
 Четыре модуля — `profile.ts`, `violation.ts`, `netpolicy.ts`, `env.ts` — **чистые**: ни ФС, ни
-процессов, ни сети. `netpolicy.ts` существует отдельно, потому что по D11 принуждение сети
-целиком наше: проба П5 показала, что `customConfig.network` не действует вовсе, и матчер доменов
-обязан быть тестируемым без прокси.
+процессов, ни сети.
+
+`netpolicy.ts` — **валидатор**, а не матчер на пути принуждения. Матчит домены сам srt
+(`matchesDomainPatternWithPort`), потому что по пересмотренному D11 принуждение делает
+`updateConfig`. Второй матчер с другой семантикой был бы дырой, а не запасом, поэтому модуль
+проверяет шаблоны манифеста и **сверяет своё понимание с вендорским** таблицей конформанса.
 Резолв реального пути в `violation.ts` инжектируется параметром, а не зовётся из модуля
 (иначе «чистая» было бы неправдой: `realpathSync.native` — синхронный сисколл, и он же оказался бы
 на горячем пути каждой строки лога живого процесса).
@@ -46,6 +49,13 @@ index.ts        реэкспорт наружу пакета
 Node 22, TypeScript 5.6, vitest 3, `@anthropic-ai/sandbox-runtime@0.0.74`.
 Новое в этой ветке: `@anthropic-ai/sandbox-runtime` в `packages/core/package.json:21` (уже
 добавлено), vitest в `packages/core` (Task 1).
+
+**Риск, который надо назвать вслух.** Режиму `none` нужны прокси-переменные и переменные доверия к
+CA, а наружу из пакета отдаётся только `getDefaultWritePaths` (`dist/index.d.ts`, 19 строк). У
+пакета **нет `exports`-карты**, поэтому `generateProxyEnvVars` и `CA_TRUST_VARS` доступны глубоким
+импортом из `dist/sandbox/sandbox-utils.js`. Выбираем глубокий импорт, а не копию списка: у
+research-preview с версией в день копия разъезжается молча, а импорт превращает обновление вендора
+в ошибку типизации. Путь неподдерживаемый — это записано в границах.
 
 ## Global Constraints
 
@@ -152,9 +162,9 @@ packages/bench/package.json:22:    "@mcpproxy/core": "workspace:*"
 
 | Посылка | Команда | Цитата | Где держится | Решение |
 |---|---|---|---|---|
-| `customConfig.network` не действует | проба П5, `probes/p5-percall-net.mjs` | `customConfig.network.allowedDomains = []             exit=0 blocked=false` | вся сетевая политика | D11: принуждение в `filterRequest` по `commandId` |
+| `customConfig.network` не действует | проба П5, `probes/p5-percall-net.mjs` | `customConfig.network.allowedDomains = []             exit=0 blocked=false` | вся сетевая политика | D11: принуждение переехало в `updateConfig` под семафором |
 | `enableLogMonitor` по умолчанию `false` | проба П6b, `probes/p6b-nologmonitor.mjs` | `БЕЗ enableLogMonitor: чтение отказано=true …, нарушений в сторе=0` | Task 7 | третий аргумент `initialize` обязателен и обязан быть `true` (R37) |
-| `filterRequest` знает, чей вызов | проба П7, `probes/p7-filterreq-attrib.mjs` | `"proxy-authorization":"Basic c3J0LlNVNVdUME5CVkVsUFRpMUJRVUU9…"` → `srt.<base64(commandId)>` | Task 7, `netpolicy.ts` | атрибуция и per-recipe политика возможны |
+| `filterRequest` знает, чей вызов — **только на plain HTTP** | пробы П7 и П8 | П7: `"proxy-authorization":"Basic c3J0LlNVNVdUME5CVkVsUFRpMUJRVUU9…"`; П8 на HTTPS: `"hasProxyAuth":false` | Task 7 | атрибуция в колбэке негодна; её даёт семафор 1, а не заголовок |
 | `NO_PROXY` зашит и включает loopback | проба П1, вывод `argv[2]` | `NO_PROXY=localhost,127.0.0.1,::1,169.254.0.0/16,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16` | R42, корпус E8 | тесты и корпус ходят на **имя**, не на адрес |
 
 Перечисление к категорическому «четыре стадии»: `build_env`, `build_profile`, `spawn`,
@@ -335,8 +345,12 @@ export interface ExecOutcome {
   readonly exit: { readonly code: number | null; readonly signal: string | null };
   readonly stdout: StreamOutcome;
   readonly stderr: StreamOutcome;
-  /** Полный набор, включая каждое уже отданное в `onViolation`. Равенство утверждает тест. */
+  /** Полный набор, включая каждое уже отданное в `onViolation` — если `violationsLost` ложно. */
   readonly violations: readonly SandboxViolation[];
+  /** Сколько нарушений вытеснило кольцо стора. Ненуль означает, что `violations` неполны (R45). */
+  readonly violationsLost: number;
+  /** Хэш JCS применённой политики — материал для сверки согласия в E5 (R47). */
+  readonly policyHash: string;
 }
 
 export interface Sandbox {
@@ -399,14 +413,19 @@ export interface ResolvedSandboxPolicy {
 единственное тайп-левел утверждение против настоящего `SandboxRuntimeConfig` — тогда дрейф формы
 вендора краснеет в одном месте.
 
-Сети в `ResolvedSandboxPolicy` **нет**: по D11 и пробе Ф8 `customConfig.network` не действует, и
-политика домена исполняется нашим колбэком. Её носит `netpolicy.ts`:
+Сети в `ResolvedSandboxPolicy` **нет**: по пересмотренному D11 её принуждает `updateConfig`
+(Task 7), а `netpolicy.ts` — валидатор шаблонов манифеста плюс таблица конформанса с матчером
+вендора:
 
 ```ts
-export interface NetPolicy { readonly allow: readonly string[] }
-export function matchesDomain(pattern: string, host: string): boolean;   // R13
-export function decide(policy: NetPolicy, host: string): { allow: boolean; reason: string };
+export function isValidDomainPattern(pattern: string): boolean;         // R13
+export function isWeakened(allow: readonly string[]): boolean;          // R14
 ```
+
+Конформанс закрепляет три известных расхождения, а не предполагает совпадение: `*.example.com`
+матчит **строго поддомены** и не матчит apex; шаблон может нести `:port`; `deniedDomains`
+проверяется раньше `allowedDomains`. Своего матчера на пути принуждения нет — второй матчер с
+другой семантикой это дыра, а не запас.
 
 Шаги `profile.ts`: маппинг узлов R6; резолв `~` в `os.homedir()` и относительных путей от
 `recipeCwd` (R8); mandatory-deny **глобами на поддерево, якорёнными на каждом корне `write.allow`**
@@ -428,8 +447,16 @@ contracts. E5 получает хэш и может сверить.
 Эти два — про **состав списка**. Что srt его действительно исполняет, проверяет интеграционный
 тест R10 в Task 7: проверка «строка лежит в массиве» зелёная и тогда, когда вендор наш `denyWrite`
 игнорирует, а глоб с несуществующим префиксом молча не матчит ничего.
-Третье, в `netpolicy.test.ts` — `expect(decide({allow: ['*.github.com']}, 'evil.com').allow).toBe(false)`
-и `expect(decide({allow: []}, 'anything').allow).toBe(false)`: deny-by-default (R12).
+Третье, в `netpolicy.test.ts` — таблица конформанса:
+`expect(isValidDomainPattern('*.github.com')).toBe(true)` и, против настоящего матчера вендора,
+`expect(matchesDomainPattern('*.github.com', 'github.com')).toBe(false)`. Предположить, что
+звёздочка покрывает apex → краснеет, и это то расхождение, из-за которого рецепт получил бы не ту
+сеть, что читается в манифесте.
+Четвёртое, покрытие R14 — `expect(isWeakened(['*.github.com'])).toBe(true)` против
+`expect(isWeakened(['api.github.com'])).toBe(false)`.
+Пятое, покрытие R7 — `expect(buildProfile(analyzeLogs, roots, cwd).read.deny).toContain(homedir() + '/.ssh')`
+при рецепте с `read.allow: ['./logs']`: замена `allow` **не** сужает чтение, и тест закрепляет
+фактическое поведение против того, как манифест читается.
 Рантайм: node; `homedir()` читается, файлы не трогаются.
 
 **Verification:** `vitest run src/exec/profile.test.ts src/exec/netpolicy.test.ts`
@@ -476,11 +503,14 @@ export function classify(
 зовущий его сам, не чист, а его тест требует настоящих путей на диске вместо стаба.
 
 **Три** грамматики (R27, факты Ф1 и Ф3): ядро, транспортный отказ прокси и
-`deny http-request <method> <url> (<reason>)`. Третья существует потому, что srt записывает свои
-отказы сам, в дополнение к тем, что эмитим мы, — то есть основной путь отказа нового дизайна
-приезжал бы как «неразобрано» и считался бы дважды. Отсюда `dedupe(ours, theirs)`: ключ —
-`commandId` плюс хост плюс близость по времени, потому что URL не годится (srt редактирует query,
-мы нет).
+`deny http-request <method> <url> (<reason>)`.
+
+Третья при нашем дизайне возникает **только** на некорректном URL: её пишет `onFilterRequestDenied`,
+который срабатывает, когда колбэк отказал или бросил, а наш колбэк всегда разрешает (R26).
+Дедупликации **нет** и быть не должно: дедуплицировать нечего, а правило «commandId плюс хост плюс
+близость по времени» было бы вредным — под семафором `commandId` постоянен на весь вызов, и цикл,
+стучащийся на один хост пятьдесят раз, схлопнулся бы в одно событие, занизив ровно ту цифру,
+которую показывает S5.
 
 Список подавляемых операций именованной константой (R39), классификация в `mandatory-deny` против
 `file-write` (R28). Таблица §7 разделяется по шву: строки грамматики проверяют `parseLine`,
@@ -493,8 +523,10 @@ export function classify(
 Третье — `expect(classify(rec, {mandatoryPaths: ['/root/.zshrc'], resolvePath: () => { throw new Error('нет пути'); }}).kind).toBe('violation')`.
 `mandatoryPaths` здесь **непустой** намеренно: с пустым списком любая разумная реализация
 закоротит до вызова резолвера, и ветка его падения не исполнится вовсе.
-Четвёртое — `expect(dedupe([ours], [theirs])).toHaveLength(1)` на нашей violation и строке
-`deny http-request` о том же отказе: без дедупликации таймлайн S5 покажет одно событие дважды.
+Четвёртое — `expect(parseLine('deny http-request GET https://h/p (bad url)')).toMatchObject({source: 'proxy'})`:
+третья грамматика разбирается, а не уезжает в «неразобрано».
+Пятое — `expect(fifty.map(parseLine).filter(Boolean)).toHaveLength(50)` на пятидесяти отказах к
+одному хосту: схлопнуть повторы → краснеет, и вместе с ним занижается цифра S5.
 
 **Verification:** `vitest run src/exec/violation.test.ts`
 
@@ -516,13 +548,13 @@ export function classify(
 (D2, R31). Слот держит фильтр честным в обоих случаях — `injected` проходит мимо `allow`
 намеренно, и это записано здесь, а не выводится читателем.
 
-**Falsification:** утверждение — `expect(buildEnv(['PATH'], {PATH: '/usr/bin', SECRET: 'x'})).toEqual({PATH: '/usr/bin'})`.
+**Falsification:** утверждение — `expect(buildEnv(['PATH'], {PATH: '/usr/bin', SECRET: 'x'}, {})).toEqual({PATH: '/usr/bin'})`.
 У R23 две половины, и фикстура обязана разводить их, иначе вторая уезжает непроверенной.
 Первое:
 заменить фильтр на `{...base, ...picked}` → `SECRET` доезжает, краснеет. Второе, изолирующее
-инъекцию — `expect(buildEnv([], {}).PATH).toBe(MINIMAL_PATH)`: убрать инъекцию → `PATH`
+инъекцию — `expect(buildEnv([], {}, {}).PATH).toBe(MINIMAL_PATH)`: убрать инъекцию → `PATH`
 отсутствует, ребёнок не резолвит `exec[0]`, краснеет. Третье, самое важное по последствиям —
-`expect(buildEnv([], {PATH: '/attacker/bin'}).PATH).toBe(MINIMAL_PATH)`: вернуть унаследованный
+`expect(buildEnv([], {PATH: '/attacker/bin'}, {}).PATH).toBe(MINIMAL_PATH)`: вернуть унаследованный
 `PATH` вместо константы → рецепт с `allow: []` молча получает путь поиска демона, краснеет.
 Четвёртое — `expect(base).toEqual(snapshot)` после вызова: мутация `base` краснеет.
 
@@ -542,6 +574,8 @@ export interface ProcessLimits {
   readonly maxBytes: number | null;
   /** Запас сверх потолка, чтобы E6 увидел секрет на границе целиком (D13, R19). */
   readonly holdBackBytes: number;
+  /** Шов с E6, объявленный сейчас (R20). По умолчанию тождественный, пока E6 нет. */
+  readonly redact?: (chunk: Buffer) => Buffer;
   readonly env: NodeJS.ProcessEnv;
   readonly cwd: string;
 }
@@ -577,19 +611,31 @@ SIGKILL по `process.kill(-pid)` (R16, факт Ф5), grace именованн�
 частый путь, и R18 говорит про исход политики, а не про конкретный сигнал; различает их
 `termination`, а не строка сигнала.
 
+**Приоритет исходов задан:** сработали и потолок, и таймаут → `termination: 'timeout'` (R49).
+Без правила поле одно, а исходов два, и вердикт зависел бы от порядка проверок.
+
+**Группа убивается на каждом пути выхода**, а не только по таймауту (R52), и пустота группы
+подтверждается — иначе фоновый потомок переживает вызов и попадает под политику следующего.
+
+Два счётчика с разными именами (R20): `producedBytes` — сколько процесс произвёл, `bytes` —
+сколько доехало после редакции и обрезки. Одно поле публиковало бы в событии не то число.
+
 **Falsification:** утверждение — `expect(await countSurvivors()).toBe(0)` после таймаута на команде,
 порождающей трёх потомков. Убрать `detached: true` и бить по `pid` → выживают трое, что проба Ф5 и
-показала, краснеет. Второе — `expect(raw.stdout.bytes).toBe(100)` при `maxBytes: 64` на выводе в
-100 байт: считать только сохранённое → `bytes: 64`, краснеет, а метрика «сколько процесс
-действительно произвёл» пропадает. Третье, многобайтовое —
+показала, краснеет. Второе — `expect(raw.stdout.producedBytes).toBe(100)` и `expect(raw.stdout.bytes).toBe(64)` при
+`maxBytes: 64` на выводе в 100 байт: слить два счётчика в один → одно из двух краснеет, и событие
+опубликовало бы не ту величину. Третье, многобайтовое —
 `expect(truncateToBytes('ЖЖЖ', 5).byteLength).toBe(5)`: считать `text.length` вместо байт →
 краснеет. Четвёртое — `expect(raw.termination).toBe('output-cap')` при превышении потолка против
 `'timeout'`: без отдельного члена оба исхода слились бы в один, и §6 перестала бы быть монотонной.
-Пятое, и оно обязано быть равенством, а не неравенством — `expect(raw.stored.byteLength).toBe(maxBytes + holdBackBytes)`
-на выводе заведомо длиннее суммы: с `toBeLessThanOrEqual` снятие hold-back дало бы `maxBytes ≤ maxBytes`
-и утверждение осталось бы зелёным, то есть проверяло бы ровно ничего.
-Шестое — `expect(raw.exit.code).toBe(0)` при превышении потолка: убить процесс на cap → `code: null`,
-краснеет (R49).
+Пятое — `expect(raw.stored.byteLength).toBe(maxBytes + holdBackBytes)` на выводе заведомо длиннее
+суммы, **при `holdBackBytes` строго больше нуля в фикстуре**: с `toBeLessThanOrEqual` или с нулевым
+запасом утверждение вырождается в `maxBytes === maxBytes` и проверяет ровно ничего.
+Седьмое — `expect(redactCalledWith.byteLength).toBe(maxBytes + holdBackBytes)`: редактор обязан
+получить окно **до** обрезки, иначе порядок R20 остаётся фразой, которую некому исполнить.
+Шестое — `expect(raw.exit.code).toBe(0)` при превышении потолка на команде, выходящей самостоятельно:
+убить процесс на cap → `code: null`, краснеет (R49). Восьмое — `expect(raw.termination).toBe('timeout')`,
+когда сработали оба: приоритет задан, а не выведен из порядка проверок.
 Рантайм: node на macOS; тест порождает реальные процессы и подчищает их в `afterEach`.
 
 **Verification:** `vitest run src/exec/limits.test.ts`
@@ -613,11 +659,21 @@ SIGKILL по `process.kill(-pid)` (R16, факт Ф5), grace именованн�
 - `initialize(config, undefined, true)` однократно на демон. **Третий аргумент обязателен**
   (R37, факт Ф10): по умолчанию он `false`, и тогда отказы происходят, а нарушений ноль.
 - `strictAllowlist: true` (R43). `sandboxAskCallback` **не регистрируем** — это решение E5.
-- **Принуждение — `updateConfig` под семафором с потолком 1** (D11, факт Ф13): перед вызовом
-  ставим `allowedDomains` этого рецепта, после снимаем. Потолок 1 здесь несущий, а не
-  нагрузочный: конфиг глобален, и второй вызов в полёте получил бы чужой allowlist (R21).
+- **Принуждение — `updateConfig` под семафором с потолком 1** (D11, факт Ф13). Порядок задан
+  целиком, а не перечислением (R46): **занять семафор → `updateConfig` политикой вызова →
+  обернуть → запустить → дождаться → убить группу и подтвердить её пустоту → drain-окно →
+  `updateConfig` пустым списком → освободить семафор.** Освобождение **после** drain: иначе
+  утверждение «под семафором всё, что видит колбэк, принадлежит текущему вызову» ложно ровно в том
+  окне, ради которого drain заведён. Идловое состояние allowlist — **пустой список** (R52).
+- `network.deny` рецепта едет в `deniedDomains` (R53). Он есть в `NormalizedAccess`
+  (`packages/contracts/src/lock.ts:56`) и проверяется srt раньше allow-списка; терять его молча
+  нельзя — это явный запрет автора рецепта.
 - `filterRequest` — **телеметрия**: байты тела, URL, метод, violation с `action: 'allowed'`
-  (R26, факт Ф12). Под семафором 1 запросы принадлежат ровно одному вызову, поэтому атрибуция
+  (R26, факт Ф12). Регистрируется **только в `initialize`**: прокси захватывает колбэк по значению
+  при создании, и установка позже через `updateConfig` не действует, причём тихо — байты станут
+  нулём, а S5 покажет «0 KB» при зелёных тестах. Тело читается не более N байт, после чего
+  читатель **явно отменяется**: без отмены ветка tee продолжает буферизовать остаток для брошенного
+  читателя, то есть «прочитали до потолка и перестали» хуже, чем не читать вовсе. Под семафором 1 запросы принадлежат ровно одному вызову, поэтому атрибуция
   бесплатна и невозможность прочитать `commandId` на HTTPS перестаёт мешать. Тело — в `try/catch`,
   ошибка даёт `allow`, а не `deny`: политика уже применена `updateConfig`, и бросок здесь резал бы
   разрешённый трафик. Чтение тела ограничено потолком, сверх него байты считаются как «≥ N».
@@ -627,8 +683,14 @@ SIGKILL по `process.kill(-pid)` (R16, факт Ф5), grace именованн�
 - Демультиплексирование по `encodedCommand`; стор при `initialize` не считается чистым —
   `reset()` его не очищает.
 - Drain-окно после выхода процесса перед resolve (R46).
-- `dispose()` считает ссылки (R50): `reset()` глобален, и освобождение `none` не имеет права
-  убить `seatbelt`, который S5 держит живым за переключателем.
+- `dispose()` считает ссылки и **выставляет флаг, после которого любой `run()` бросает** (R50):
+  `reset()` чистит `initializationPromise`, но не `config`, а `initialize` возвращается сразу при
+  выставленном промисе. Значит повторный `initialize` — тихий no-op, а вызов после `reset()` идёт
+  со старым конфигом и `getProxyPort() === undefined`, то есть прокси-переменные не эмитятся вовсе:
+  сеть тихо **открыта** в `none` и тихо **мертва** в `seatbelt`.
+- Громкая проверка на старте (R54): под конфигом `none` пробный хост обязан быть разрешён.
+  `allowedDomains: ['*']` схема вендора объявляет недопустимым и пропускает лишь потому, что
+  `updateConfig` — голый `structuredClone` без валидации.
 - `commandId` — высокоэнтропийный, энтропия в первых 100 символах (R48).
 
 `modes/seatbelt.ts` даёт своё: отображение `ResolvedSandboxPolicy` в
@@ -643,8 +705,11 @@ SIGKILL по `process.kill(-pid)` (R16, факт Ф5), grace именованн�
 Проверка состава списка в Task 3 этого не заменяет: она зелёная и когда вендор список игнорирует,
 и когда глоб с несуществующим префиксом не матчит ничего.
 
-Второе, детектор дрейфа R10 — `expect(await deniedByVendor(OUR_MANDATORY_LIST)).toEqual(OUR_MANDATORY_LIST)`:
-апстрим расширил или сузил защиту → расхождение краснеет, и копия не устаревает молча.
+Второе, детектор дрейфа R10 — и он обязан гонять **вендорскую** защиту, а не нашу.
+`expect(await vendorOnlyDenials(fixture)).toEqual(RECORDED_VENDOR_SET)`, где прогон идёт с
+**пустым** `denyWrite` и cwd, равным фикстуре, в дочернем процессе (техника П3b, чтобы не трогать
+cwd демона). Формулировка «наш список отказан» тавтологична: он отказан потому, что мы его
+запретили, и покраснеть при сужении апстрима не может.
 
 Третье — `expect(await reachable(recipeA)).toBe(true)` и `expect(await reachable(recipeB)).toBe(false)`
 для двух **последовательных** вызовов с разными `network.allow`, **по HTTPS**. Оставить принуждение
@@ -656,6 +721,21 @@ SIGKILL по `process.kill(-pid)` (R16, факт Ф5), grace именованн�
 Пятое — на команде, дающей **ровно 250** отказов: `expect(outcome.violations).toHaveLength(250)`.
 Число независимое, а не взятое из накопителя: сравнение накопителя со стримом, который его же и
 кормит, одинаково усечено с обеих сторон и зелено при потере.
+Шестое, ветка потери — `expect(cursor.advance({totalCount: 400, lastSeen: 100}).lost).toBe(200)`
+подачей синтетического скачка в функцию курсора: воспроизводить гонку бессмысленно,
+`notifyListeners` синхронен внутри `addViolation`, и в продакшене ветка почти недостижима — именно
+поэтому её легко написать неправильно и не узнать.
+Седьмое, покрытие R48 — `expect(new Set(Array.from({length: 1000}, newCommandId)).size).toBe(1000)`
+и `expect(newCommandId().slice(0, 100)).not.toEqual(newCommandId().slice(0, 100))`: энтропия обязана
+лежать в первых ста символах, дальше идентификатор обрезается.
+Восьмое, покрытие R32 — `expect(eventsOf(deniedRun).map((e) => e.stage)).toContain('build_profile')`
+на вызове, остановленном отказом: «событие пишется на каждой стадии, включая отказ» иначе остаётся
+цитатой без проверки.
+Девятое, покрытие R29 — `expect(seenWhileAlive).toBe(true)`: нарушение доехало до колбэка **до**
+выхода процесса, что и есть живая красная строка S5.
+Десятое, покрытие R55 — `expect(upstreamTlsFails).toBe(false)` на локальном listener: прокси делает
+своё соединение наверх с проверкой сертификата, и самоподписанный listener даёт ребёнку 502, а не
+успех. Тест на байты этого не поймает — колбэк отрабатывает **до** соединения наверх.
 
 Рантайм: node на macOS с рабочим `sandbox-exec`. На другой платформе набор пропускается
 `describe.skipIf`, и пропуск обязан быть **громким** — эти тесты видят дефекты, которых
@@ -696,8 +776,11 @@ CA-переменных наружу не экспортируются (`index.d
 Третье — `expect(outcome.termination).toBe('exited')` при чтении файла, который в `seatbelt` был бы
 закрыт: если `none` начнёт применять профиль, baseline перестанет быть baseline.
 Четвёртое — `expect(bytes).toBeGreaterThan(0)` на POST с телом: это «1.2 KB» из S5.
-Рантайм: цель — **имя** хоста, не `127.0.0.1` (R42, R51); механизм появления имени — запись в
-`/etc/hosts` демо-машины, и она объявлена шагом подготовки, а не подразумевается.
+Рантайм: цель — **имя** хоста, не `127.0.0.1` (R42, R51), и имя берётся из публичного
+wildcard-DNS (`*.localtest.me`, `*.nip.io`), а не из правки `/etc/hosts`: последняя требует root,
+мутирует машину глобально и в CI не ставится. Имя не совпадает с `NO_PROXY`, поэтому запрос уходит
+в прокси, а прокси работает вне песочницы и его соединение на loopback не ограничено — ради чего
+R42 и R51 и существуют. Зависимость от внешнего DNS — объявленное условие прогона.
 
 **Verification:** `vitest run src/exec/modes/none.test.ts`
 
@@ -804,33 +887,33 @@ CA-переменных наружу не экспортируются (`index.d
 | R3 | Task 2, первое утверждение — `expect(() => createSandbox('container')).toThrow(/container/)` |
 | R4 | Task 2: `createSandbox(mode: SandboxMode)` — режим параметром вызова |
 | R5 | Task 3: `buildProfile(sandbox: NormalizedSandbox, …)` — вход лист, а не агрегат |
-| R6 | Task 7: «отображение `ResolvedSandboxPolicy` в `filesystem.denyRead/allowRead/allowWrite/denyWrite`» |
-| R7 | Task 10: неточность `07-contracts.md:154` фиксируется требованием, а не правкой контракта |
+| R6 | Task 7: отображение ФС в `filesystem.*`; сеть — через `updateConfig`, не `customConfig` |
+| R7 | Task 3, **пятое** утверждение — `read.allow: ['./logs']` чтение не сужает; Task 10 не правит контракт |
 | R8 | Task 3, второе утверждение — разворачивание `~` |
 | R9 | Task 3: «mandatory-deny глобами на поддерево, якорёнными на каждом корне `write.allow`» |
 | R10 | Task 7, **первое и второе** утверждения — интеграционный отказ и детектор дрейфа |
 | R11 | Ничего не делаем: слот `{}` в профиле — ошибка загрузки ещё в E0 (`refine.ts:80`). Строка есть, чтобы отсутствие работы было видно |
-| R12 | Task 7: «Принуждение — `updateConfig` под семафором», третье утверждение |
-| R13 | Task 3: `matchesDomain(pattern, host)`, утверждение на `*.github.com` |
-| R14 | Task 3: «флаг `weakened` из `*` в `network.allow`» |
+| R12 | Task 7: «Принуждение — `updateConfig` под семафором», третье утверждение (последовательные вызовы, HTTPS) |
+| R13 | Task 3: `isValidDomainPattern` плюс **таблица конформанса** с матчером вендора, третье утверждение |
+| R14 | Task 3, **четвёртое** утверждение — `isWeakened(['*.github.com'])` против `['api.github.com']` |
 | R15 | Task 7: `filterRequest` эмитит violation; Task 10 — строка про сырой TCP |
 | R16 | Task 6: «SIGTERM → grace → SIGKILL по `process.kill(-pid)`», первое утверждение |
 | R17 | Task 6: «grace именованной константой» |
-| R18 | Task 2: поле `termination`; Task 6 выставляет; Task 9 отображает в вердикт |
+| R18 | Task 2: поле `termination`; Task 6 выставляет и разводит `SIGTERM`/`SIGKILL`. Вердикт пишет E4 — E3 даёт материал |
 | R19 | Task 6: «храним только `maxBytes + holdBackBytes`», пятое утверждение (равенство, не неравенство) |
-| R20 | Task 6: «`text` декодируется после того, как E6 отредактировал»; Task 9 — схлопывание пары |
+| R20 | Task 6: `redact` в `ProcessLimits`, два счётчика `producedBytes`/`bytes`, седьмое утверждение; Task 9 — схлопывание пары |
 | R21 | Task 7: «потолок 1 здесь несущий, а не нагрузочный», третье утверждение проверяет разные политики |
 | R22 | Task 10: строка A13 в `03-threat-model.md:63` |
 | R23 | Task 5, второе и третье утверждения — минимальный `PATH` |
-| R24 | Task 5, **четвёртое** утверждение — `injected` переживает фильтр |
+| R24 | Task 5, четвёртое утверждение — `expect(buildEnv([], {}, {HTTP_PROXY: 'http://x'}).HTTP_PROXY).toBe('http://x')` |
 | R25 | Task 9, **третье** утверждение — `env.allowed` именами, секрет не сериализуется |
 | R26 | Task 7: «`filterRequest` — телеметрия», `try/catch` и потолок чтения тела |
-| R27 | Task 4: три грамматики и `dedupe`, четвёртое утверждение |
+| R27 | Task 4: три грамматики, **дедупликации нет**; четвёртое и пятое утверждения |
 | R28 | Task 4, второе утверждение — `mandatory-deny` против `file-write` |
-| R29 | Task 7: подписка с демультиплексированием; факт Ф9 |
+| R29 | Task 7, **девятое** утверждение — нарушение доехало до колбэка до выхода процесса |
 | R30 | Task 7: `commandId` — идентификатор вызова, не текст команды |
 | R31 | Task 8, первое и второе утверждения — прокси-переменные и CA-группа |
-| R32 | Task 9: «Событие на каждой из четырёх стадий, включая отказ» |
+| R32 | Task 7, **восьмое** утверждение — событие есть на вызове, остановленном отказом |
 | R33 | Task 9: «`sandbox.mode` приезжает уже на `build_profile`», первое утверждение |
 | R34 | Task 9, второе утверждение; Global Constraints, `exactOptionalPropertyTypes` |
 | R35 | Task 9: «`durationUs` из `process.hrtime.bigint()`» |
@@ -843,10 +926,14 @@ CA-переменных наружу не экспортируются (`index.d
 | R42 | Task 8: «цель — имя хоста, не `127.0.0.1`»; Task 10 — строка про loopback |
 | R43 | Task 7: «`strictAllowlist: true`. `sandboxAskCallback` не регистрируем» |
 | R44 | Task 7: «Курсор по `getTotalCount()`, не по индексу», пятое утверждение |
-| R45 | Task 7: «исход помечается потерявшим нарушения, громко», пятое утверждение |
-| R46 | Task 7: «Drain-окно после выхода процесса перед resolve» |
-| R47 | Task 3: «`policyHash(policy)` … уезжает в `ExecOutcome`, а не в `AuditEvent`» |
-| R48 | Task 7: «`commandId` — высокоэнтропийный, энтропия в первых 100 символах» |
+| R45 | Task 7, **шестое** утверждение — синтетический скачок `totalCount` в функцию курсора |
+| R46 | Task 7: порядок задан целиком, освобождение семафора **после** drain |
+| R47 | Task 2: поле `policyHash` в `ExecOutcome`; Task 3 его считает |
+| R48 | Task 7, **седьмое** утверждение — тысяча уникальных, различие в первых ста символах |
 | R49 | Task 6: «процесс не убивается», шестое утверждение — `expect(raw.exit.code).toBe(0)` |
-| R50 | Task 7: «`dispose()` считает ссылки» |
-| R51 | Task 8: «механизм появления имени — запись в `/etc/hosts` демо-машины, и она объявлена шагом подготовки» |
+| R50 | Task 7: «выставляет флаг, после которого любой `run()` бросает» |
+| R51 | Task 8: имя из публичного wildcard-DNS, не `/etc/hosts`; зависимость объявлена условием прогона |
+| R52 | Task 7: «убить группу и подтвердить её пустоту», идловый allowlist — пустой список |
+| R53 | Task 7: «`network.deny` рецепта едет в `deniedDomains`» |
+| R54 | Task 7: «Громкая проверка на старте: под конфигом `none` пробный хост обязан быть разрешён» |
+| R55 | Task 7, **десятое** утверждение — соединение прокси наверх с проверкой сертификата |
