@@ -46,9 +46,14 @@ describe('формы подтверждения', () => {
     profile: { network: { allow: ['registry.npmjs.org'] } },
   };
 
-  it('запрос несёт ровно то, что показывают человеку', () => {
-    expect(request.argv).toHaveLength(3);
-    expect(request.profile.network?.allow).toEqual(['registry.npmjs.org']);
+  it('argsHash покрывает ту же пару «рецепт + аргументы», что показали человеку', () => {
+    // Прежние два утверждения перечисляли поля объявленного тут же литерала: ни одна строка
+    // продакшена, будучи удалённой, их не роняла. Формы держит `tsc -b` — он видит и
+    // `*.test.ts`, — а исполняемого здесь ровно одно: дайджест обязан меняться и от
+    // аргументов, и от имени рецепта, иначе апрув можно предъявить к другому вызову.
+    expect(argsHash(recipeName, { tag: 'v1.0.0' })).toBe(request.argsHash);
+    expect(argsHash(recipeName, { tag: 'v1.0.1' })).not.toBe(request.argsHash);
+    expect(argsHash(asRecipeName('run_tests'), { tag: 'v1.0.0' })).not.toBe(request.argsHash);
   });
 
   it('requestId брендирован и не принимает SessionId', () => {
@@ -65,8 +70,11 @@ describe('формы подтверждения', () => {
       scope: 'until',
       expiresAt: '2026-08-27T10:10:00.000Z',
     };
-    expect(() => new Date(verdict.expiresAt ?? '')).not.toThrow();
+    // `new Date('')` возвращает Invalid Date, а не бросает, — прежняя проверка «не бросает»
+    // не могла покраснеть никогда. Осмысленно здесь только то, что время АБСОЛЮТНОЕ и
+    // разбирается, а не относительный TTL.
     expect(Number.isNaN(Date.parse(verdict.expiresAt ?? ''))).toBe(false);
+    expect(verdict.expiresAt).toMatch(/Z$|[+-]\d{2}:\d{2}$/);
   });
 
   it('истечение и отмена выражаются отсутствием вердикта, а не третьим решением', () => {
@@ -85,7 +93,9 @@ describe('формы подтверждения', () => {
       sessionId,
     };
     const event: AuditEvent = {
+      schema: 'mcpproxy.audit/1',
       operation: 'execute_tool',
+      protocolVersion: '2025-11-25',
       toolName: 'publish_release',
       sessionId,
       traceId: '4bf92f3577b34da6a3ce929d0e0e4736',

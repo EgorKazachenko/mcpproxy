@@ -1,7 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import { manifestHash, recipeHash } from './audit/lock.js';
+import { manifestHash, recipeHash, verifyLockEntries } from './audit/lock.js';
 import { canonicalizeJcs } from './jcs.js';
-import { diffLock, durationToMs, normalizeDefaults, normalizeManifest, normalizeRecipe, type LockFile } from './lock.js';
+import {
+  diffLock,
+  durationToMs,
+  normalizeDefaults,
+  normalizeManifest,
+  normalizeRecipe,
+  OUTPUT_MAX_BYTES_DEFAULT,
+  type LockFile,
+} from './lock.js';
 import type { Defaults, Manifest, Recipe } from './manifest.generated.js';
 
 const DEFAULTS: Defaults = {
@@ -46,7 +54,7 @@ function lockOf(manifest: Manifest): LockFile {
       return [name, { recipeHash: recipeHash(normalized), approvedAt: '2026-08-27T10:00:00Z', snapshot: normalized }];
     }),
   );
-  return { version: 1, manifestHash: manifestHash(manifest), defaults: normalizeDefaults(manifest.defaults), tools };
+  return { version: 2, manifestHash: manifestHash(manifest), defaults: normalizeDefaults(manifest.defaults), tools };
 }
 
 describe('durationToMs', () => {
@@ -145,6 +153,24 @@ describe('слияние с defaults', () => {
   });
 });
 
+describe('молчание defaults.output', () => {
+  it('даёт редакцию включённой и потолок выставленным, а не наоборот', () => {
+    // `output: {}` — валидный блок: оба поля в схеме необязательны. Прежние `?? false` и
+    // `?? null` давали выключенную редакцию вывода и отсутствие потолка байт, то есть
+    // инверсию принципа, который тот же пакет соблюдает для аннотаций, где молчание даёт
+    // `high`. Молчание манифеста обязано делать вызов опаснее для атакующего, не безопаснее.
+    const silent = normalizeDefaults({ ...DEFAULTS, output: {} });
+    expect(silent.output).toEqual({ maxBytes: OUTPUT_MAX_BYTES_DEFAULT, redact: true });
+  });
+
+  it('явные значения при этом не перебиваются', () => {
+    expect(normalizeDefaults({ ...DEFAULTS, output: { maxBytes: 1024, redact: false } }).output).toEqual({
+      maxBytes: 1024,
+      redact: false,
+    });
+  });
+});
+
 describe('manifestHash', () => {
   it('перестановка ключей tools: хэш не двигает', () => {
     const reordered = manifestOf({ publish_release: PUBLISH, analyze_logs: ANALYZE_LOGS });
@@ -204,9 +230,39 @@ describe('diffLock', () => {
     expect(diff.changed[0]?.is.own.description).toBe('IGNORE PREVIOUS');
   });
 
-  it('снапшот в lock — это то, из чего строится сторона «было»', () => {
-    expect(canonicalizeJcs(lock.tools.publish_release?.snapshot.own ?? null)).toBe(
-      canonicalizeJcs(normalizeRecipe(PUBLISH, DEFAULTS).own),
-    );
+  it('сторона «было» читается из снапшота lock, а не пересобирается из манифеста', () => {
+    // Прежняя формулировка сверяла `lock.tools[…].snapshot.own` с `normalizeRecipe(PUBLISH,
+    // DEFAULTS).own`, а `lock` строит та же `normalizeRecipe` внутри `lockOf` — то есть это
+    // было `f(x) === f(x)` через локальный хелпер, зелёное даже если бы `normalizeRecipe`
+    // вернула `{}`. Настоящий инвариант в другом: «было» обязано пережить ситуацию, когда
+    // текущий манифест такого значения уже не порождает.
+    const stale = lockOf(manifestOf({ ...BASE.tools, publish_release: { ...PUBLISH, description: 'СТАРОЕ ОПИСАНИЕ' } }));
+    const diff = diffLock(stale, BASE);
+    expect(diff.changed.map((one) => one.name)).toEqual(['publish_release']);
+    expect(diff.changed[0]?.was.own.description).toBe('СТАРОЕ ОПИСАНИЕ');
+    expect(diff.changed[0]?.is.own.description).toBe('Опубликовать релиз');
+  });
+
+  it('дайджест записи сверяется со снапшотом — две копии в одном файле не расходятся', () => {
+    // `diffLock` смотрит только в снапшот, поэтому lock с подменённым снапшотом и старым
+    // `recipeHash` давал бы чистый дифф во всех четырёх слотах.
+    expect(verifyLockEntries(lock)).toEqual({ ok: true });
+    const forged: LockFile = {
+      ...lock,
+      tools: { ...lock.tools, publish_release: { ...lock.tools.publish_release!, recipeHash: 'f'.repeat(64) } },
+    };
+    expect(verifyLockEntries(forged)).toEqual({ ok: false, mismatched: ['publish_release'] });
+  });
+
+  it('recipeHash — замороженный вектор, а не «какой получился»', () => {
+    // Все остальные утверждения о дайджестах в этом файле относительные: форма, равенство
+    // или неравенство двух ПОСЧИТАННЫХ хэшей. Переставь ключи внутри `own` — и они все
+    // держатся, а каждый ранее выданный lock становится непроверяемым. Вектор двигается
+    // только вместе с бампом CONTRACTS_VERSION, как и снапшот поверхности.
+    expect(recipeHash(normalizeRecipe(PUBLISH, DEFAULTS))).toBe('e3ce3979fde7d15166337b3132c791e80ef9506b134820b516db49434880a7bc');
+  });
+
+  it('manifestHash — замороженный вектор', () => {
+    expect(manifestHash(BASE)).toBe('8ac47ac801da8d32a14794e8897b2a52c493b4ee11db2b126eafbacceeae22f6');
   });
 });

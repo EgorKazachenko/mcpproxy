@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { canonicalizeJcs } from './jcs.js';
+import { canonicalizeJcs, JCS_MAX_DEPTH } from './jcs.js';
 
 /** Символ по коду. Так входные данные тестов не зависят от экранирования в исходнике. */
 const ch = (code: number): string => String.fromCharCode(code);
@@ -107,6 +107,38 @@ describe('canonicalizeJcs — строки', () => {
     // JSON.stringify экранировал бы его в \udXXX и посчитал бы дайджест от мусора молча.
     expect(() => canonicalizeJcs(`a${ch(0xd800)}b`)).toThrow(TypeError);
     expect(() => canonicalizeJcs({ [ch(0xdc00)]: 1 })).toThrow(TypeError);
+  });
+});
+
+describe('canonicalizeJcs — глубина', () => {
+  const nest = (depth: number): unknown => {
+    let value: unknown = 1;
+    for (let i = 0; i < depth; i += 1) value = { a: value };
+    return value;
+  };
+
+  it('на потолке ещё канонизирует', () => {
+    expect(() => canonicalizeJcs(nest(JCS_MAX_DEPTH - 1))).not.toThrow();
+  });
+
+  it('за потолком бросает TypeError, а не движковый RangeError', () => {
+    // Замер до правки: `argsHash` переживал глубину 1961 и падал на 1962 — то есть 3 930
+    // байт в `IpcRequest.params` (произвольный JSON из сокета) роняли вызов на пути
+    // подтверждения, причём `JSON.parse` пропускает вход в 25 раз глубже. Отказ обязан быть
+    // тем же `TypeError`, что и остальные в этом файле, иначе вызывающий его не поймает.
+    let thrown: unknown;
+    try {
+      canonicalizeJcs(nest(JCS_MAX_DEPTH + 5));
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(TypeError);
+    expect(thrown).not.toBeInstanceOf(RangeError);
+  });
+
+  it('массивы считаются той же глубиной, что и объекты', () => {
+    const deep: unknown = JSON.parse('['.repeat(JCS_MAX_DEPTH + 5) + '1' + ']'.repeat(JCS_MAX_DEPTH + 5));
+    expect(() => canonicalizeJcs(deep)).toThrow(TypeError);
   });
 });
 

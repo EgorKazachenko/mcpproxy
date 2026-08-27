@@ -13,6 +13,13 @@ import type { AccessRule, Defaults, Manifest, Param, Recipe } from './manifest.g
 const UNIT_MS: Readonly<Record<string, number>> = { ms: 1, s: 1_000, m: 60_000, h: 3_600_000 };
 
 /**
+ * Потолок вывода, когда `defaults.output.maxBytes` умолчал. Значение — из канонического
+ * примера `docs/07-contracts.md`, а не выдумано здесь: манифест, который о потолке молчит,
+ * обязан получить потолок, а не его отсутствие.
+ */
+export const OUTPUT_MAX_BYTES_DEFAULT = 65_536;
+
+/**
  * `"120s"` → `120000`. Длительности нормализуются в целые миллисекунды, иначе `"120s"` и
  * `"2m"` — один и тот же таймаут и разные дайджесты, то есть косметическая правка даёт
  * жёсткий стоп на `lock_check` с диффом, в котором ничего не изменилось.
@@ -20,7 +27,11 @@ const UNIT_MS: Readonly<Record<string, number>> = { ms: 1, s: 1_000, m: 60_000, 
 export function durationToMs(duration: string): number {
   const match = /^([0-9]+)(ms|s|m|h)$/.exec(duration);
   if (match === null) throw new TypeError(`не длительность: ${duration}`);
-  return Number(match[1]) * (UNIT_MS[match[2] as string] ?? 1);
+  const unit = UNIT_MS[match[2] as string];
+  // Не `?? 1`: регулярка выше уже сузила единицу до `ms|s|m|h`, то есть ветка недостижима,
+  // а её семантика («неизвестная единица = миллисекунды») противоположна броску строкой выше.
+  if (unit === undefined) throw new TypeError(`неизвестная единица длительности: ${duration}`);
+  return Number(match[1]) * unit;
 }
 
 export interface NormalizedAccess {
@@ -92,7 +103,13 @@ export interface LockEntry {
 }
 
 export interface LockFile {
-  readonly version: 1;
+  /**
+   * `2`, а не `1`: форма изменилась несовместимо относительно задокументированной ранее
+   * (`hash` → `recipeHash`, плюс обязательные `snapshot` и `defaults`). Оставить `1` значило
+   * бы, что файл прежней формы честно объявляет себя текущим, — а дискриминатор существует
+   * ровно для того, чтобы этого не было. Разбирает файл `parseLockFile` из `./validate`.
+   */
+  readonly version: 2;
   readonly manifestHash: string;
   /**
    * Слот обязателен по тому же доводу, что и снапшот: `manifestHash` необратим, а
@@ -142,13 +159,24 @@ function mergeAccess(base: NormalizedAccess, own: AccessRule | null): Normalized
   };
 }
 
+// `deny` дедуплицируется и здесь — иначе `defaults.sandbox.read.deny: ["~/.ssh", "~/.ssh"]`
+// попадал бы в `lock.defaults` с дублем, а в каждый `snapshot.effective` (через `mergeAccess`)
+// — без него, и «нормализованное представление» оказалось бы нормализовано не до конца.
 const accessOf = (rule: AccessRule | undefined): NormalizedAccess =>
-  rule === undefined ? EMPTY_ACCESS : { allow: [...(rule.allow ?? [])], deny: [...(rule.deny ?? [])] };
+  rule === undefined ? EMPTY_ACCESS : { allow: [...(rule.allow ?? [])], deny: dedupe(rule.deny ?? []) };
 
 export function normalizeDefaults(defaults: Defaults): NormalizedDefaults {
   return {
     timeoutMs: durationToMs(defaults.timeout),
-    output: { maxBytes: defaults.output.maxBytes ?? null, redact: defaults.output.redact ?? false },
+    // Молчание манифеста обязано делать вызов ОПАСНЕЕ для атакующего, а не безопаснее —
+    // тот же принцип, что и у аннотаций, где отсутствие даёт `high`. `output: {}` — валидный
+    // блок, и `?? false` / `?? null` давали бы выключенную редакцию вывода и отсутствие
+    // потолка байт, то есть инверсию принципа на уровне, где он важнее всего.
+    // Значения — из канонического примера `docs/07-contracts.md`.
+    output: {
+      maxBytes: defaults.output.maxBytes ?? OUTPUT_MAX_BYTES_DEFAULT,
+      redact: defaults.output.redact ?? true,
+    },
     env: { allow: [...defaults.env.allow] },
     sandbox: {
       read: accessOf(defaults.sandbox.read),

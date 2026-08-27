@@ -1,6 +1,7 @@
 import type { ErrorObject } from 'ajv';
 import type { Document, LineCounter } from 'yaml';
 import type { Manifest } from '../manifest.generated.js';
+import { sanitizeDescription } from '../tool.js';
 import type { Diagnostic, ManifestSource, ParseManifestResult, PatternMatcher } from '../types.js';
 import { matcherKey } from '../types.js';
 import { manifestValidator } from './ajv.js';
@@ -19,6 +20,7 @@ function diagnose(error: ErrorObject, doc: Document, lineCounter: LineCounter): 
   return {
     pointer: pointerOf(segments),
     ...positionOf(doc, lineCounter, segments),
+    code: 'schema',
     message: error.message ?? error.keyword,
   };
 }
@@ -48,7 +50,12 @@ function buildMatchers(
             doc,
             lineCounter,
             ['tools', recipeName, 'params', paramName, 'pattern'],
-            `pattern не компилируется движком RE2: ${compiled.reason}`,
+            'pattern',
+            // `reason` — это `error.message` от RE2, а он эхоит фрагмент паттерна дословно.
+            // Паттерн пришёл из недоверенного манифеста, а диагностику рисуют человеку и
+            // пишут в лог, поэтому bidi-override и ANSI-escape доехали бы до глаз и до
+            // терминала. Инструмент для этого в пакете уже есть — он и применяется.
+            `pattern не компилируется движком RE2: ${sanitizeDescription(compiled.reason).text}`,
           ),
         );
       }
@@ -75,3 +82,5 @@ export function parseManifest(yamlText: string, source: ManifestSource): ParseMa
 
   return { ok: true, manifest, matchers };
 }
+
+export { parseLockFile, type ParseLockResult } from './lock.js';

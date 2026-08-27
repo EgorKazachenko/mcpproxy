@@ -1,12 +1,13 @@
 import { LineCounter, parseDocument, type Document } from 'yaml';
-import type { Diagnostic, ManifestSource } from '../types.js';
+import type { Diagnostic, DiagnosticCode, ManifestSource } from '../types.js';
 import { MANIFEST_MAX_BYTES } from '../types.js';
 
 export type YamlResult =
   | { ok: true; data: unknown; doc: Document; lineCounter: LineCounter }
   | { ok: false; diagnostics: Diagnostic[] };
 
-const at = (message: string, line = 1, column = 1): Diagnostic => ({ pointer: '', line, column, message });
+const at = (code: DiagnosticCode, message: string, line = 1, column = 1): Diagnostic =>
+  ({ pointer: '', line, column, code, message });
 
 /**
  * Разбор недоверенного YAML. Дефолты `yaml@2.9.0` уже отбивают алиас-бомбу, дубли ключей
@@ -18,7 +19,7 @@ export function parseYaml(text: string, source: ManifestSource): YamlResult {
   const limit = Math.min(MANIFEST_MAX_BYTES, source.maxBytes ?? MANIFEST_MAX_BYTES);
   const bytes = Buffer.byteLength(text, 'utf8');
   if (bytes > limit) {
-    return { ok: false, diagnostics: [at(`манифест больше лимита: ${bytes} байт при потолке ${limit}`)] };
+    return { ok: false, diagnostics: [at('size-limit', `манифест больше лимита: ${bytes} байт при потолке ${limit}`)] };
   }
 
   const lineCounter = new LineCounter();
@@ -29,7 +30,7 @@ export function parseYaml(text: string, source: ManifestSource): YamlResult {
   //    превращается в `[false]`. Передача `{version: '1.2'}` директиву НЕ перебивает,
   //    поэтому единственная работающая мера — отказать документу целиком.
   if (doc.directives?.yaml.explicit === true) {
-    return { ok: false, diagnostics: [at('директива %YAML запрещена: версию разбора выбирает загрузчик, а не манифест')] };
+    return { ok: false, diagnostics: [at('yaml', 'директива %YAML запрещена: версию разбора выбирает загрузчик, а не манифест')] };
   }
 
   if (doc.errors.length > 0) {
@@ -37,7 +38,7 @@ export function parseYaml(text: string, source: ManifestSource): YamlResult {
       ok: false,
       diagnostics: doc.errors.map((error) => {
         const pos = lineCounter.linePos(error.pos[0]);
-        return at(`${error.code}: ${error.message}`, pos.line, pos.col);
+        return at('yaml', `${error.code}: ${error.message}`, pos.line, pos.col);
       }),
     };
   }
@@ -49,7 +50,7 @@ export function parseYaml(text: string, source: ManifestSource): YamlResult {
       ok: false,
       diagnostics: doc.warnings.map((warning) => {
         const pos = lineCounter.linePos(warning.pos[0]);
-        return at(`${warning.code}: ${warning.message}`, pos.line, pos.col);
+        return at('yaml', `${warning.code}: ${warning.message}`, pos.line, pos.col);
       }),
     };
   }
@@ -58,7 +59,7 @@ export function parseYaml(text: string, source: ManifestSource): YamlResult {
   try {
     data = doc.toJS();
   } catch (error) {
-    return { ok: false, diagnostics: [at(error instanceof Error ? error.message : String(error))] };
+    return { ok: false, diagnostics: [at('yaml', error instanceof Error ? error.message : String(error))] };
   }
 
   return { ok: true, data, doc, lineCounter };

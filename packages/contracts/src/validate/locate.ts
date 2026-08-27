@@ -1,5 +1,5 @@
 import type { Document, LineCounter } from 'yaml';
-import type { Diagnostic } from '../types.js';
+import type { Diagnostic, DiagnosticCode } from '../types.js';
 
 /** Сегмент пути внутрь документа: имя ключа или индекс массива. */
 export type Segment = string | number;
@@ -35,7 +35,8 @@ export function diagnosticAt(
   doc: Document,
   lineCounter: LineCounter,
   segments: readonly Segment[],
+  code: DiagnosticCode,
   message: string,
 ): Diagnostic {
-  return { pointer: pointerOf(segments), ...positionOf(doc, lineCounter, segments), message };
+  return { pointer: pointerOf(segments), ...positionOf(doc, lineCounter, segments), code, message };
 }

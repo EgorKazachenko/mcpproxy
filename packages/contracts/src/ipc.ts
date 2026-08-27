@@ -17,11 +17,24 @@ export type RequestId = string & { readonly __brand: 'RequestId' };
 /**
  * Та же форма, что у `propertyNames` схемы манифеста. Копия здесь намеренная: корневой
  * вход не читает файл схемы. Совпадение двух копий проверяет тест — иначе они разъедутся.
+ *
+ * `propertyNames` состоит из **двух** частей, и обе обязаны быть здесь. Одного паттерна
+ * мало: `constructor` и `prototype` целиком из строчных букв, то есть ему соответствуют.
+ * Пропустив их, `asRecipeName` вернул бы брендированный `RecipeName` для имени, которое
+ * загрузчик манифеста отвергает, а `manifest.tools` — обычный объект из `doc.toJS()`, так
+ * что `tools['constructor']` у потребителя резолвится по цепочке прототипов в истинное
+ * значение, и проверка вида `if (!recipe) reject` его не ловит.
  */
 export const RECIPE_NAME_PATTERN = /^[a-z][a-z0-9_]{0,63}$/;
 
+/** Вторая половина `propertyNames`. Значение заморожено вместе с паттерном. */
+export const RESERVED_RECIPE_NAMES = ['constructor', 'prototype', '__proto__'] as const;
+
 export function asRecipeName(value: string): RecipeName {
   if (!RECIPE_NAME_PATTERN.test(value)) throw new TypeError(`не имя рецепта: ${value}`);
+  if ((RESERVED_RECIPE_NAMES as readonly string[]).includes(value)) {
+    throw new TypeError(`зарезервированное имя, не имя рецепта: ${value}`);
+  }
   return value as RecipeName;
 }
 

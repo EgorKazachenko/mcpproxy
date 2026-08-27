@@ -1,5 +1,4 @@
 import type { AuditEvent } from './event.js';
-import { MCP_PROTOCOL_VERSION } from './mcp.js';
 
 /**
  * Экспортёр события в OTLP/JSON.
@@ -39,9 +38,20 @@ export interface OtlpSpan {
   startTimeUnixNano: string;
   endTimeUnixNano: string;
   attributes: OtlpKeyValue[];
+  /**
+   * `STATUS_CODE_ERROR` = 2. Без этого поля спан всегда `STATUS_UNSET`, и в любом бэкенде,
+   * который считает ошибки по статусу спана — а это все, — ошибка неотличима от успеха.
+   * Аргумент тот же, что у R14: приёмник не жалуется, поэтому дефект ненаблюдаем.
+   *
+   * `denied` статусом **не** помечается намеренно: отказ политики — это штатный исход
+   * решения, а не сбой прокси. Смешав их, мы получили бы дашборд, на котором работающая
+   * политика выглядит как отказавший сервис.
+   */
+  status?: { code: 2; message?: string };
 }
 
 const SPAN_KIND_INTERNAL = 1 as const;
+const SPAN_STATUS_ERROR = 2 as const;
 
 /**
  * ISO-8601 → десятичные наносекунды.
@@ -50,7 +60,17 @@ const SPAN_KIND_INTERNAL = 1 as const;
  * из самой строки: событие несёт микросекундные длительности, и терять их при экспорте
  * значило бы делать замер оверхеда невоспроизводимым.
  */
+/**
+ * Зона обязана быть указана. `Date.parse('2026-08-27T10:00:00')` — форма без `Z` и без
+ * смещения — по спеке ECMAScript трактуется как **локальное** время, поэтому два писателя
+ * событий, один из которых забыл `Z`, дали бы спаны, разъехавшиеся на смещение машины, и ни
+ * один из них не был бы ошибкой. `AuditEvent.startTime: string` формы не ограничивает, значит
+ * ограничивает экспортёр.
+ */
+const ISO_WITH_ZONE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$/;
+
 export function isoToUnixNano(iso: string): string {
+  if (!ISO_WITH_ZONE.test(iso)) throw new TypeError(`не ISO-8601 с указанной зоной: ${iso}`);
   const ms = Date.parse(iso);
   if (Number.isNaN(ms)) throw new TypeError(`не ISO-8601: ${iso}`);
   const fraction = /\.(\d+)/.exec(iso)?.[1] ?? '';
@@ -78,7 +98,8 @@ export function toOtlp(event: AuditEvent): OtlpSpan {
     str('network.transport', 'pipe'),
     str('mcp.session.id', event.sessionId),
     str('mcp.method.name', 'tools/call'),
-    str('mcp.protocol.version', MCP_PROTOCOL_VERSION),
+    // Согласованная ревизия из события, а не константа сборки: см. `AuditEvent.protocolVersion`.
+    str('mcp.protocol.version', event.protocolVersion),
     // `jsonrpc.request.id` НЕ эмитится, и это записано, а не забыто: id живёт в E4 между
     // клиентом и шимом и через IpcRequest не едет (И5). Корреляция идёт по traceId.
     // `mcp.resource.uri` тоже нет: ресурсов у нас нет.
@@ -97,7 +118,9 @@ export function toOtlp(event: AuditEvent): OtlpSpan {
   if (event.sandbox !== undefined) {
     attributes.push(str('mcpproxy.sandbox.mode', event.sandbox.mode));
     if (event.sandbox.violations !== undefined) {
-      attributes.push(int('mcpproxy.sandbox.violations', event.sandbox.violations.length));
+      // `.count`, а не `.violations`: имя без суффикса обещало бы сам список, а спан несёт
+      // только длину. Полная запись живёт в JSONL — см. «Экспорт в OTLP» в 07-contracts.md.
+      attributes.push(int('mcpproxy.sandbox.violations.count', event.sandbox.violations.length));
     }
   }
   if (event.risk !== undefined) attributes.push(str('mcpproxy.risk.tier', event.risk.tier));
@@ -112,7 +135,7 @@ export function toOtlp(event: AuditEvent): OtlpSpan {
     attributes.push(int('mcpproxy.output.bytes', event.output.bytes));
     attributes.push(bool('mcpproxy.output.truncated', event.output.truncated));
   }
-  if (event.redactions !== undefined) attributes.push(int('mcpproxy.redactions', event.redactions.length));
+  if (event.redactions !== undefined) attributes.push(int('mcpproxy.redactions.count', event.redactions.length));
   if (event.duration !== undefined) attributes.push(int('mcpproxy.duration.overhead_ms', event.duration.overheadMs));
 
   return {
@@ -124,5 +147,8 @@ export function toOtlp(event: AuditEvent): OtlpSpan {
     startTimeUnixNano: isoToUnixNano(event.startTime),
     endTimeUnixNano: isoToUnixNano(event.endTime),
     attributes,
+    ...(event.verdict === 'error'
+      ? { status: { code: SPAN_STATUS_ERROR, ...(event.denyReason == null ? {} : { message: event.denyReason }) } }
+      : {}),
   };
 }

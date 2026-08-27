@@ -3,7 +3,9 @@ import type { AuditEvent, ChainedEvent } from '../event.js';
 import { chainHash, DIGEST_HEX_LENGTH, unchain, verifyChain } from './chain.js';
 
 const event = (index: number): AuditEvent => ({
+  schema: 'mcpproxy.audit/1',
   operation: 'execute_tool',
+  protocolVersion: '2025-11-25',
   toolName: 'run_tests',
   sessionId: 'sess-1',
   traceId: '4bf92f3577b34da6a3ce929d0e0e4736',
@@ -42,7 +44,7 @@ describe('chainHash — замороженная формула', () => {
   it('фиксированное событие даёт фиксированный дайджест', () => {
     // Вектор кодировки: если кто-то поменяет форму `{prev, event}`, порядок ключей или
     // кодировку дайджеста, эта строка разойдётся, а не «просто станет другой».
-    expect(chainHash(event(0), null)).toBe('e3c9b24988339f0edd262b826e339cf58fc33296a08f3a63569239bd19008197');
+    expect(chainHash(event(0), null)).toBe('ba1bb478e1fdf5f060043b7fc368f6bd4c15d271a7a56d7b87d5f2fccba0c98b');
   });
 
   it('prev входит внутрь каноничной формы, а не приписывается снаружи', () => {
@@ -107,11 +109,16 @@ describe('verifyChain', () => {
     expect(verifyChain(events)).toEqual({ ok: false, brokenAt: 0 });
   });
 
+  // Оба кейса ниже пересчитывают `self` под подменённый `prev`. Без пересчёта краснела
+  // вторая половина предиката — самосогласованность записи, — то есть тест проходил бы
+  // мимо правила, которое назван проверять: сведя предикат к самосогласованности, оба
+  // оставались зелёными. Теперь красным их делает ТОЛЬКО правило связи.
   it('генезис обязан иметь prev: null', () => {
     const events = chainOf(2);
     const target = events[0];
     if (target === undefined) throw new Error('фикстура пуста');
-    events[0] = { ...target, chain: { prev: 'b'.repeat(64), self: target.chain.self } };
+    const forged = 'b'.repeat(64);
+    events[0] = { ...target, chain: { prev: forged, self: chainHash(unchain(target), forged) } };
 
     expect(verifyChain(events)).toEqual({ ok: false, brokenAt: 0 });
   });
@@ -121,8 +128,8 @@ describe('verifyChain', () => {
     const first = events[1];
     const second = events[2];
     if (first === undefined || second === undefined) throw new Error('фикстура пуста');
-    events[1] = { ...first, chain: { prev: second.chain.prev, self: first.chain.self } };
-    events[2] = { ...second, chain: { prev: first.chain.prev, self: second.chain.self } };
+    events[1] = { ...first, chain: { prev: second.chain.prev, self: chainHash(unchain(first), second.chain.prev) } };
+    events[2] = { ...second, chain: { prev: first.chain.prev, self: chainHash(unchain(second), first.chain.prev) } };
 
     expect(verifyChain(events)).toEqual({ ok: false, brokenAt: 1 });
   });

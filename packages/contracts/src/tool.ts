@@ -79,12 +79,18 @@ export function sanitizeDescription(text: string): { text: string; removedRuns: 
   };
 
   const withoutAnsi = text.replace(ANSI_CSI, count).replace(ANSI_OTHER, count);
-  // Переводы строки схлопываются ДО вырезания невидимых: иначе `a\nb` склеилось бы в `ab`.
-  const flattened = withoutAnsi.replace(/[\r\n]+/g, ' ');
+  // Разделители схлопываются ДО вырезания невидимых: иначе `a\nb` склеилось бы в `ab`.
+  // Здесь именно все пятеро, а не `\r\n`: `\t`, `\v` и `\f` тоже входят в `\p{Cc}`, то есть
+  // без них три символа из пяти просто удалялись бы — `"колонка\tзначение"` → `"колонказначение"`,
+  // ровно тот дефект, ради предотвращения которого порядок операций и объяснён.
+  const flattened = withoutAnsi.replace(/[\r\n\t\v\f]+/g, ' ');
   const visible = flattened.replace(INVISIBLE, count);
   const collapsed = visible.replace(/ {2,}/g, ' ').trim();
 
-  return { text: collapsed.slice(0, DESCRIPTION_MAX_LENGTH), removedRuns };
+  // Срез по кодовым ТОЧКАМ: `slice` работает по единицам UTF-16 и разрубил бы суррогатную
+  // пару, стоящую на границе, — а одиночный суррогат `canonicalizeJcs` считает достаточным
+  // основанием бросить. `trimEnd` после среза: он может оголить хвостовой пробел.
+  return { text: [...collapsed].slice(0, DESCRIPTION_MAX_LENGTH).join('').trimEnd(), removedRuns };
 }
 
 function jsonSchemaOf(param: Param): JsonSchemaValue {

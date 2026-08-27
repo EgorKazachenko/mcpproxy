@@ -178,6 +178,84 @@ describe('правило 6 — рецептный deny не может быть 
   });
 });
 
+describe('правило 7 — рецептный env.allow не выше потолка defaults', () => {
+  it('принимает подмножество', () => {
+    expect(load(`  x:
+    description: "x"
+    exec: ["true"]
+    env: { allow: ["PATH"] }
+`).ok).toBe(true);
+  });
+
+  it('отвергает переменную, которой нет в defaults.env.allow', () => {
+    // Рецептный `env` сливается ЗАМЕНОЙ по листу, поэтому без этого правила рецепт выдал бы
+    // себе `AWS_SECRET_ACCESS_KEY` — тогда как `sandbox.*.deny` из defaults принципиально
+    // неснимаем. Асимметрия была бы тем опаснее, что схема разрешила рецепту нести `env`
+    // только в этом диффе.
+    const result = load(`  x:
+    description: "x"
+    exec: ["true"]
+    env: { allow: ["PATH", "AWS_SECRET_ACCESS_KEY"] }
+`);
+    expect(result.ok).toBe(false);
+    expect(messagesOf(result).join('\n')).toContain('AWS_SECRET_ACCESS_KEY');
+  });
+});
+
+describe('уровень defaults — та же ветка, то же правило', () => {
+  it('отвергает слот {} в профиле песочницы уровня defaults', () => {
+    // Ветка `SandboxProfile` инстанцируется и в `Defaults`, и в `Recipe`, а проверка
+    // обходила только рецепты — то есть таблица R6 объявляла покрытой ветку, чью проверку
+    // применяли не ко всем её вхождениям.
+    const text = `version: 1
+defaults:
+  timeout: 120s
+  output: { maxBytes: 65536, redact: true }
+  env: { allow: ["PATH"] }
+  sandbox:
+    read: { deny: ["~/.ssh"], allow: ["."] }
+    write: { allow: ["{}/out"] }
+tools:
+  x:
+    description: "x"
+    exec: ["true"]
+`;
+    const result = parseManifest(text, SOURCE);
+    expect(result.ok).toBe(false);
+    expect(messagesOf(result)).toContain('параметр не может подставляться в профиль песочницы');
+  });
+
+  it('пустой defaults.deny при этом остаётся законным — там он значит «запретов нет»', () => {
+    const text = `version: 1
+defaults:
+  timeout: 120s
+  output: { maxBytes: 65536, redact: true }
+  env: { allow: ["PATH"] }
+  sandbox:
+    read: { deny: [], allow: ["."] }
+tools:
+  x:
+    description: "x"
+    exec: ["true"]
+`;
+    expect(parseManifest(text, SOURCE).ok).toBe(true);
+  });
+});
+
+describe('каталог, чьё имя начинается с двух точек', () => {
+  it('является подкаталогом, а не выходом за пределы', () => {
+    // `relative()` вернёт `..cache`, и проверка `startsWith('..')` объявляла бы легитимный
+    // подкаталог выходом наверх. Отказ ложный, но отказ загрузки на честном манифесте люди
+    // чинят обходом правила.
+    expect(load(`  x:
+    description: "x"
+    exec: ["true"]
+    params:
+      p: { type: path, root: "./..cache" }
+`).ok).toBe(true);
+  });
+});
+
 describe('таблица «ветка ↔ проверка» (R6)', () => {
   const schemaPath = fileURLToPath(new URL('../../schema/mcpproxy.schema.json', import.meta.url));
   const schema = JSON.parse(readFileSync(schemaPath, 'utf8')) as { $defs: Record<string, unknown> };

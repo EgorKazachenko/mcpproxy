@@ -1,4 +1,4 @@
-import { dirname, isAbsolute, relative, resolve } from 'node:path';
+import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import type { Document, LineCounter } from 'yaml';
 import type { AccessRule, Manifest, Recipe, SandboxProfile } from '../manifest.generated.js';
 import type { Diagnostic, ManifestSource } from '../types.js';
@@ -59,6 +59,23 @@ function checkExecShape(recipe: Recipe, at: readonly Segment[], report: (path: S
   }
 }
 
+/**
+ * Профильная половина правила «параметр никуда не подставляется». Вынесена отдельно, потому
+ * что ветка `SandboxProfile` инстанцируется ДВАЖДЫ — и в `Recipe.sandbox`, и в
+ * `Defaults.sandbox`, — а `branch-checks.ts` вешает проверку на ветку, а не на рецепт.
+ * Пока она обходила только рецепты, `defaults.sandbox.write.allow: ["{}/out"]` проходил
+ * загрузку, хотя инвариант в `07-contracts.md` сформулирован без оговорки.
+ */
+function checkProfileNoSubstitution(
+  profile: SandboxProfile,
+  at: readonly Segment[],
+  report: (path: Segment[], message: string) => void,
+) {
+  for (const { path, value } of sandboxStrings(profile, at)) {
+    if (countSlots(value) > 0) report(path, 'параметр не может подставляться в профиль песочницы');
+  }
+}
+
 function checkNoSubstitution(recipe: Recipe, at: readonly Segment[], report: (path: Segment[], message: string) => void) {
   // И1/И2: параметр попадает в командную строку только через собственный `argv`. Слот в
   // `exec`, `cwd` или профиле означал бы, что недоверенное значение выбирает бинарь,
@@ -69,11 +86,32 @@ function checkNoSubstitution(recipe: Recipe, at: readonly Segment[], report: (pa
   if (recipe.cwd !== undefined && countSlots(recipe.cwd) > 0) {
     report([...at, 'cwd'], 'параметр не может подставляться в cwd');
   }
-  if (recipe.sandbox !== undefined) {
-    for (const { path, value } of sandboxStrings(recipe.sandbox, [...at, 'sandbox'])) {
-      if (countSlots(value) > 0) report(path, 'параметр не может подставляться в профиль песочницы');
+  if (recipe.sandbox !== undefined) checkProfileNoSubstitution(recipe.sandbox, [...at, 'sandbox'], report);
+}
+
+/**
+ * `defaults.env.allow` — потолок, а не значение по умолчанию.
+ *
+ * Рецептный `env` сливается заменой по листу, поэтому без этого правила рецепт мог бы выдать
+ * себе переменную, которой в `defaults` нет: `env: {allow: ["PATH", "AWS_SECRET_ACCESS_KEY"]}`
+ * был бы валидным манифестом. Сравнить с `sandbox.*.deny`, где запрет из `defaults` сделан
+ * принципиально неснимаемым (объединение плюс отказ на пустом `deny`), — для `env`
+ * симметричного правила не было ни в схеме, ни здесь. Сужение остаётся рецепту: подмножество
+ * законно, надмножество — нет.
+ */
+function checkEnvCeiling(
+  recipe: Recipe,
+  ceiling: readonly string[],
+  at: readonly Segment[],
+  report: (path: Segment[], message: string) => void,
+) {
+  const allow = recipe.env?.allow;
+  if (allow === undefined) return;
+  allow.forEach((name, index) => {
+    if (!ceiling.includes(name)) {
+      report([...at, 'env', 'allow', index], `рецепт не может вводить переменную, которой нет в defaults.env.allow: ${name}`);
     }
-  }
+  });
 }
 
 function checkArgvSlots(recipe: Recipe, at: readonly Segment[], report: (path: Segment[], message: string) => void) {
@@ -116,8 +154,14 @@ function checkRootConfinement(
       continue;
     }
     if (!isAbsolute(param.root)) {
+      // Ровно `..` либо `../…`, а не любое начало с двух точек: `root: "./..cache"` даёт
+      // `relative` = `"..cache"` — это законный ПОДкаталог, и `startsWith('..')` объявлял бы
+      // его выходом за пределы. Дефект односторонний (ложный отказ), но отказ загрузки на
+      // легитимном манифесте люди чинят обходом правила.
       const outside = relative(manifestDir, resolved);
-      if (outside.startsWith('..')) report(path, 'относительный root не может выходить за каталог манифеста');
+      if (outside === '..' || outside.startsWith(`..${sep}`)) {
+        report(path, 'относительный root не может выходить за каталог манифеста');
+      }
     }
   }
 }
@@ -130,7 +174,11 @@ export function refine(
 ): Diagnostic[] {
   const diagnostics: Diagnostic[] = [];
   const report = (path: Segment[], message: string) =>
-    diagnostics.push(diagnosticAt(doc, lineCounter, path, message));
+    diagnostics.push(diagnosticAt(doc, lineCounter, path, 'invariant', message));
+
+  // Уровень `defaults`: та же ветка `SandboxProfile`, то же правило. Пустой `defaults.deny`
+  // при этом остаётся законным — там он означает «запретов нет», а не «снять запрет».
+  checkProfileNoSubstitution(manifest.defaults.sandbox, ['defaults', 'sandbox'], report);
 
   for (const [recipeName, recipe] of Object.entries(manifest.tools)) {
     const at: Segment[] = ['tools', recipeName];
@@ -139,6 +187,7 @@ export function refine(
     checkArgvSlots(recipe, at, report);
     checkDenyNonEmpty(recipe, at, report);
     checkRootConfinement(recipe, at, source, report);
+    checkEnvCeiling(recipe, manifest.defaults.env.allow, at, report);
   }
 
   return diagnostics;

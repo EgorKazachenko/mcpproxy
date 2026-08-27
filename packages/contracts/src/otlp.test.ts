@@ -2,10 +2,12 @@ import { describe, expect, it } from 'vitest';
 import type { AuditEvent } from './event.js';
 import { OVERHEAD_EXCLUDED_STAGES, overheadMs } from './event.js';
 import type { Stage } from './domain.js';
-import { isoToUnixNano, toOtlp, type OtlpKeyValue } from './otlp.js';
+import { toOtlp, type OtlpKeyValue } from './otlp.js';
 
 const CORE: AuditEvent = {
+  schema: 'mcpproxy.audit/1',
   operation: 'execute_tool',
+  protocolVersion: '2025-11-25',
   toolName: 'run_tests',
   sessionId: 'sess-1',
   traceId: '4bf92f3577b34da6a3ce929d0e0e4736',
@@ -62,8 +64,12 @@ describe('toOtlp — форма', () => {
 
   it('время — десятичные строки наносекунд, включая доли миллисекунды', () => {
     const span = toOtlp(FULL);
-    expect(span.startTimeUnixNano).toBe(isoToUnixNano('2026-08-27T10:00:00.000000Z'));
-    expect(typeof span.endTimeUnixNano).toBe('string');
+    // Литералы, посчитанные от эпохи, а НЕ через `isoToUnixNano` — её же и проверяем.
+    // Сверка с функцией под тестом двигала обе стороны вместе: сдвиг на секунду внутри
+    // `isoToUnixNano` оставлял файл зелёным, а каждый экспортированный спан — сдвинутым,
+    // и в OTLP у приёмника нет второго мнения о времени.
+    expect(span.startTimeUnixNano).toBe('1787824800000000000');
+    expect(span.endTimeUnixNano).toBe('1787824812412500000');
     // 12.4125 с разницы — микросекунды обязаны дожить до экспорта, иначе замер оверхеда
     // невоспроизводим по логу.
     expect(BigInt(span.endTimeUnixNano) - BigInt(span.startTimeUnixNano)).toBe(12_412_500_000n);
@@ -76,6 +82,25 @@ describe('toOtlp — форма', () => {
 
   it('отвергает не-ISO время, а не молча пишет NaN', () => {
     expect(() => toOtlp({ ...CORE, startTime: 'вчера' })).toThrow(TypeError);
+  });
+
+  it('отвергает время без зоны — иначе оно молча считается локальным', () => {
+    // `Date.parse('2026-08-27T10:00:00')` по спеке ECMAScript — ЛОКАЛЬНОЕ время, поэтому
+    // писатель, забывший `Z`, дал бы спан, сдвинутый на смещение машины, и ни одной ошибки.
+    expect(() => toOtlp({ ...CORE, startTime: '2026-08-27T10:00:00' })).toThrow(TypeError);
+    expect(() => toOtlp({ ...CORE, startTime: '2026-08-27T10:00:00+03:00' })).not.toThrow();
+  });
+
+  it('ошибка ставит статус спана, отказ политики — нет', () => {
+    // Без `status` спан всегда STATUS_UNSET, и бэкенд, считающий ошибки по статусу, не
+    // отличает сбой от успеха. `denied` при этом штатный исход решения, а не сбой: пометив
+    // его ошибкой, мы нарисовали бы работающую политику как отказавший сервис.
+    expect(toOtlp({ ...CORE, verdict: 'error', denyReason: 'upstream закрыл сокет' }).status).toEqual({
+      code: 2,
+      message: 'upstream закрыл сокет',
+    });
+    expect(toOtlp({ ...CORE, verdict: 'denied' }).status).toBeUndefined();
+    expect(toOtlp({ ...CORE, verdict: 'allowed' }).status).toBeUndefined();
   });
 });
 
@@ -121,12 +146,39 @@ describe('toOtlp — атрибуты', () => {
     const attributes = toOtlp(FULL).attributes;
     expect(attributes.find((one) => one.key === 'network.transport')?.value.stringValue).toBe('pipe');
     expect(attributes.find((one) => one.key === 'mcp.method.name')?.value.stringValue).toBe('tools/call');
+    // Ревизия — из события, а не из константы сборки: сессия со старым клиентом обязана
+    // оставить в логе то, на чём договорились, иначе запись утверждает неправду.
     expect(attributes.find((one) => one.key === 'mcp.protocol.version')?.value.stringValue).toBe('2025-11-25');
+    const older = toOtlp({ ...FULL, protocolVersion: '2025-06-18' }).attributes;
+    expect(older.find((one) => one.key === 'mcp.protocol.version')?.value.stringValue).toBe('2025-06-18');
   });
 
   it('int64 едет строкой, как требует proto3 JSON', () => {
     const attributes = toOtlp(FULL).attributes;
     expect(attributes.find((one) => one.key === 'mcpproxy.output.bytes')?.value.intValue).toBe('4211');
+  });
+
+  it('полный вызов несёт argv, cwd и тир — контроль к проверке ниже', () => {
+    // Без этого кейса три отрицания ниже были вакуумными: удалив эмиссию `mcpproxy.argv`,
+    // `mcpproxy.cwd` и `mcpproxy.risk.tier`, весь набор оставался зелёным, а экспортёр
+    // молча переставал отдавать argv, на который опираются модалка S8 и аудит.
+    const attributes = toOtlp(FULL).attributes;
+    const find = (key: string) => attributes.find((one) => one.key === key)?.value;
+    expect(find('mcpproxy.argv')?.arrayValue?.values.map((one) => one.stringValue)).toEqual([
+      '/opt/homebrew/bin/pnpm',
+      'test',
+      '--testPathPattern',
+      'auth',
+    ]);
+    expect(find('mcpproxy.cwd')?.stringValue).toBe('/Users/u/proj');
+    expect(find('mcpproxy.risk.tier')?.stringValue).toBe('medium');
+    expect(find('mcpproxy.env.allowed')?.arrayValue?.values.map((one) => one.stringValue)).toEqual(['PATH', 'HOME']);
+    expect(find('mcpproxy.sandbox.mode')?.stringValue).toBe('seatbelt');
+    expect(find('mcpproxy.sandbox.violations.count')?.intValue).toBe('1');
+    expect(find('mcpproxy.approval.channel')?.stringValue).toBe('electron');
+    expect(find('mcpproxy.exit.code')?.intValue).toBe('0');
+    expect(find('mcpproxy.redactions.count')?.intValue).toBe('1');
+    expect(find('mcpproxy.duration.overhead_ms')?.intValue).toBe('14');
   });
 
   it('вызов, остановленный на lock_check, не несёт выдуманного argv', () => {

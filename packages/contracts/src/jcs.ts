@@ -29,7 +29,28 @@ function assertWellFormed(text: string): void {
   }
 }
 
+/**
+ * Потолок вложенности. Существует не ради вкуса: без него рекурсия ниже выпускает наружу
+ * **движковый** `RangeError`, а не отказ этого модуля. Замерено на этом дереве — `argsHash`
+ * переживает глубину 1961 и падает на 1962, то есть **3 930 байт** в `IpcRequest.params`
+ * (произвольный JSON из сокета) роняют вызов на пути подтверждения; `JSON.parse` при этом
+ * пропускает вход в 25 раз глубже, потому что парсер V8 итеративный. Порог вдобавок
+ * недетерминирован — он зависит от глубины стека демона в момент вызова.
+ *
+ * 128 с запасом перекрывает любую осмысленную форму `params`, `AuditEvent` и `NormalizedOwn`,
+ * а отказ теперь — тот же `TypeError`, что и остальные четыре в этом файле, то есть
+ * вызывающий ловит его тем же `catch`.
+ */
+export const JCS_MAX_DEPTH = 128;
+
 export function canonicalizeJcs(value: unknown): string {
+  return canonicalize(value, 0);
+}
+
+function canonicalize(value: unknown, depth: number): string {
+  if (depth > JCS_MAX_DEPTH) {
+    throw new TypeError(`вложенность глубже ${JCS_MAX_DEPTH}: значение не канонизируется`);
+  }
   if (value === null) return 'null';
 
   switch (typeof value) {
@@ -57,7 +78,7 @@ export function canonicalizeJcs(value: unknown): string {
   const object = value as object;
 
   if (Array.isArray(object)) {
-    return `[${object.map((item) => canonicalizeJcs(item)).join(',')}]`;
+    return `[${object.map((item) => canonicalize(item, depth + 1)).join(',')}]`;
   }
 
   // Экземпляр класса, Date, Map, Set — отказ. `JSON.stringify` превратил бы их в `{}`
@@ -71,7 +92,7 @@ export function canonicalizeJcs(value: unknown): string {
   const keys = Object.keys(object).sort();
   const members = keys.map((key) => {
     assertWellFormed(key);
-    return `${JSON.stringify(key)}:${canonicalizeJcs((object as Record<string, unknown>)[key])}`;
+    return `${JSON.stringify(key)}:${canonicalize((object as Record<string, unknown>)[key], depth + 1)}`;
   });
   return `{${members.join(',')}}`;
 }

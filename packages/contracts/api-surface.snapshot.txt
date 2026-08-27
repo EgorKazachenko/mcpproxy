@@ -216,6 +216,28 @@ export declare const recipeHash: (normalized: NormalizedRecipe) => string;
  * пер-рецептные хэши совпадают, `lock_check` зелёный, а И4 и атака A10 сняты молча.
  */
 export declare const manifestHash: (manifest: Manifest) => string;
+/**
+ * Сверка двух копий одобренного рецепта внутри одного файла.
+ *
+ * Lock несёт и `recipeHash`, и `snapshot`, а `diffLock` смотрит только во второй: решение
+ * «дрейф или нет» принимается сравнением `snapshot.own` с манифестом. Значит файл, у
+ * которого записанный дайджест противоречит собственному снапшоту, давал бы чистый дифф во
+ * всех четырёх слотах — то есть «одобрено» по подменённому снапшоту. Проверка делает две
+ * копии проверяемым инвариантом, а не соглашением.
+ *
+ * Живёт здесь, а не в `./validate`: ей нужен `node:crypto`, а правило размещения одно.
+ */
+export declare function verifyLockEntries(lock: {
+    readonly tools: Readonly<Record<string, {
+        readonly recipeHash: string;
+        readonly snapshot: NormalizedRecipe;
+    }>>;
+}): {
+    ok: true;
+} | {
+    ok: false;
+    mismatched: readonly string[];
+};
 
 // ==== domain.d.ts ====
 /**
@@ -279,8 +301,27 @@ import type { SandboxProfile } from './manifest.generated.js';
  * и UI отрисует его как настоящую пустую команду.
  */
 export interface AuditEvent {
+    /**
+     * Версия формы записи. Запись аудита обязана быть самоописывающейся: лог append-only,
+     * `chainHash` хэширует событие целиком, поэтому добавить это поле **после** заморозки
+     * нельзя дважды — и по правилу заморозки, и потому что новое обязательное поле даёт
+     * новый дайджест, а старые и новые записи лежат в одной цепочке.
+     *
+     * Читатель обязан быть tolerant: неизвестное значение — читаемая запись с пометкой
+     * «форма новее меня», а не исключение. Иначе одна запись из будущего делает
+     * нечитаемым весь предшествующий лог, который перегенерировать нельзя.
+     */
+    readonly schema: 'mcpproxy.audit/1';
     /** `gen_ai.operation.name`. У прокси она одна. */
     readonly operation: 'execute_tool';
+    /**
+     * Ревизия MCP, **согласованная в этой сессии**, а не константа сборки. `MCP_PROTOCOL_VERSION`
+     * — предпочитаемая нами ревизия и разумный дефолт для писателя; но сессия со старым
+     * клиентом, договорившимся на `2025-06-18`, обязана оставить в логе `2025-06-18`. Запись,
+     * утверждающая нашу константу вместо согласованного значения, — не потеря поля, а ложное
+     * утверждение в доказательстве.
+     */
+    readonly protocolVersion: string;
     readonly toolName: string;
     /**
      * IPC-сессия. В обязательном ядре, а не в опциональных: он известен уже на `received`, и
@@ -355,10 +396,17 @@ export interface SandboxViolation {
     readonly action: 'denied' | 'allowed';
     readonly bytes: number;
 }
+/**
+ * Что именно было вырезано и откуда. `stream` шире, чем два потока вывода, намеренно:
+ * в этом же событии лежит `argv` со значениями, пришедшими от модели, и список разрешённых
+ * имён переменных окружения — то есть места, откуда секрет придётся вырезать, замороженным
+ * событием обязаны быть выразимы. Расширять юнион после заморозки дорого: по нему строятся
+ * исчерпывающие `Record<Union, …>` у потребителей.
+ */
 export interface Redaction {
     readonly rule: string;
     readonly count: number;
-    readonly stream: 'stdout' | 'stderr';
+    readonly stream: 'stdout' | 'stderr' | 'argv' | 'env';
 }
 /**
  * Стадии, чья длительность **не** входит в оверхед прокси.
@@ -437,8 +485,17 @@ export type RequestId = string & {
 /**
  * Та же форма, что у `propertyNames` схемы манифеста. Копия здесь намеренная: корневой
  * вход не читает файл схемы. Совпадение двух копий проверяет тест — иначе они разъедутся.
+ *
+ * `propertyNames` состоит из **двух** частей, и обе обязаны быть здесь. Одного паттерна
+ * мало: `constructor` и `prototype` целиком из строчных букв, то есть ему соответствуют.
+ * Пропустив их, `asRecipeName` вернул бы брендированный `RecipeName` для имени, которое
+ * загрузчик манифеста отвергает, а `manifest.tools` — обычный объект из `doc.toJS()`, так
+ * что `tools['constructor']` у потребителя резолвится по цепочке прототипов в истинное
+ * значение, и проверка вида `if (!recipe) reject` его не ловит.
  */
 export declare const RECIPE_NAME_PATTERN: RegExp;
+/** Вторая половина `propertyNames`. Значение заморожено вместе с паттерном. */
+export declare const RESERVED_RECIPE_NAMES: readonly ['constructor', 'prototype', '__proto__'];
 export declare function asRecipeName(value: string): RecipeName;
 export declare function asSessionId(value: string): SessionId;
 export declare function asRequestId(value: string): RequestId;
@@ -466,11 +523,30 @@ export interface IpcRequest {
  * представление чисел (тот самый алгоритм ECMAScript, на который ссылается RFC), и
  * well-formed экранирование строк. Руками пишутся только порядок ключей и структура.
  */
+/**
+ * Потолок вложенности. Существует не ради вкуса: без него рекурсия ниже выпускает наружу
+ * **движковый** `RangeError`, а не отказ этого модуля. Замерено на этом дереве — `argsHash`
+ * переживает глубину 1961 и падает на 1962, то есть **3 930 байт** в `IpcRequest.params`
+ * (произвольный JSON из сокета) роняют вызов на пути подтверждения; `JSON.parse` при этом
+ * пропускает вход в 25 раз глубже, потому что парсер V8 итеративный. Порог вдобавок
+ * недетерминирован — он зависит от глубины стека демона в момент вызова.
+ *
+ * 128 с запасом перекрывает любую осмысленную форму `params`, `AuditEvent` и `NormalizedOwn`,
+ * а отказ теперь — тот же `TypeError`, что и остальные четыре в этом файле, то есть
+ * вызывающий ловит его тем же `catch`.
+ */
+export declare const JCS_MAX_DEPTH = 128;
 export declare function canonicalizeJcs(value: unknown): string;
 
 // ==== lock.d.ts ====
 import type { ToolAnnotations } from './annotations.js';
 import type { AccessRule, Defaults, Manifest, Param, Recipe } from './manifest.generated.js';
+/**
+ * Потолок вывода, когда `defaults.output.maxBytes` умолчал. Значение — из канонического
+ * примера `docs/07-contracts.md`, а не выдумано здесь: манифест, который о потолке молчит,
+ * обязан получить потолок, а не его отсутствие.
+ */
+export declare const OUTPUT_MAX_BYTES_DEFAULT = 65536;
 /**
  * `'120s'` → `120000`. Длительности нормализуются в целые миллисекунды, иначе `'120s'` и
  * `'2m'` — один и тот же таймаут и разные дайджесты, то есть косметическая правка даёт
@@ -553,7 +629,13 @@ export interface LockEntry {
     readonly snapshot: NormalizedRecipe;
 }
 export interface LockFile {
-    readonly version: 1;
+    /**
+     * `2`, а не `1`: форма изменилась несовместимо относительно задокументированной ранее
+     * (`hash` → `recipeHash`, плюс обязательные `snapshot` и `defaults`). Оставить `1` значило
+     * бы, что файл прежней формы честно объявляет себя текущим, — а дискриминатор существует
+     * ровно для того, чтобы этого не было. Разбирает файл `parseLockFile` из `./validate`.
+     */
+    readonly version: 2;
     readonly manifestHash: string;
     /**
      * Слот обязателен по тому же доводу, что и снапшот: `manifestHash` необратим, а
@@ -811,14 +893,20 @@ export interface OtlpSpan {
     startTimeUnixNano: string;
     endTimeUnixNano: string;
     attributes: OtlpKeyValue[];
+    /**
+     * `STATUS_CODE_ERROR` = 2. Без этого поля спан всегда `STATUS_UNSET`, и в любом бэкенде,
+     * который считает ошибки по статусу спана — а это все, — ошибка неотличима от успеха.
+     * Аргумент тот же, что у R14: приёмник не жалуется, поэтому дефект ненаблюдаем.
+     *
+     * `denied` статусом **не** помечается намеренно: отказ политики — это штатный исход
+     * решения, а не сбой прокси. Смешав их, мы получили бы дашборд, на котором работающая
+     * политика выглядит как отказавший сервис.
+     */
+    status?: {
+        code: 2;
+        message?: string;
+    };
 }
-/**
- * ISO-8601 → десятичные наносекунды.
- *
- * `Date.parse` режет дробную часть до миллисекунд, поэтому доли миллисекунды собираются
- * из самой строки: событие несёт микросекундные длительности, и терять их при экспорте
- * значило бы делать замер оверхеда невоспроизводимым.
- */
 export declare function isoToUnixNano(iso: string): string;
 export declare function toOtlp(event: AuditEvent): OtlpSpan;
 
@@ -913,6 +1001,27 @@ export interface ManifestSource {
  * `ManifestSource.path`, и два соседних замороженных типа не должны называть одним словом
  * файл и точечный указатель внутрь него.
  */
+/**
+ * Причина отказа, машиночитаемо. Существует потому, что `message` — свободный русский текст,
+ * а последствия у отказов разные: «RE2 отверг паттерн» — решение политики, «синтаксис YAML» —
+ * ввод-вывод, и потребитель обязан их различать. `pointer` для этого не годится: у «RE2
+ * отверг паттерн» и у «`pattern` не прошёл `SafeText` схемы» он один и тот же —
+ * `tools.X.params.Y.pattern`.
+ *
+ * Без кода семь эпиков ветвились бы `String.includes` по прозе, и первая же правка
+ * формулировки тихо ломала бы ветвление, не уронив ни одного теста.
+ */
+export type DiagnosticCode = 
+/** Файл больше потолка — до разбора. */
+'size-limit'
+/** Синтаксис YAML, неизвестный тег, дубль ключа, алиас-бомба, директива, второй документ. */
+ | 'yaml'
+/** Документ разобран, но не соответствует схеме манифеста. */
+ | 'schema'
+/** Проверка, которую схема выразить не может (`refine`): confinement, слоты, форма `exec[0]`. */
+ | 'invariant'
+/** `pattern` не принят движком RE2. */
+ | 'pattern';
 export interface Diagnostic {
     /** Точечный путь внутрь документа, например `tools.publish_release.params.tag`. */
     readonly pointer: string;
@@ -920,12 +1029,27 @@ export interface Diagnostic {
     readonly line: number;
     /** 1-based. */
     readonly column: number;
+    /**
+     * Ветвиться потребитель обязан по нему. `message` — для человека, и его текст не заморожен.
+     */
+    readonly code: DiagnosticCode;
+    /**
+     * Безопасен для отрисовки: всё, что интерполируется сюда из недоверенного манифеста,
+     * проходит через `sanitizeDescription`. Без этого сообщение RE2, эхоящее фрагмент паттерна,
+     * донесло бы до глаз человека bidi-override и ANSI-escape.
+     */
     readonly message: string;
 }
 /**
- * Скомпилированный матчер. Через границу пакета едет он, а не голая строка `pattern` (R29):
- * иначе потребитель волен вызвать `new RegExp(pattern)` и вернуть ReDoS, закрытый здесь
- * только на загрузке. Ни `source`, ни `flags` наружу не выставлены намеренно.
+ * Скомпилированный матчер. Он существует, чтобы потребителю **не приходилось** звать
+ * `new RegExp(pattern)` и возвращать ReDoS, закрытый здесь на загрузке (R29): ни `source`,
+ * ни `flags` наружу не выставлены.
+ *
+ * Чего он НЕ даёт, и это записано, чтобы не переоценивать границу: сама строка `pattern`
+ * остаётся в `Manifest` — она обязательна в схеме, из неё же генерируется тип — и уезжает в
+ * `Tool.inputSchema` через `toTool`, потому что модели без неё нечем валидировать аргумент.
+ * То есть гарантия «строку никто не скомпилирует бэктрекающим движком» держится **внутри
+ * демона**, а не у MCP-клиента. Подробности и цена — в `docs/10-honest-limitations.md`.
  */
 export interface PatternMatcher {
     test(value: string): boolean;
@@ -953,6 +1077,37 @@ export declare function matcherKey(recipeName: string, paramName: string): strin
 // ==== validate/index.d.ts ====
 import type { ManifestSource, ParseManifestResult } from '../types.js';
 export declare function parseManifest(yamlText: string, source: ManifestSource): ParseManifestResult;
+export { parseLockFile, type ParseLockResult } from './lock.js';
+
+// ==== validate/lock.d.ts ====
+import type { LockFile } from '../lock.js';
+import type { Diagnostic } from '../types.js';
+/**
+ * Разбор `mcpproxy.lock`.
+ *
+ * Существует потому, что до него единственной формой, пересекавшей границу процесса без
+ * проверки, был именно lock: манифест получил файл схемы, `parseManifest` и диагностики с
+ * координатами, а lock — только TS-интерфейс. Потребитель неизбежно написал бы
+ * `JSON.parse(text) as LockFile` и подал бы результат прямо в `diffLock`, который
+ * разыменовывает `entry.snapshot` и `lock.defaults` на веру: файл прежней формы давал не
+ * диагностику и не `absent`, а **необработанное исключение на стадии `lock_check`** — то есть
+ * на самом пути принятия решения.
+ *
+ * Проверка структурная и намеренно неглубокая: она отвечает на вопрос «этот файл вообще
+ * наша форма номер 2», а не «правильны ли в нём дайджесты». Второе — `verifyLockEntries`
+ * в `./audit`, потому что для него нужен `node:crypto`.
+ *
+ * Отказ здесь читается вызывающим как `absent`, а не как «продолжай»: не разобрали lock —
+ * значит одобрения нет, значит рецепт идёт на повторный апрув. Fail-closed.
+ */
+export type ParseLockResult = {
+    ok: true;
+    lock: LockFile;
+} | {
+    ok: false;
+    diagnostics: Diagnostic[];
+};
+export declare function parseLockFile(text: string): ParseLockResult;
 
 // ==== schema/mcpproxy.schema.json ====
 {

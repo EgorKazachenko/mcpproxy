@@ -19,7 +19,9 @@ export type CheckId =
   /** `pattern` компилируется движком RE2. */
   | 'pattern-re2'
   /** Рецептный `deny`, если ключ присутствует, обязан быть непустым. */
-  | 'deny-non-empty';
+  | 'deny-non-empty'
+  /** Рецептный `env.allow` — подмножество `defaults.env.allow`, а не произвольный список. */
+  | 'env-allow-subset';
 
 export type BranchName =
   | 'Defaults'
@@ -55,7 +57,9 @@ export const branchChecks: Readonly<Record<BranchName, readonly CheckId[]>> = {
   // Правило про пустой `deny` — на носителе данных, а не на рецепте: так оно не разъедется
   // с таблицей слияния, которая тоже говорит про этот узел.
   AccessRule: ['deny-non-empty'],
-  EnvPolicy: [],
+  // Потолок, а не дефолт: слияние заменой по листу иначе позволило бы рецепту ввести
+  // переменную, которой в `defaults` нет. Проверка на носителе, как и `deny-non-empty`.
+  EnvPolicy: ['env-allow-subset'],
   OutputPolicy: [],
   // Формат длительности целиком выражается схемой.
   Duration: [],
