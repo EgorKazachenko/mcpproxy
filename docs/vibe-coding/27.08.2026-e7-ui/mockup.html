@@ -502,7 +502,12 @@ body:not(.raw) #app{margin-top:45px}
    ═══════════════════════════════════════════════════════════════════════ */
 const verdictLabel = { allowed:'разрешено', denied:'отказано', pending_approval:'ждёт апрува', error:'ошибка' };
 const verdictRole  = { allowed:'ok', denied:'warn', pending_approval:'info', error:'danger' };
+/* Стадии `approval` в записи ещё нет: durationUs обязателен, то есть событие
+   пишется по завершении стадии, а подтверждение ещё не получено. Ожидание —
+   это вердикт последнего события, а не отдельная строка стадии. Псевдостадия
+   ниже существует только в макете, чтобы показать, как выглядит ожидание. */
 const stageLabel = {
+  classify_risk_pending:'ожидание подтверждения',
   received:'принят', lock_check:'сверка lock', validate:'валидация',
   resolve_paths:'резолв путей', build_argv:'сборка argv', classify_risk:'оценка риска',
   approval:'подтверждение', build_env:'сборка env', build_profile:'профиль песочницы',
@@ -551,7 +556,7 @@ const CALLS = [
       ['resolve_paths',2210,'./scripts/publish.sh → /Users/y/work/demo-repo/scripts/publish.sh'],
       ['build_argv',310,'2 элемента, подстановок в exec[0] нет'],
       ['classify_risk',180,'destructive + openWorld → высокий'],
-      ['approval',null,'ожидает подтверждения вне контекста модели'],
+      ['classify_risk_pending',null,'ожидает подтверждения вне контекста модели'],
     ],
   },
   {
@@ -960,7 +965,7 @@ function renderViolations() {
       <span class="vrow-icon" aria-hidden="true">${ICON[role]}</span>
       <span class="badge badge--${role}">${violationLabel[v.type]}</span>
       <span class="vrow-what">
-        <b>${violationVerb(v.action)} — ${esc(c.toolName)}</b>
+        <b>${violationVerb(v.action)} — процесс стучался на</b>
         <span class="mono">${esc(v.target)}</span>
       </span>
       <span class="vrow-meta">${v.bytes} байт<br>${c.time} · ${sandboxLabel[c.sandbox.mode]}</span>
