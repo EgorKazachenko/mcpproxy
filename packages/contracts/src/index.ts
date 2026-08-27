@@ -3,5 +3,6 @@ export const CONTRACTS_VERSION = 1 as const;
 
 export * from './domain.js';
 export * from './annotations.js';
+export * from './manifest.generated.js';
 
-// TODO(E0): JSON Schema манифеста, схема события (OTel GenAI), три рецепта-заглушки.
+// TODO(E0): схема события (OTel GenAI), lock, IPC, четыре рецепта-заглушки.
