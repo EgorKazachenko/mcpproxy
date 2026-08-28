@@ -1,12 +1,11 @@
 {
   "gate": "review-internal",
-  "status": "pass",
-  "exit_code": 0,
-  "codeTree": "833bdcd4055ef0ae7209a4d68257e8b2a2ce5fc8",
+  "status": "waived",
+  "waived_by": "agent-recorded",
+  "reason": "Решение владельца 2026-08-28. Измерение отработало на bc3e963; дрейф — четыре файла, появившихся при починке его же находок: jcs.ts и jcs.test.ts (фикс канонизации по находке BC), guard.test.ts и appCss.test.ts (два новых структурных теста). Владелец выбрал точечный перезапуск bc, tests и errors — тех измерений, чью поверхность правки действительно трогают, — а internal и scan завейвлены: те же четыре файла они читали бы более тупыми линзами.",
+  "codeTree": "c86e85bd469ec2b6dad402b020ca02b2dae12a2b",
   "codeDirty": false,
-  "headSha": "bc3e9630d99bfd702ae37e73063d88e258424ad5",
-  "startedAt": "2026-08-28T06:17:04.197Z",
-  "command": "node .claude/skills/vibe-code-developing-v2/scripts/review-verify.mjs --kind internal --feature docs/vibe-coding/27.08.2026-e7-ui",
-  "evidencePath": null,
+  "headSha": "cad08c39318abcc9ffe47cc8e30d785231ecf18d",
+  "startedAt": "2026-08-28T06:54:09.249Z",
   "artifacts": []
 }

@@ -1,12 +1,11 @@
 {
   "gate": "review-scan",
-  "status": "pass",
-  "exit_code": 0,
-  "codeTree": "833bdcd4055ef0ae7209a4d68257e8b2a2ce5fc8",
+  "status": "waived",
+  "waived_by": "agent-recorded",
+  "reason": "Решение владельца 2026-08-28. То же, что и у review-internal: измерение отработало на bc3e963, дрейф — четыре файла из починки его же находок (jcs.ts, jcs.test.ts, guard.test.ts, appCss.test.ts). Перезапущены bc, tests и errors как владеющие этой поверхностью; scan завейвлен.",
+  "codeTree": "c86e85bd469ec2b6dad402b020ca02b2dae12a2b",
   "codeDirty": false,
-  "headSha": "bc3e9630d99bfd702ae37e73063d88e258424ad5",
-  "startedAt": "2026-08-28T06:17:04.508Z",
-  "command": "node .claude/skills/vibe-code-developing-v2/scripts/review-verify.mjs --kind scan --feature docs/vibe-coding/27.08.2026-e7-ui",
-  "evidencePath": null,
+  "headSha": "cad08c39318abcc9ffe47cc8e30d785231ecf18d",
+  "startedAt": "2026-08-28T06:54:09.399Z",
   "artifacts": []
 }

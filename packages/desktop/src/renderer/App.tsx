@@ -95,7 +95,11 @@ export function App() {
   const command = (next: PlayerCommand): void => {
     void bridge()
       .send({ kind: 'player-command', command: next })
-      .then((reply) => setFault(reply.ok ? null : reply.error.message))
+      // WHY: успешная команда баннер НЕ гасит. Гашение делало его мигающим — отказ пропадал
+      // от следующего же нажатия, то есть ровно тогда, когда человек до него не дочитал.
+      .then((reply) => {
+        if (!reply.ok) setFault(reply.error.message);
+      })
       .catch((cause: unknown) => setFault(String(cause)));
   };
 

@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { app } from 'electron';
+import { app, dialog } from 'electron';
 import { denied, ok, type Result } from '../shared/result.js';
 import type { UiReply, UiRequest } from '../shared/channel.js';
 import type { TrackMarks } from './player.js';
@@ -78,8 +78,9 @@ async function loadPlayer(): Promise<void> {
  *
  * Код выхода ненулевой: тихая смерть с нулём читается запускающим как штатное завершение.
  */
-app.whenReady().then(
-  async () => {
+app
+  .whenReady()
+  .then(async () => {
     handleAppScheme(bundleRootFor(app.getAppPath()), mode);
     registerIpc(run, allowedOrigins);
     await loadPlayer();
@@ -89,12 +90,18 @@ app.whenReady().then(
     // WHY: закрытие окна снимает таймер проигрывателя. На darwin `window-all-closed` процесс
     // не гасит, поэтому без этого интервал продолжал бы тикать в приложение без единого окна.
     window.on('closed', () => player?.stop());
-  },
-  (cause: unknown) => {
+  })
+  // WHY: именно `.catch`, а не второй аргумент `.then`. Второй аргумент ловит отказ САМОГО
+  // `whenReady()`, который не отказывает никогда, и не ловит бросок из тела обработчика —
+  // то есть ровно тот случай, ради которого написан: нечитаемый трейс и битый `marks.json`.
+  // Первая редакция этой правки была именно такой и не чинила ничего.
+  .catch((cause: unknown) => {
+    // `showErrorBox` работает и до готовности окна, и в упакованном `.app`, запущенном без
+    // терминала, где `stderr` читать некому. Пишем оба: один — человеку, второй — запускающему.
     process.stderr.write(`mcpproxy: приложение не стартовало — ${String(cause)}\n`);
+    dialog.showErrorBox('mcpproxy не стартовал', String(cause));
     app.exit(1);
-  },
-);
+  });
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
