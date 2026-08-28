@@ -108,7 +108,7 @@ export function createBroker(deps: BrokerDeps): Broker {
         return {
           kind: 'refused',
           code: 'approval-unavailable',
-          reason: 'high-risk требует out-of-band подтверждения, authoritative-канал не подключён',
+          reason: 'high risk requires out-of-band confirmation, and the authoritative channel is not connected',
         };
       }
 
@@ -137,7 +137,7 @@ export function createBroker(deps: BrokerDeps): Broker {
         return {
           kind: 'refused',
           code: 'approval-no-verdict',
-          reason: 'подтверждение не получено: отсутствие вердикта есть отказ',
+          reason: 'no confirmation arrived: an absent verdict is a refusal',
         };
       }
 
@@ -147,7 +147,7 @@ export function createBroker(deps: BrokerDeps): Broker {
         return {
           kind: 'refused',
           code: 'approval-mismatched',
-          reason: 'вердикт не относится к этому запросу подтверждения',
+          reason: 'verdict does not belong to this confirmation request',
         };
       }
 
@@ -160,7 +160,7 @@ export function createBroker(deps: BrokerDeps): Broker {
       });
 
       if (verdict.decision === 'denied') {
-        return { kind: 'refused', code: 'approval-denied', reason: 'человек отказал в подтверждении', record };
+        return { kind: 'refused', code: 'approval-denied', reason: 'a human refused the confirmation', record };
       }
 
       if (verdict.scope === 'until') {
@@ -169,7 +169,7 @@ export function createBroker(deps: BrokerDeps): Broker {
         // не молчаливое сведение к `once`. Переписать выбор человека в более широкий значило
         // бы записать в журнал не то решение, которое он принял.
         if (at === null || at.getTime() <= decided.getTime()) {
-          return { kind: 'refused', code: 'approval-expired', reason: 'срок подтверждения истёк или не разобран', record };
+          return { kind: 'refused', code: 'approval-expired', reason: 'the confirmation expired or did not parse', record };
         }
       }
 

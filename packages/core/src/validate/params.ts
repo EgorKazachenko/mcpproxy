@@ -46,16 +46,16 @@ const fail = (code: DenialCode, reason: string): Check => ({ ok: false, code, re
  */
 function checkStringGates(value: string): Check | null {
   if (!codePointLengthAtMost(value, VALUE_MAX_CODE_POINTS)) {
-    return fail('value-oversized', `строка длиннее потолка в ${VALUE_MAX_CODE_POINTS} кодовых точек`);
+    return fail('value-oversized', `string is longer than the ceiling of ${VALUE_MAX_CODE_POINTS} code points`);
   }
   if (!isCanonicalizable(value)) {
-    return fail('not-canonicalizable', 'строка содержит одиночный суррогат и не переживёт запись события');
+    return fail('not-canonicalizable', 'string contains a lone surrogate and would not survive being written to an event');
   }
   return null;
 }
 
 function checkString(param: Extract<PreparedParam, { kind: 'string' }>, value: unknown): Check {
-  if (typeof value !== 'string') return fail('wrong-type', 'ожидалась строка (type: string)');
+  if (typeof value !== 'string') return fail('wrong-type', 'expected a string (type: string)');
 
   const gate = checkStringGates(value);
   if (gate !== null) return gate;
@@ -63,46 +63,46 @@ function checkString(param: Extract<PreparedParam, { kind: 'string' }>, value: u
   // Счёт по кодовым точкам, а не по `length`: для эмодзи это 3 против 4 (Ф11), и потолок,
   // заданный автором манифеста в символах, при подсчёте по `length` был бы вдвое строже.
   if (param.maxLength !== null && codePointLength(value) > param.maxLength) {
-    return fail('too-long', `длиннее maxLength: ${param.maxLength} кодовых точек`);
+    return fail('too-long', `longer than maxLength: ${param.maxLength} code points`);
   }
   // `matcher.test` ПОСЛЕДНИМ: паттерн автора манифеста не решает судьбу отравленного значения.
-  if (!param.matcher.test(value)) return fail('pattern-mismatch', 'значение не соответствует объявленному паттерну параметра');
+  if (!param.matcher.test(value)) return fail('pattern-mismatch', 'value does not match the pattern declared for the parameter');
 
   return { ok: true, value };
 }
 
 function checkEnum(param: Extract<PreparedParam, { kind: 'enum' }>, value: unknown): Check {
-  if (typeof value !== 'string') return fail('wrong-type', 'ожидалась строка (type: enum)');
+  if (typeof value !== 'string') return fail('wrong-type', 'expected a string (type: enum)');
 
   const gate = checkStringGates(value);
   if (gate !== null) return gate;
 
   // Сравнение точное: значения `enum` едут в контекст модели и обязаны вернуться байт в байт.
-  if (!param.values.includes(value)) return fail('not-in-enum', `значение вне списка values: ${param.values.join(', ')}`);
+  if (!param.values.includes(value)) return fail('not-in-enum', `value is outside the declared values: ${param.values.join(', ')}`);
 
   return { ok: true, value };
 }
 
 function checkNumber(param: Extract<PreparedParam, { kind: 'number' }>, value: unknown): Check {
-  if (typeof value !== 'number') return fail('wrong-type', 'ожидалось число (type: number)');
+  if (typeof value !== 'number') return fail('wrong-type', 'expected a number (type: number)');
   // JSON выражает `1e400`, и `JSON.parse` даёт `Infinity`: это отказ, а не «большое число».
-  if (!Number.isFinite(value)) return fail('not-finite', 'число не конечно');
+  if (!Number.isFinite(value)) return fail('not-finite', 'number is not finite');
 
-  if (param.min !== null && value < param.min) return fail('out-of-range', `ниже min: ${param.min}`);
-  if (param.max !== null && value > param.max) return fail('out-of-range', `выше max: ${param.max}`);
-  if (param.integer && !Number.isInteger(value)) return fail('not-integer', 'объявлено integer: true');
+  if (param.min !== null && value < param.min) return fail('out-of-range', `below min: ${param.min}`);
+  if (param.max !== null && value > param.max) return fail('out-of-range', `above max: ${param.max}`);
+  if (param.integer && !Number.isInteger(value)) return fail('not-integer', 'declared as integer: true');
 
   return { ok: true, value };
 }
 
 function checkBoolean(value: unknown): Check {
   // Строка `"true"` не принимается: приведения типов здесь нет вовсе.
-  if (typeof value !== 'boolean') return fail('wrong-type', 'ожидалось true или false (type: boolean)');
+  if (typeof value !== 'boolean') return fail('wrong-type', 'expected true or false (type: boolean)');
   return { ok: true, value };
 }
 
 function checkPath(value: unknown): Check {
-  if (typeof value !== 'string') return fail('wrong-type', 'ожидалась строка (type: path)');
+  if (typeof value !== 'string') return fail('wrong-type', 'expected a string (type: path)');
 
   // Оба гейта здесь наиболее нужны, а не наименее: `PathParam` не имеет НИ `pattern`, НИ
   // `maxLength` — это и есть весь мотив R30. Пропустив их, мы оставили бы без потолка ровно
@@ -138,7 +138,7 @@ export function validateParams(prepared: PreparedRecipe, params: Readonly<Record
     return {
       ok: false,
       denials: [
-        denial({ stage: 'validate', code: 'bad-params-container', paramName: null, reason: 'params не является объектом' }),
+        denial({ stage: 'validate', code: 'bad-params-container', paramName: null, reason: 'params is not an object' }),
       ],
     };
   }
@@ -168,7 +168,7 @@ export function validateParams(prepared: PreparedRecipe, params: Readonly<Record
     // ключах ЗАПРОСА.
     if (!Object.hasOwn(params, param.name)) {
       if (param.required) {
-        record({ stage: 'validate', code: 'missing-required', paramName: param.name, reason: 'обязательный параметр не передан' });
+        record({ stage: 'validate', code: 'missing-required', paramName: param.name, reason: 'required parameter was not supplied' });
       }
       // Необязательный и не переданный — пропуск без значения и без элементов argv (R7).
       continue;
@@ -197,7 +197,7 @@ export function validateParams(prepared: PreparedRecipe, params: Readonly<Record
       omitted += unknown.length - unknown.indexOf(key);
       break;
     }
-    record({ stage: 'validate', code: 'unknown-param', paramName: key, reason: 'ключ не объявлен в рецепте' });
+    record({ stage: 'validate', code: 'unknown-param', paramName: key, reason: 'key is not declared in the recipe' });
   }
 
   if (denials.length === 0) {
@@ -220,7 +220,7 @@ export function validateParams(prepared: PreparedRecipe, params: Readonly<Record
         paramName: null,
         // «Показано», а не «первые»: внутренний порядок сбора не совпадает с порядком, в
         // котором ключи прислал вызывающий, и по записи это неразличимо.
-        reason: `список отказов усечён: всего ${denials.length + omitted}, показано ${denials.length}, не показано ещё ${omitted}`,
+        reason: `denial list truncated: ${denials.length + omitted} in total, ${denials.length} shown, ${omitted} more not shown`,
       }),
     );
   }

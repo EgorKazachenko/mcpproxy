@@ -91,7 +91,7 @@ export async function startDaemon(options: DaemonOptions): Promise<StartDaemonRe
           : openAuditLog({ path: options.auditPath });
   } catch (error) {
     if (error instanceof AuditLogError) {
-      return { ok: false, code: error.code, message: `журнал аудита не открыт: ${error.message}` };
+      return { ok: false, code: error.code, message: `audit log did not open: ${error.message}` };
     }
     throw error;
   }
@@ -99,7 +99,7 @@ export async function startDaemon(options: DaemonOptions): Promise<StartDaemonRe
   const started = await startStore(options.manifestPath, options.lockPath);
   if (started.outcome === 'invalid-manifest') {
     log.close();
-    return { ok: false, code: 'invalid-manifest', message: 'манифест не проходит загрузку', diagnostics: started.diagnostics };
+    return { ok: false, code: 'invalid-manifest', message: 'manifest does not load', diagnostics: started.diagnostics };
   }
   if (started.outcome === 'unreadable-manifest') {
     log.close();
@@ -157,8 +157,8 @@ export async function startDaemon(options: DaemonOptions): Promise<StartDaemonRe
         notifyToolsChanged();
         return;
       }
-      const detail = result.outcome === 'invalid' ? `${result.diagnostics.length} диагностик` : `${result.code}: ${result.message}`;
-      options.onDiagnostic?.(`перечитка ${source} не удалась, продолжаю по прежней политике — ${detail}`);
+      const detail = result.outcome === 'invalid' ? `${result.diagnostics.length} diagnostics` : `${result.code}: ${result.message}`;
+      options.onDiagnostic?.(`re-read of ${source} failed, continuing on the previous policy — ${detail}`);
     },
   });
 
@@ -199,7 +199,7 @@ export async function startDaemon(options: DaemonOptions): Promise<StartDaemonRe
           return;
         }
         if (outcome.kind === 'malformed') {
-          send({ kind: 'error', id: null, code: 'bad-request', message: 'кадр не разбирается как JSON' });
+          send({ kind: 'error', id: null, code: 'bad-request', message: 'frame does not parse as JSON' });
           continue;
         }
 
@@ -237,7 +237,7 @@ export async function startDaemon(options: DaemonOptions): Promise<StartDaemonRe
         // журнале говорила бы то, что назвал отправитель, — а именно она и есть единственный
         // криминалистический артефакт при украденном токене (A5).
         if (frame.request.sessionId !== sessionId) {
-          send({ kind: 'error', id: frame.id, code: 'bad-request', message: 'sessionId не совпадает с сессией соединения' });
+          send({ kind: 'error', id: frame.id, code: 'bad-request', message: 'sessionId does not match the connection session' });
           continue;
         }
 
@@ -272,7 +272,7 @@ export async function startDaemon(options: DaemonOptions): Promise<StartDaemonRe
             if (error instanceof AuditLogError) {
               // Нет аудита — нет исполнения. Демон перестаёт принимать вызовы целиком: запись
               // о вызове и есть то, ради чего прокси стоит в разрыве.
-              terminal = denyReason('audit-unavailable', `журнал аудита недоступен: ${error.code}`);
+              terminal = denyReason('audit-unavailable', `audit log is unavailable: ${error.code}`);
               options.onDiagnostic?.(terminal);
               send({ kind: 'call-reply', id, result: { ok: false, verdict: 'error', denyReason: terminal } });
               return;
@@ -291,7 +291,7 @@ export async function startDaemon(options: DaemonOptions): Promise<StartDaemonRe
     const parsed = parseDenyReason(reason);
     if (parsed !== null && isExecCode(parsed.code) && isTerminal(parsed.code) && terminal === null) {
       terminal = reason;
-      options.onDiagnostic?.(`демон больше не выдаёт вызовов: ${reason}`);
+      options.onDiagnostic?.(`daemon issues no further calls: ${reason}`);
     }
   }
 
@@ -308,7 +308,7 @@ export async function startDaemon(options: DaemonOptions): Promise<StartDaemonRe
     await new Promise<void>((resolve) => server.close(() => resolve()));
     await sandbox.dispose();
     log.close();
-    return { ok: false, code: 'socket-unprotected', message: `права сокета не выставлены: ${(error as Error).message}` };
+    return { ok: false, code: 'socket-unprotected', message: `socket permissions were not applied: ${(error as Error).message}` };
   }
 
   return {

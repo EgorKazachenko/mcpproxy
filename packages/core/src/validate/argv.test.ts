@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { asRecipeName, type PatternMatcher, type Recipe } from '@mcpproxy/contracts';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { ResolvedValues } from './denial.js';
-import { buildArgv, buildArgvWithOrigin } from './argv.js';
+import { buildArgv } from './argv.js';
 import { validateParams } from './params.js';
 import { resolvePaths } from './paths.js';
 import { prepareRecipe, type PreparedRecipe } from './prepare.js';
@@ -155,14 +155,14 @@ describe('buildArgv — подстановка не интерпретирует
   });
 });
 
-describe('buildArgvWithOrigin — происхождение элементов команды (AuditEvent.argvFromParams)', () => {
+describe('buildArgv — происхождение элементов команды (AuditEvent.argvFromParams)', () => {
   /** Тот же прогон трёх стадий, но с сохранённым происхождением. */
   function builtOf(prepared: PreparedRecipe, params: Readonly<Record<string, unknown>>) {
     const validated = validateParams(prepared, params);
     if (!validated.ok) throw new Error(`validate: ${validated.denials.map((one) => one.code).join()}`);
     const resolved = resolvePaths(prepared, validated.values);
     if (!resolved.ok) throw new Error(`resolve_paths: ${resolved.denials.map((one) => one.code).join()}`);
-    return buildArgvWithOrigin(prepared, resolved.values);
+    return buildArgv(prepared, resolved.values);
   }
 
   const prepared = prepare({
@@ -199,12 +199,6 @@ describe('buildArgvWithOrigin — происхождение элементов 
       expect(index).toBeGreaterThanOrEqual(0);
       expect(index).toBeLessThan(built.argv.length);
     }
-  });
-
-  it('buildArgv — та же команда, что и у версии с происхождением', () => {
-    expect(buildArgv(prepared, resolvePathsFor(prepared, { pattern: 'auth' }))).toEqual(
-      builtOf(prepared, { pattern: 'auth' }).argv,
-    );
   });
 
   /** Карта резолва для сверки двух входов: считать её дважды в одном тесте незачем. */

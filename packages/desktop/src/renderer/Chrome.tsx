@@ -59,19 +59,24 @@ export function Chrome({
         ))}
       </div>
 
-      <button className="btn-secondary" type="button" onClick={() => onCommand({ kind: 'step' })}>
-        {STRINGS.player.step}
-      </button>
       {/* Пауза и скорость были реализованы в проигрывателе и провалидированы на границе, но
           из интерфейса недостижимы: в шапке стояли только «Шаг» и «Сброс», а `R12` называет
-          непрерывное воспроизведение планом Б на случай, если ядро упадёт на сцене. */}
+          непрерывное воспроизведение планом Б на случай, если ядро упадёт на сцене.
+
+          WHY первым и первичным: показ ведётся непрерывным прогоном, а не покадрово. Пока
+          «Шаг» стоял первым и обе кнопки были вторичными, орган, которым сценарий ЗАПУСКАЮТ,
+          ничем не отличался от органа, которым его листают, — и читался как «жать сюда
+          двадцать шесть раз». «Шаг» остаётся: он нужен, когда по стадии задают вопрос. */}
       <button
-        className="btn-secondary"
+        className="btn-primary"
         type="button"
         aria-pressed={playing}
         onClick={() => onCommand(playing ? { kind: 'pause' } : { kind: 'play', speed })}
       >
         {playing ? STRINGS.player.pause : STRINGS.player.play}
+      </button>
+      <button className="btn-secondary" type="button" onClick={() => onCommand({ kind: 'step' })}>
+        {STRINGS.player.step}
       </button>
       <button
         className="btn-secondary"
