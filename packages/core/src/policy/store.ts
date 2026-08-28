@@ -306,36 +306,62 @@ export async function startStore(
     return () => mine === generation;
   };
 
+  /**
+   * Перечитки исполняются ПО ОДНОЙ. Без этого номер поколения не выражает того, ради чего
+   * заведён: он берётся до чтения, а порядок завершения чтений ему не подчинён. Две
+   * параллельные перечитки могут прочитать файл в порядке, обратном порядку захвата номера, —
+   * и тогда побеждает та, что прочитала СТАРОЕ содержимое, а `current()` остаётся старее
+   * диска навсегда, ничем этого не показав. Именно этот исход запрещает комментарий выше.
+   *
+   * Воспроизведено детерминированно: `probes/p12-reload-race.mjs`. Найдено в E4 при
+   * подключении вотчера к демону — в фикстуре запись файла токена будила перечитку
+   * одновременно с правкой манифеста, и правка терялась.
+   *
+   * Очередь, а не отмена: обе перечитки обязаны вернуть вызывающему результат — `mcpproxy
+   * lock` ветвится по нему, а вотчер по нему же пишет диагностику.
+   */
+  let queue: Promise<unknown> = Promise.resolve();
+  const serialize = <T>(work: () => Promise<T>): Promise<T> => {
+    const next = queue.then(work, work);
+    queue = next.then(
+      () => undefined,
+      () => undefined,
+    );
+    return next;
+  };
+
   const store: StartedStore = {
     current: () => policy,
     reloadCount: () => reloads,
 
     // Правка с опечаткой не обезоруживает прокси: пока новая загрузка не завершилась успехом,
     // действует прежний манифест (R4). Диагностики при этом отдаются вызывающему, а не тонут.
-    reloadManifest: async () => {
-      const newest = claim();
-      const next = await loadManifest(manifestPath, resolved);
-      if (!next.ok) {
-        return 'diagnostics' in next
-          ? { outcome: 'invalid', diagnostics: next.diagnostics }
-          : { outcome: 'unreadable', code: next.code, message: next.message };
-      }
-      const loaded = withLock(next.loaded, policy.lock);
-      if (newest()) policy = loaded;
-      reloads += 1;
-      return { outcome: 'reloaded', policy: loaded };
-    },
+    reloadManifest: async () =>
+      serialize(async () => {
+        const newest = claim();
+        const next = await loadManifest(manifestPath, resolved);
+        if (!next.ok) {
+          return 'diagnostics' in next
+            ? { outcome: 'invalid', diagnostics: next.diagnostics }
+            : { outcome: 'unreadable', code: next.code, message: next.message };
+        }
+        const loaded = withLock(next.loaded, policy.lock);
+        if (newest()) policy = loaded;
+        reloads += 1;
+        return { outcome: 'reloaded', policy: loaded };
+      }),
 
     // Обновление lock **не** влечёт перечитку и перехэширование манифеста (R5b): это разные
     // файлы с разным временем жизни.
-    reloadLock: async () => {
-      const newest = claim();
-      const lock = await loadLock(lockPath, resolved);
-      const loaded = withLock(policy.manifest, lock);
-      if (newest()) policy = loaded;
-      reloads += 1;
-      return { outcome: 'reloaded', policy: loaded };
-    },
+    reloadLock: async () =>
+      serialize(async () => {
+        const newest = claim();
+        const lock = await loadLock(lockPath, resolved);
+        const loaded = withLock(policy.manifest, lock);
+        if (newest()) policy = loaded;
+        reloads += 1;
+        return { outcome: 'reloaded', policy: loaded };
+      }),
   };
 
   return { outcome: 'started', store };
