@@ -1,8 +1,5 @@
 > ⚠️ **Waived:** `review-internal` — решение владельца — слияние: 48 файлов E1/E6 отревьюены на своих ветках; `review-scan` — решение владельца — слияние: 48 файлов E1/E6 отревьюены на своих ветках (+2 ещё — см. status.md)
 
-**Гейты @ `4a3a33d5`:** plan-approved ✓ · build-test ✓ · review-internal ⚠ · review-scan ⚠ · review-bc ⚠ · review-tests ⚠ · review-errors ✓
-Бандл: `docs/vibe-coding/27.08.2026-e2-validate`
-
 **Outstanding:**
 - [ ] OUTSTANDING — релиз-ноты: `bounds-satisfiable` ломает загрузку манифеста, отказ всеманифестный
 - [ ] OUTSTANDING — ревизия веток e1/e3/e6/e7: эта ветка правит `packages/contracts`
@@ -19,7 +16,9 @@
 | scan | снят: решение владельца — слияние: 48 файлов E1/E6 отревьюены на своих ветках |
 | bc | снят: решение владельца — слияние: 48 файлов E1/E6 отревьюены на своих ветках |
 | tests | снят: решение владельца — слияние: 48 файлов E1/E6 отревьюены на своих ветках |
-| errors | прошла |
+| errors | прошла ⚠ — **ревью не видело 24 файл(ов)*
 
-**Доказательства:** plan-approved (1 файл(ов))
-**Скриншоты:** `docs/vibe-coding/27.08.2026-e2-validate/.review`
+**Гейты @ `a2fbcc7b`:** plan-approved ✓ · build-test ✓ · review-internal ⚠ · review-scan ⚠ · review-bc ⚠ · review-tests ⚠ · review-errors ✗
+Бандл: `docs/vibe-coding/27.08.2026-e2-validate`
+
+_Truncated — see `docs/vibe-coding/27.08.2026-e2-validate/status.md` and `docs/vibe-coding/27.08.2026-e2-validate/review.md`._

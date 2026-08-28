@@ -4,7 +4,7 @@
 - branch: `v2/e2-validate`
 - mode: attended
 - track: full
-- codeTree: `4a3a33d56d3e`
+- codeTree: `a2fbcc7b4640`
 - kill-review due: 2026-10-26
 - handoff: prompt recorded, no carrier spawned (attended) — SessionStart re-injects it after /clear
 
@@ -16,4 +16,4 @@
 | review-scan | waived: решение владельца — слияние: 48 файлов E1/E6 отревьюены на своих ветках | — |
 | review-bc | waived: решение владельца — слияние: 48 файлов E1/E6 отревьюены на своих ветках | — |
 | review-tests | waived: решение владельца — слияние: 48 файлов E1/E6 отревьюены на своих ветках | — |
-| review-errors | pass | — |
+| review-errors | **STALE** — the code changed after this gate ran (receipt 4a3a33d5, now a2fbcc7b). Re-run it. | — |
