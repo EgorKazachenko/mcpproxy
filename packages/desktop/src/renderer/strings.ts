@@ -18,6 +18,7 @@ export const STRINGS = {
     name: 'mcpproxy',
     sandboxEyebrow: 'песочница',
     unsandboxedBanner: 'Песочница выключена — baseline. Всё, что запустит вызов, выполняется с вашими правами.',
+    faultBanner: (reason: string): string => `Главный процесс отклонил команду: ${reason}`,
   },
 
   nav: {
@@ -35,6 +36,8 @@ export const STRINGS = {
     play: 'Играть',
     pause: 'Пауза',
     reset: 'Сброс',
+    speed: (multiplier: number): string => `×${multiplier}`,
+    speedLabel: 'скорость воспроизведения',
     position: (position: number, total: number): string => `${position} из ${total}`,
   },
 
@@ -45,6 +48,14 @@ export const STRINGS = {
     emptyHead: 'Вызовов пока не было',
     emptyBody:
       'Прокси запущен и слушает сокет. Здесь появится каждый вызов инструмента — и разрешённый, и отклонённый.',
+    // Остаток строки вызова. Формулировки дословно из макета (`callLine` в `mockup.html`).
+    verb: (word: string): string => `${word} —`,
+    deniedBecause: (reason: string, stage: string): string => `${reason} · стадия «${stage}»`,
+    awaitingNote: 'высокий риск — окно вне контекста модели',
+    completed: (code: number | null, overheadMs: number): string =>
+      `${code === null ? 'завершён сигналом' : `код выхода ${code}`} · оверхед ${overheadMs} мс`,
+    sent: (bytes: number): string => ` — ${bytes} байт`,
+    andMore: (count: number): string => ` и ещё ${count}`,
     pairSeatbelt: 'тот же вызов, повторён с песочницей',
     pairNone: 'тот же вызов, четырьмя секундами раньше — без песочницы',
   },
@@ -56,6 +67,7 @@ export const STRINGS = {
     awaiting: 'Ждёт подтверждения',
     clean: 'Выполнено',
     running: 'Выполняется',
+    failed: 'Ошибка',
   } satisfies Record<CallOutcome, string>,
 
   group: {

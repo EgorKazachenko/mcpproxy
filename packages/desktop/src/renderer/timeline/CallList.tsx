@@ -1,4 +1,4 @@
-import { sandboxLabel, verdictLabel, verdictRole, violationLabel } from '@mcpproxy/design';
+import { sandboxLabel, verdictLabel, verdictRole } from '@mcpproxy/design';
 import type { Call } from '../../shared/call.js';
 import { STRINGS } from '../strings.js';
 import { callLine, groupBar } from './callLine.js';
@@ -70,12 +70,10 @@ export function CallList({
               <span className="call-icon" aria-hidden="true">
                 {ICON[line.role]}
               </span>
-              <b>{STRINGS.outcome[line.outcome]}</b>
-              {line.worst !== undefined && (
-                <span>
-                  {violationLabel[line.worst.type]}: {line.worst.target}
-                </span>
-              )}
+              {/* Слово диспозиции и тире — из макета: тире держит два куска строки вместе,
+                  когда остаток усечён многоточием, и без него слово сливается с остатком. */}
+              <b>{line.rest === '' ? STRINGS.outcome[line.outcome] : STRINGS.calls.verb(STRINGS.outcome[line.outcome])}</b>
+              {line.rest !== '' && <span>{line.rest}</span>}
             </span>
 
             <span className="groupbar" aria-hidden="true">

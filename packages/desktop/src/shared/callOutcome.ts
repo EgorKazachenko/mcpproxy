@@ -8,8 +8,12 @@
  *
  * Шестое значение обязательно: проигрыватель отдаёт события по одному, и половина вызовов на
  * экране всегда незакончена. Без `running` такой вызов подписывался бы «Выполнено».
+ *
+ * Седьмое — тоже. `Verdict` контракта знает `error`, и он терминален, то есть `open` у такого
+ * вызова ложно. Без отдельного исхода он доходил до `clean` и подписывался «Выполнено» —
+ * красной строкой. Слово диспозиции по `R15` читается раньше цвета и спорить с ним не может.
  */
-export type CallOutcome = 'blocked' | 'passed' | 'denied' | 'awaiting' | 'clean' | 'running';
+export type CallOutcome = 'blocked' | 'passed' | 'denied' | 'awaiting' | 'clean' | 'running' | 'failed';
 
 export const CALL_OUTCOMES: readonly CallOutcome[] = [
   'blocked',
@@ -18,4 +22,5 @@ export const CALL_OUTCOMES: readonly CallOutcome[] = [
   'awaiting',
   'clean',
   'running',
+  'failed',
 ];

@@ -1,8 +1,9 @@
 import type { SandboxMode, SandboxViolation } from '@mcpproxy/contracts';
-import { violationRole, type Role } from '@mcpproxy/design';
+import { stageLabel, violationLabel, violationRole, type Role } from '@mcpproxy/design';
 import type { Call } from '../../shared/call.js';
 import type { CallOutcome } from '../../shared/callOutcome.js';
 import { STAGE_GROUPS, stageGroup, stagesOf, type StageGroup } from '../../shared/stageGroup.js';
+import { STRINGS } from '../strings.js';
 
 export interface CallLine {
   readonly role: Role;
@@ -18,7 +19,18 @@ export interface CallLine {
    */
   readonly verdictMuted: boolean;
   readonly worst: SandboxViolation | undefined;
-  readonly others: number;
+
+  /**
+   * Остаток строки после слова диспозиции — то, ЧТО именно случилось.
+   *
+   * Прежде здесь не было ничего, а `CallList` печатал только «тип: цель». Макет
+   * (`mockup.html`, функция `callLine`) даёт остаток во всех четырёх случаях, и по `R49` он
+   * источник истины для строк. Потери были не косметические: у отказанного вызова пропадала
+   * причина и стадия, у выполненного — код выхода и оверхед, у нарушения — объём в байтах и
+   * счётчик остальных. На строке, по которой человек и решает, куда смотреть, объём в байтах
+   * это и есть ответ на вопрос сценария S5 «ушли ли данные и сколько».
+   */
+  readonly rest: string;
 }
 
 const RANK: Readonly<Record<Role, number>> = { ok: 0, muted: 0, info: 1, human: 1, warn: 2, danger: 3 };
@@ -43,10 +55,36 @@ function roleOf(call: Call, violations: readonly SandboxViolation[]): Role {
 
 function outcomeOf(call: Call, violations: readonly SandboxViolation[]): CallOutcome {
   if (call.verdict === 'denied') return 'denied';
+  // WHY: ветка `error` обязана стоять здесь так же, как она стоит в `roleOf`. Без неё
+  // `error` доходил до последней строки и — поскольку `error` терминален, а значит `open`
+  // ложно — давал исход `clean`, то есть слово «Выполнено» на красной строке. `R15` требует
+  // ровно обратного: слово читается раньше цвета, поэтому спорить с цветом оно не имеет права.
+  if (call.verdict === 'error') return 'failed';
   if (call.verdict === 'pending_approval') return 'awaiting';
   if (violations.some((v) => v.action === 'allowed')) return 'passed';
   if (violations.length > 0) return 'blocked';
   return call.open ? 'running' : 'clean';
+}
+
+/** Остаток строки. Порядок веток — тот же, что в макете: отказ, ожидание, нарушения, чистый. */
+function restOf(call: Call, violations: readonly SandboxViolation[], worst: SandboxViolation | undefined): string {
+  if (call.verdict === 'denied') {
+    const denied = call.stages.find((event) => event.denyReason !== undefined && event.denyReason !== null);
+    const at = denied ?? call.stages[call.stages.length - 1];
+    return STRINGS.calls.deniedBecause(denied?.denyReason ?? '', stageLabel[at?.stage ?? 'received']);
+  }
+  if (call.verdict === 'pending_approval') return STRINGS.calls.awaitingNote;
+
+  if (worst !== undefined) {
+    const sent = worst.action === 'allowed' && worst.bytes > 0 ? STRINGS.calls.sent(worst.bytes) : '';
+    const more = violations.length > 1 ? STRINGS.calls.andMore(violations.length - 1) : '';
+    return `${violationLabel[worst.type]}: ${worst.target}${sent}${more}`;
+  }
+
+  const exit = call.stages.reduce<{ code: number | null } | undefined>((found, e) => e.exit ?? found, undefined);
+  const overhead = call.stages.reduce<number | undefined>((found, e) => e.duration?.overheadMs ?? found, undefined);
+  if (exit === undefined || overhead === undefined) return '';
+  return STRINGS.calls.completed(exit.code, overhead);
 }
 
 export function callLine(call: Call): CallLine {
@@ -61,7 +99,7 @@ export function callLine(call: Call): CallLine {
     sandbox: sandboxOf(call),
     verdictMuted: violations.some((v) => violationRole(v.type, v.action) === 'danger'),
     worst,
-    others: Math.max(0, violations.length - 1),
+    rest: restOf(call, violations, worst),
   };
 }
 

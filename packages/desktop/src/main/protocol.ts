@@ -75,7 +75,14 @@ export function registerAppScheme(): void {
 
 export function handleAppScheme(bundleRoot: string, mode: CspMode): void {
   protocol.handle(APP_SCHEME, async (request) => {
-    const path = await resolveBundlePath(new URL(request.url).pathname, bundleRoot);
+    const url = new URL(request.url);
+    // WHY: `protocol.handle` регистрируется на СХЕМУ целиком, поэтому `app://что-угодно/`
+    // отдавало бы тот же бандл под другим origin — со своим `localStorage` и своим `'self'`
+    // в CSP. `R3` выбирает стандартную схему именно ради сравнимого origin; сравнение должно
+    // быть, а не подразумеваться.
+    if (url.host !== APP_HOST) return new Response('not found', { status: 404 });
+
+    const path = await resolveBundlePath(url.pathname, bundleRoot);
     if (path === null) return new Response('not found', { status: 404 });
 
     return new Response(await readFile(path), {

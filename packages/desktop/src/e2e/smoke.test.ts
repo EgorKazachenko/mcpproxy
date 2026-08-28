@@ -13,11 +13,20 @@ let app: ElectronApplication;
 let page: Page;
 
 beforeAll(async () => {
-  app = await electron.launch({
-    args: ['.'],
-    cwd: PACKAGE,
-    env: { ...process.env, MCPPROXY_OBSERVE: '1' },
-  });
+  // WHY: `MCPPROXY_OBSERVE` — флаг СБОРКИ (`define` в `electron.vite.config.ts`), а не
+  // переменная окружения запуска: наблюдатель в preload либо инлайнен в артефакт, либо его
+  // там нет. Передавать флаг рантаймом было ложью — он ни на что не влиял и маскировал
+  // настоящую зависимость смоука от сборки с ним. Отсюда `yarn build:smoke` в `package.json`
+  // и проверка ниже, которая падает с причиной, а не с таймаутом ожидания окна.
+  // Наблюдатель либо инлайнен в артефакт, либо его там нет. Проверяем ДО запуска: иначе
+  // сборка без флага падает первым утверждением про `__mcpproxyObserve`, и причина
+  // («собрано не тем скриптом») из сообщения не читается.
+  const preload = await readFile(join(PACKAGE, 'out', 'preload', 'index.cjs'), 'utf8');
+  if (!preload.includes('__mcpproxyObserve')) {
+    throw new Error('смоук требует сборки с флагом наблюдения: yarn workspace @mcpproxy/desktop build:smoke');
+  }
+
+  app = await electron.launch({ args: ['.'], cwd: PACKAGE });
   page = await app.firstWindow();
   await page.waitForSelector('.chrome');
 }, 60_000);
@@ -178,9 +187,23 @@ describe('рендерер не тянет узловых зависимосте
     expect([...reachable].filter((s) => FORBIDDEN.includes(s))).toEqual([]);
   });
 
-  /** Проверка обязана уметь падать: без входа внутрь зависимости она была бы тавтологией. */
+  /**
+   * Проверка обязана уметь падать, и прежняя редакция этого не доказывала.
+   *
+   * Она утверждала, что `own` содержит `@mcpproxy/contracts` — то есть ровно то, что видно и
+   * без входа внутрь зависимости. Корневой вход контрактов голых импортов не имеет вовсе,
+   * поэтому удаление цикла обхода оставило бы зелёными и её, и настоящую проверку.
+   *
+   * Здесь зонд направлен в тот вход, который запрещённое ЗАВЕДОМО тянет: `@mcpproxy/contracts/audit`
+   * документированно живёт на `node:crypto` — ради этого он и вынесен отдельным входом. Если
+   * механизм обхода перестанет заглядывать внутрь зависимости, эта строка покраснеет, и
+   * зелёная строка выше снова начнёт что-то значить.
+   */
   it('обход действительно доходит до зависимостей, а не только до своих файлов', async () => {
     const own = await bareSpecifiers(await emittedFiles(join(PACKAGE, 'dist', 'deps')));
     expect([...own]).toContain('@mcpproxy/contracts');
+
+    const inside = await bareSpecifiers([requireFrom.resolve('@mcpproxy/contracts/audit')]);
+    expect([...inside]).toContain('node:crypto');
   });
 });

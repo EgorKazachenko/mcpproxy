@@ -487,9 +487,16 @@ lock-файла.
 | `ApprovalChannel` | `electron` \| `elicitation` |
 | `ApprovalDecision` | `approved` \| `denied` — третьего члена нет: истечение и отмена это **отсутствие** вердикта |
 | `ApprovalScope` | `once` \| `until` \| `recipe_and_args` |
-| `ApprovalRequest` | `requestId`, `sessionId`, `recipeName`, `argsHash`, `tier`, `argv`, `cwd`, `profile` |
+| `ApprovalRequest` | `requestId`, `sessionId`, `recipeName`, `argsHash`, `tier`, `argv`, `argvFromParams?`, `cwd`, `profile` |
 | `ApprovalVerdict` | `requestId`, `sessionId`, `channel`, `decision`, `scope`, `expiresAt` |
 | `ApprovalRecord` (в событии) | `channel`, `decision`, `scope`, `expiresAt`, `argsHash`, `sessionId` |
+
+`argvFromParams` — то же поле, что у `AuditEvent`, и с тем же инвариантом: индексы тех
+элементов `argv`, которые подставлены из параметров вызова. Здесь оно несёт вторую
+обязанность — правило выбора опасного токена (`R41`) обязано быть **вычислимым из того, что
+окно получило**, а не угаданным по эвристике. Заполняет его E5, перенося индексы со стадии
+`build_argv`, а не пересчитывая по значениям: пересчёт разъедется там, где редакция вырезала
+секрет. Расписка — в `WORK.md`.
 
 `expiresAt` — **абсолютное** ISO-время, а не относительный TTL: append-only запись читают
 через месяцы, и «10 минут» в ней уже ничего не означают. `requestId` непрозрачный и

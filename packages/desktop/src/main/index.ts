@@ -67,14 +67,34 @@ async function loadPlayer(): Promise<void> {
   player = createPlayer(trace.value, marks, (event) => dispatch.send(event));
 }
 
-app.whenReady().then(async () => {
-  handleAppScheme(bundleRootFor(app.getAppPath()), mode);
-  registerIpc(run, allowedOrigins);
-  await loadPlayer();
+/**
+ * Отказ старта обязан быть слышен.
+ *
+ * Без `catch` любой из двух входов — нечитаемый `demo.jsonl` или битый `marks.json`, который
+ * `JSON.parse` роняет без обёртки, — давал непойманный reject: окно не создавалось НИКОГДА,
+ * а на macOS процесс при этом оставался жив. Снаружи это неотличимо от зависшего приложения,
+ * и смоук падал по таймауту ожидания окна, а не с причиной. `readTrace` специально возвращает
+ * конверт, «чтобы не упасть», — и терять его тут же было бы прямым отрицанием этого решения.
+ *
+ * Код выхода ненулевой: тихая смерть с нулём читается запускающим как штатное завершение.
+ */
+app.whenReady().then(
+  async () => {
+    handleAppScheme(bundleRootFor(app.getAppPath()), mode);
+    registerIpc(run, allowedOrigins);
+    await loadPlayer();
 
-  const window = createWindow('main', devUrl ?? APP_ORIGIN);
-  dispatch.register(window.webContents);
-});
+    const window = createWindow('main', devUrl ?? APP_ORIGIN);
+    dispatch.register(window.webContents);
+    // WHY: закрытие окна снимает таймер проигрывателя. На darwin `window-all-closed` процесс
+    // не гасит, поэтому без этого интервал продолжал бы тикать в приложение без единого окна.
+    window.on('closed', () => player?.stop());
+  },
+  (cause: unknown) => {
+    process.stderr.write(`mcpproxy: приложение не стартовало — ${String(cause)}\n`);
+    app.exit(1);
+  },
+);
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();

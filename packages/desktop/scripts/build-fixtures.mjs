@@ -58,15 +58,34 @@ function deniedCall(n, toolName, recipe, stages, denyReason) {
   );
 }
 
-function runTests(n, mode, violations) {
-  const argv = ['pnpm', 'test', '--testPathPattern', 'auth'];
+/** Вызов, дошедший до `approval` и там остановленный: вердикт ожидания, а не отказ. */
+function pendingCall(n, toolName, tier, stages) {
+  const last = stages.at(-1)[0];
+  return stages.map(([stage, us, fields], k) =>
+    core(trace(n), span(n, k), stage, us, {
+      toolName,
+      recipe: { name: toolName },
+      verdict: stage === last ? 'pending_approval' : 'allowed',
+      fields: { ...fields, ...(stage === 'classify_risk' ? { risk: { tier, annotations: ANNOTATIONS[tier] } } : {}) },
+    }),
+  );
+}
+
+const ANNOTATIONS = {
+  medium: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  high: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
+};
+
+function fullRun(n, { toolName = 'run_tests', argv, argvFromParams, tier = 'medium', mode, violations }) {
   const stages = [
     ['received', 340, {}],
-    ['lock_check', 1020, { recipe: { name: 'run_tests', hash: 'a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90' } }],
+    ['lock_check', 1020, { recipe: { name: toolName, hash: 'a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90' } }],
     ['validate', 720, {}],
     ['resolve_paths', 1640, { cwd: CWD }],
-    ['build_argv', 260, { argv, argvFromParams: [3] }],
-    ['classify_risk', 140, { risk: { tier: 'medium', annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false } } }],
+    // Ключ, а не значение: `argvFromParams: undefined` уронил бы канонизацию, и это правильно —
+    // контракт различает отсутствующий ключ и пустое значение побайтово (`R13`).
+    ['build_argv', 260, { argv, ...(argvFromParams === undefined ? {} : { argvFromParams }) }],
+    ['classify_risk', 140, { risk: { tier, annotations: ANNOTATIONS[tier] } }],
     ['build_env', 480, { env: { allowed: ['PATH', 'HOME', 'LANG', 'CI'] } }],
     ['build_profile', mode === 'none' ? 0 : 1980, mode === 'none' ? {} : { sandbox: { mode, profile: { network: { allow: [] }, write: { allow: ['coverage', '/tmp'] } } } }],
     ['spawn', 12_400_000, { sandbox: { mode } }],
@@ -74,7 +93,7 @@ function runTests(n, mode, violations) {
     ['redact', 1310, { redactions: [{ rule: 'npm-token', count: 1, stream: 'stdout' }], output: { bytes: 4096, truncated: false } }],
     ['complete', 0, { exit: { code: 0, signal: null }, duration: { overheadMs: 7 } }],
   ];
-  return stages.map(([stage, us, fields], k) => core(trace(n), span(n, k), stage, us, { fields }));
+  return stages.map(([stage, us, fields], k) => core(trace(n), span(n, k), stage, us, { toolName, fields }));
 }
 
 const events = [
@@ -101,14 +120,51 @@ const events = [
     ],
     'резолвнутый путь вне корня logs',
   ),
-  ...runTests(3, 'none', [
+  // S7 — rug pull: определение рецепта разошлось с lock, жёсткий стоп на `lock_check`.
+  // Он же — пример из `R13`: у вызова, остановленного здесь, ключа `argv` нет вовсе.
+  ...deniedCall(
+    5,
+    'analyze_logs',
+    { name: 'analyze_logs' },
+    [
+      ['received', 300, {}],
+      ['lock_check', 1140, {}],
+    ],
+    'определение рецепта разошлось с lock: добавлен аргумент --exec',
+  ),
+
+  // S6 — persistence: обе попытки отбиты, и обе всё равно красные. `mandatory-deny` —
+  // единственная роль, не зависящая от исхода: успешно отбитая попытка закрепиться в системе
+  // это не рутина.
+  ...fullRun(6, {
+    toolName: 'build_project',
+    argv: ['pnpm', 'build'],
+    mode: 'seatbelt',
+    violations: [
+      { type: 'mandatory-deny', target: '/Users/y/work/demo-repo/.git/hooks/pre-commit', action: 'denied', bytes: 0 },
+      { type: 'mandatory-deny', target: '/Users/y/.zshrc', action: 'denied', bytes: 0 },
+    ],
+  }),
+
+  // S8 — подтверждение: вызов ждёт человека вне контекста модели и до `spawn` не доходит.
+  ...pendingCall(7, 'publish_release', 'high', [
+    ['received', 310, {}],
+    ['lock_check', 990, { recipe: { name: 'publish_release', hash: 'b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f901' } }],
+    ['validate', 640, {}],
+    ['resolve_paths', 1580, { cwd: CWD }],
+    ['build_argv', 240, { argv: ['/bin/sh', './scripts/publish.sh', 'v1.4.0'], argvFromParams: [2] }],
+    ['classify_risk', 150, {}],
+    ['approval', 0, {}],
+  ]),
+
+  ...fullRun(3, { argv: ['pnpm', 'test', '--testPathPattern', 'auth'], argvFromParams: [3], mode: 'none', violations: [
     { type: 'network', target: 'evil.io:443', action: 'allowed', bytes: 1247 },
     { type: 'file-read', target: '/Users/y/.aws/credentials', action: 'allowed', bytes: 1247 },
-  ]),
-  ...runTests(4, 'seatbelt', [
+  ] }),
+  ...fullRun(4, { argv: ['pnpm', 'test', '--testPathPattern', 'auth'], argvFromParams: [3], mode: 'seatbelt', violations: [
     { type: 'network', target: 'evil.io:443', action: 'denied', bytes: 0 },
     { type: 'file-read', target: '/Users/y/.aws/credentials', action: 'denied', bytes: 0 },
-  ]),
+  ] }),
 ];
 
 /** Одна цепочка на весь лог: `prev` каждой записи совпадает с `self` предыдущей. */

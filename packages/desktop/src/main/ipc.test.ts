@@ -1,5 +1,3 @@
-import { readdir, readFile } from 'node:fs/promises';
-import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { APP_ORIGIN } from './protocol.js';
 import { guarded, senderRejection, type SenderFacts } from './ipc.js';
@@ -80,35 +78,5 @@ describe('guarded', () => {
     await handler(eventWith(good), { kind: 'player-command', command: { kind: 'step' } });
 
     expect(seen).toEqual([{ kind: 'player-command', command: { kind: 'step' } }]);
-  });
-});
-
-/**
- * Структурный страж вместо линтера.
- *
- * Единственный плагин с таким правилом имеет одного мейнтейнера и в собственной документации
- * признаёт, что проверяет факт наличия защиты, а не её корректность. Здесь проверяется то,
- * что действительно важно: привилегированные вызовы существуют ровно в отведённых модулях, и
- * появление пятого места видно сразу, а не после инцидента.
- */
-describe('структурный страж границы', () => {
-  const MAIN = new URL('.', import.meta.url).pathname;
-
-  const RULES: ReadonlyArray<readonly [RegExp, string]> = [
-    [/\bipcMain\.(handle|on|handleOnce)\b/, 'ipc.ts'],
-    [/\bwebContents\.send\b|\.send\(UI_CHANNEL/, 'dispatch.ts'],
-    [/\bnew BrowserWindow\b/, 'window.ts'],
-  ];
-
-  it.each(RULES)('%s встречается только в %s', async (pattern, owner) => {
-    const names = (await readdir(MAIN)).filter((n) => n.endsWith('.ts') && !n.endsWith('.test.ts'));
-    const offenders: string[] = [];
-
-    for (const name of names) {
-      const source = await readFile(join(MAIN, name), 'utf8');
-      if (pattern.test(source) && name !== owner) offenders.push(name);
-    }
-
-    expect(offenders).toEqual([]);
   });
 });

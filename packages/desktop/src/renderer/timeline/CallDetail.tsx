@@ -5,8 +5,16 @@ import { commandView, stagePresence } from './commandView.js';
 import { MachineText } from './MachineText.js';
 import { StageList } from './StageList.js';
 
-const lastOf = (call: Call, pick: (event: Call['stages'][number]) => string | undefined): string | undefined =>
-  call.stages.reduce<string | undefined>((found, event) => pick(event) ?? found, undefined);
+/**
+ * Последнее непустое значение поля по стадиям вызова.
+ *
+ * Дженерик, а не `string | undefined`: прежняя сигнатура стирала союз, и каждое обращение
+ * сужалось обратно утверждением (`risk as 'low' | 'medium' | 'high'`). Утверждение — это
+ * обещание компилятору, а не проверка: расширь контракт седьмым тиром, и на экране появится
+ * пустая ячейка вместо ошибки сборки, причём в месте, которое никто не читал.
+ */
+const lastOf = <T,>(call: Call, pick: (event: Call['stages'][number]) => T | undefined): T | undefined =>
+  call.stages.reduce<T | undefined>((found, event) => pick(event) ?? found, undefined);
 
 /**
  * Панель деталей.
@@ -51,7 +59,7 @@ export function CallDetail({ call, onFilter }: { call: Call | null; onFilter: (v
           {risk !== undefined && (
             <>
               <dt>{STRINGS.detail.risk}</dt>
-              <dd>{riskLabel[risk as 'low' | 'medium' | 'high']}</dd>
+              <dd>{riskLabel[risk]}</dd>
             </>
           )}
           {cwd !== undefined && (
@@ -75,7 +83,7 @@ export function CallDetail({ call, onFilter }: { call: Call | null; onFilter: (v
               <dt>{STRINGS.detail.sandbox}</dt>
               <dd>
                 <span className={`badge badge--${sandbox === 'none' ? 'danger' : 'ok'}`}>
-                  {sandboxLabel[sandbox as 'none' | 'seatbelt' | 'container']}
+                  {sandboxLabel[sandbox]}
                 </span>
               </dd>
             </>

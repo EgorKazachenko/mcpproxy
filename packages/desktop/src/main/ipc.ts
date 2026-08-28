@@ -66,7 +66,17 @@ export function guarded(
     const request = parseUiRequest(payload);
     if (!request.ok) return request;
 
-    return run(request.value);
+    // WHY: `R7` («границы не бросают») держался только тем, что нынешний `run` тотален —
+    // структурно этого не закреплял ничто, а тип обёртки уже допускает асинхронный
+    // обработчик рана 2. Наружу уходит СТАТИЧЕСКИЙ текст: сообщение исключения понесло бы в
+    // рендерер внутренности главного процесса, а `contextBridge` всё равно срезает всё,
+    // кроме `message`.
+    try {
+      const reply = run(request.value);
+      return reply instanceof Promise ? reply.catch(() => denied('bad-payload', MESSAGES['bad-payload'])) : reply;
+    } catch {
+      return denied('bad-payload', MESSAGES['bad-payload']);
+    }
   };
 }
 

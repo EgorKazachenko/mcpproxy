@@ -22,8 +22,17 @@ const event = (n: number): ChainedEvent =>
     chain: { prev: null, self: 'x'.repeat(64) },
   }) as ChainedEvent;
 
-const EVENTS = [event(0), event(1), event(2), event(3)];
-const MARKS = { seatbelt: 0, none: 2 } as const;
+const EVENTS = [event(0), event(1), event(2), event(3), event(4), event(5)];
+
+/**
+ * Метки — как в настоящей фикстуре: **обе** ненулевые, и метка дорожки по умолчанию не первая.
+ *
+ * Прежние `{ seatbelt: 0, none: 2 }` структурно исключали единственную интересную ситуацию.
+ * В `demo.jsonl` лог начинается с отказанных вызовов, которые не принадлежат ни одной
+ * дорожке, поэтому метка `seatbelt` заведомо больше нуля — и именно там `replay()` резал
+ * `slice(метка, позиция)` и отдавал пустоту на перезагрузке рендерера.
+ */
+const MARKS = { none: 2, seatbelt: 4 } as const;
 
 /** Приёмник — обычная функция, поэтому IPC для проверки не нужен. */
 function harness() {
@@ -99,7 +108,49 @@ describe('createPlayer', () => {
     expect(seen[0]).toEqual({ kind: 'trace-reset', track: 'seatbelt' });
   });
 
+  /**
+   * Регрессия: со свежего старта прогон идёт с НАЧАЛА лога, а не с метки выбранной дорожки.
+   *
+   * Позиция стартовала нулём при дорожке, метка которой не ноль, и `replay()` срезал по метке —
+   * то есть перезагрузка рендерера стирала уже показанный список. Событий до метки в логе не
+   * бывает только в тесте; в фикстуре с них лог и начинается.
+   */
+  it('повтор со свежего старта отдаёт всё показанное, а не срез от метки дорожки', () => {
+    const { player, seen, traces } = harness();
+    player.apply({ kind: 'step' });
+    player.apply({ kind: 'step' });
+    expect(player.state().position).toBeLessThan(MARKS.seatbelt);
+
+    seen.length = 0;
+    player.replay();
+
+    expect(traces()).toHaveLength(2);
+  });
+
+  /** А после смены дорожки повтор обязан идти уже от её метки — иначе он покажет чужой прогон. */
+  it('после смены дорожки повтор идёт от её метки', () => {
+    const { player, seen, traces } = harness();
+    player.apply({ kind: 'select-track', track: 'none' });
+    player.apply({ kind: 'step' });
+
+    seen.length = 0;
+    player.replay();
+
+    expect(traces()).toHaveLength(1);
+    expect(traces()[0]).toMatchObject({ event: { traceId: `t${MARKS.none}` } });
+  });
+
   it('состояние сообщает длину трейса', () => {
     expect(harness().player.state().total).toBe(EVENTS.length);
+  });
+
+  /** Таймер снимается явной остановкой: закрытие окна не оставляет тикающий интервал. */
+  it('stop снимает таймер воспроизведения', () => {
+    const { player } = harness();
+    player.apply({ kind: 'play', speed: 1 });
+    expect(player.state().playing).toBe(true);
+
+    player.stop();
+    expect(player.state().playing).toBe(false);
   });
 });

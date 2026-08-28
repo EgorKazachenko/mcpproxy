@@ -78,6 +78,18 @@ function canonicalize(value: unknown, depth: number): string {
   const object = value as object;
 
   if (Array.isArray(object)) {
+    // Дырка — не значение, и молчать о ней нельзя. `map` её пропускает, а `join` всё равно
+    // ставит запятую, поэтому наружу уходило `[,3]` — не JSON вовсе. `JSON.stringify` того же
+    // массива пишет `[null,3]`, так что запись садилась на диск с одним дайджестом, а при
+    // перечитывании давала другой: в append-only логе навсегда оставался разрыв цепочки,
+    // и опечатка производителя выглядела как подделка. Замерено: `04c4e420…` на записи
+    // против `1b3db1e2…` на перечитанной. Отказ здесь — тот же `TypeError`, что и у
+    // нефинитного числа, и по той же причине: дайджест обязан быть от того, что уедет на диск.
+    for (let index = 0; index < object.length; index += 1) {
+      if (!Object.hasOwn(object, index)) {
+        throw new TypeError(`дырка в массиве в позиции ${index}: значение не канонизируется`);
+      }
+    }
     return `[${object.map((item) => canonicalize(item, depth + 1)).join(',')}]`;
   }
 

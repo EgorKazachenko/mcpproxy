@@ -2,6 +2,7 @@ import type { ChainedEvent, SandboxViolation, Stage, Verdict } from '@mcpproxy/c
 import { describe, expect, it } from 'vitest';
 import { foldCalls } from '../../shared/call.js';
 import { CALL_OUTCOMES } from '../../shared/callOutcome.js';
+import { stageLabel } from '@mcpproxy/design';
 import { STRINGS } from '../strings.js';
 import { callLine, groupBar } from './callLine.js';
 
@@ -72,6 +73,83 @@ describe('callLine', () => {
     expect(callLine(call).outcome).toBe('denied');
   });
 
+  /**
+   * Слово диспозиции обязано соглашаться с цветом: `R15` ставит его первым именно потому, что
+   * оно читается раньше цвета. `error` терминален, поэтому `open` у такого вызова ложно — и
+   * без своей ветки он доходил до `clean`, то есть красная строка подписывалась «Выполнено».
+   */
+  it('вызов с вердиктом error подписан failed, а не clean', () => {
+    const call = foldCalls([event('received'), event('spawn', 'error')])[0]!;
+    expect(callLine(call).outcome).toBe('failed');
+    expect(callLine(call).role).toBe('danger');
+    // Положительный контроль: тот же вызов с обычным вердиктом — именно `clean`, то есть
+    // зонд различает две ветки, а не всегда возвращает `failed`.
+    expect(callLine(foldCalls([event('received'), event('complete')])[0]!).outcome).toBe('clean');
+  });
+});
+
+/**
+ * Остаток строки — то, ЧТО случилось. Проверяется по всем четырём случаям макета: без него
+ * `CallList` печатал «тип: цель» и терял причину отказа, код выхода, объём в байтах и счётчик
+ * остальных нарушений.
+ */
+describe('callLine — остаток строки', () => {
+  it('у отказа несёт причину и стадию', () => {
+    const call = foldCalls([
+      event('received'),
+      event('validate', 'denied', { denyReason: 'значение не соответствует схеме' }),
+    ])[0]!;
+    const rest = callLine(call).rest;
+    expect(rest).toContain('значение не соответствует схеме');
+    expect(rest).toContain(stageLabel.validate);
+  });
+
+  it('у ожидания подтверждения объясняет, почему спрашивают вне контекста модели', () => {
+    const call = foldCalls([event('received'), event('classify_risk', 'pending_approval')])[0]!;
+    expect(callLine(call).rest).toBe(STRINGS.calls.awaitingNote);
+  });
+
+  it('у чистого вызова несёт код выхода и оверхед', () => {
+    const call = foldCalls([
+      event('received'),
+      event('complete', 'allowed', { exit: { code: 0, signal: null }, duration: { overheadMs: 7 } }),
+    ])[0]!;
+    const rest = callLine(call).rest;
+    expect(rest).toContain('0');
+    expect(rest).toContain('7');
+  });
+
+  /** Сценарий S5 спрашивает «ушли ли данные и сколько» — ответ обязан стоять в строке. */
+  it('у прошедшего насквозь нарушения несёт объём в байтах', () => {
+    const call = violated({ type: 'network', target: 'evil.io:443', action: 'allowed', bytes: 1247 }, 'none');
+    expect(callLine(call).rest).toContain('1247');
+  });
+
+  it('у отбитого нарушения объёма нет: нулевые байты — не новость', () => {
+    const call = violated({ type: 'network', target: 'evil.io:443', action: 'denied', bytes: 0 }, 'seatbelt');
+    expect(callLine(call).rest).not.toContain('0 ');
+    expect(callLine(call).rest).toContain('evil.io:443');
+  });
+
+  it('второе и последующие нарушения считаются, а не пропадают', () => {
+    const call = foldCalls([
+      event('received'),
+      event('violation', 'allowed', {
+        sandbox: {
+          mode: 'none',
+          violations: [
+            { type: 'network', target: 'evil.io:443', action: 'allowed', bytes: 1247 },
+            { type: 'file-read', target: '/Users/y/.aws/credentials', action: 'allowed', bytes: 512 },
+          ],
+        },
+      }),
+      event('complete'),
+    ])[0]!;
+    expect(callLine(call).rest).toContain(STRINGS.calls.andMore(1).trim());
+  });
+});
+
+describe('callLine — бейдж и режим', () => {
   /**
    * Две оси расходятся ровно здесь: попытка отбита, ничего не прошло, но строка красная —
    * и зелёный бейдж вердикта рядом спорил бы сам с собой. Правило «глушить только

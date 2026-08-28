@@ -24,8 +24,14 @@ export const STAGE_TEMPLATES: Readonly<Record<Stage, Template>> = {
   classify_risk: (e) => (e.risk === undefined ? STRINGS.stage.riskUnknown : riskLabel[e.risk.tier]),
   approval: (e) => (e.approval === undefined ? STRINGS.stage.approvalPending : STRINGS.stage.approvalDone),
   build_env: (e) => (e.env?.allowed ?? []).join(' ') || STRINGS.stage.envEmpty,
+  // WHY: ветвиться здесь по `sandbox.mode` нельзя — таблица контракта
+  // (`packages/contracts/src/event.ts`) говорит, что `mode` впервые появляется на `spawn`, а
+  // `build_profile` вводит `sandbox.profile`. Прежняя ветка по `mode === 'none'` не срабатывала
+  // никогда: у baseline-прогона ключа `sandbox` на этой стадии нет вовсе, и небезопасный запуск
+  // рисовался зелёным «профиль применён» — в центре сценария S5. Признак применения профиля —
+  // сам профиль.
   build_profile: (e) =>
-    e.sandbox?.mode === 'none' ? STRINGS.stage.profileSkipped : STRINGS.stage.profileApplied,
+    e.sandbox?.profile === undefined ? STRINGS.stage.profileSkipped : STRINGS.stage.profileApplied,
   // WHY: `argv` впервые появляется на `build_argv` и на событии `spawn` может не
   // повторяться. Без запасной строки шаблон отдавал бы пустоту, и строка стадии молча
   // исчезала бы с экрана — это нашёл тест полноты, а не чтение.

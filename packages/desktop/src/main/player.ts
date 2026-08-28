@@ -7,6 +7,8 @@ export interface Player {
   readonly state: () => PlayerState;
   /** Повторяет уже отданные события. Нужен `hello`: рендерер подписывается позже, чем main начинает. */
   readonly replay: () => void;
+  /** Снимает таймер. Зовётся при закрытии окна: отправлять события некому. */
+  readonly stop: () => void;
 }
 
 /** Позиции начала прогонов в общем массиве событий. */
@@ -30,6 +32,13 @@ export function createPlayer(
   emit: (event: UiEvent) => void,
 ): Player {
   let track: TrackId = 'seatbelt';
+  // WHY: откуда идёт ТЕКУЩИЙ прогон — не то же самое, что метка выбранной дорожки. На старте
+  // это ноль: лог начинается с двух отказанных вызовов (S3, S4), которые не принадлежат ни
+  // одной дорожке, и прыжок сразу на `marks.seatbelt` спрятал бы их навсегда. Прежде здесь
+  // была только `position = 0` при `track = 'seatbelt'`, чья метка 20 — и `replay()` резал
+  // `slice(20, position)`, то есть на перезагрузке рендерера отдавал пустоту и стирал уже
+  // показанный список.
+  let origin = 0;
   let position = 0;
   let timer: ReturnType<typeof setInterval> | null = null;
 
@@ -65,7 +74,8 @@ export function createPlayer(
   const reset = (to: TrackId): void => {
     pause();
     track = to;
-    position = marks[to];
+    origin = marks[to];
+    position = origin;
     // WHY: обе команды делают накопленный рендерером массив недействительным. Без явного
     // сообщения рендереру пришлось бы ВЫВОДИТЬ сброс из гонки состояния с событиями.
     emit({ kind: 'trace-reset', track });
@@ -94,9 +104,9 @@ export function createPlayer(
 
   const replay = (): void => {
     emit({ kind: 'trace-reset', track });
-    for (const event of events.slice(marks[track], position)) emit({ kind: 'trace-event', event });
+    for (const event of events.slice(origin, position)) emit({ kind: 'trace-event', event });
     announce();
   };
 
-  return { apply, state, replay };
+  return { apply, state, replay, stop: pause };
 }

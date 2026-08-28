@@ -1,4 +1,4 @@
-import { stageLabel } from '@mcpproxy/design';
+import { stageLabel, violationRole } from '@mcpproxy/design';
 import type { ChainedEvent } from '@mcpproxy/contracts';
 import { STRINGS } from '../strings.js';
 import { MachineText } from './MachineText.js';
@@ -14,9 +14,23 @@ const duration = (us: number): string => {
 
 const ICON: Readonly<Record<string, string>> = { ok: '✓', warn: '⊘', danger: '✕' };
 
+/**
+ * Роль строки стадии.
+ *
+ * `build_profile` спрашивает про **профиль**, а не про режим: `sandbox.mode` по таблице
+ * контракта впервые появляется на `spawn`, поэтому прежняя проверка `mode === 'none'` не
+ * срабатывала никогда и небезопасный прогон получал зелёную галочку.
+ *
+ * У `violation` роль берётся из `violationRole(type, action)`, а не пишется плоским `warn`:
+ * `R24` и есть про то, что отбитое нарушение и прошедшее насквозь — разные новости, и
+ * плоский янтарь красил успешную утечку так же, как отбитую попытку.
+ */
 const roleOf = (event: ChainedEvent): string => {
-  if (event.stage === 'build_profile' && event.sandbox?.mode === 'none') return 'danger';
-  if (event.stage === 'violation') return 'warn';
+  if (event.stage === 'build_profile') return event.sandbox?.profile === undefined ? 'danger' : 'ok';
+  if (event.stage === 'violation') {
+    const violation = event.sandbox?.violations?.[0];
+    return violation === undefined ? 'warn' : violationRole(violation.type, violation.action);
+  }
   if (event.verdict === 'denied') return 'warn';
   if (event.verdict === 'error') return 'danger';
   return 'ok';

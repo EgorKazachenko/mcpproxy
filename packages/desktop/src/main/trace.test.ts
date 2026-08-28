@@ -76,6 +76,47 @@ describe('закоммиченная фикстура', () => {
     const events = unwrap(readTrace(await load('demo.jsonl')));
     const built = events.filter((e) => e.stage === 'build_argv');
     expect(built.length).toBeGreaterThan(0);
-    for (const event of built) expect(event.argvFromParams).toEqual([3]);
+
+    const withOrigin = built.filter((e) => e.argvFromParams !== undefined);
+    expect(withOrigin.length).toBeGreaterThan(0);
+
+    // Инвариант поля, а не одно ожидаемое значение: индексы обязаны указывать в `argv` ТОГО
+    // ЖЕ события. Прежняя редакция ждала ровно `[3]` у каждого события и была верна только
+    // пока в логе жил один рецепт.
+    for (const event of withOrigin) {
+      const argv = event.argv ?? [];
+      for (const index of event.argvFromParams ?? []) {
+        expect(Number.isInteger(index)).toBe(true);
+        expect(index).toBeGreaterThanOrEqual(0);
+        expect(index).toBeLessThan(argv.length);
+      }
+    }
+
+    // И обратная половина `R13`: где из параметров не подставлялось ничего, ключа НЕТ вовсе.
+    expect(built.some((e) => !Object.hasOwn(e, 'argvFromParams'))).toBe(true);
+  });
+
+  /**
+   * `R13` просит покрыть фикстурами сценарии S1–S9. Покрыты те, у которых в ране 1 есть
+   * поверхность: таймлайн показывает вызовы, а не политику и не журнал.
+   *
+   * Проверяется исходами, а не именами сценариев: имя в фикстуре — комментарий, а исход —
+   * то, что действительно отрисуется. S3 и S4 дают отказ на `validate` и на `resolve_paths`,
+   * S5 — пару прогонов с прошедшим и отбитым нарушением, S6 — `mandatory-deny`, S7 — стоп на
+   * `lock_check`, S8 — ожидание подтверждения.
+   */
+  it('покрывает сценарии, у которых в этом ране есть поверхность', async () => {
+    const calls = foldCalls(unwrap(readTrace(await load('demo.jsonl'))));
+    const stoppedAt = (stage: string) =>
+      calls.some((c) => c.verdict === 'denied' && c.stages[c.stages.length - 1]?.stage === stage);
+    const violations = calls.flatMap((c) => c.stages.flatMap((e) => e.sandbox?.violations ?? []));
+
+    expect(stoppedAt('validate')).toBe(true); // S3
+    expect(stoppedAt('resolve_paths')).toBe(true); // S4
+    expect(stoppedAt('lock_check')).toBe(true); // S7
+    expect(violations.some((v) => v.action === 'allowed')).toBe(true); // S5, прогон без песочницы
+    expect(violations.some((v) => v.action === 'denied')).toBe(true); // S5, прогон с песочницей
+    expect(violations.some((v) => v.type === 'mandatory-deny')).toBe(true); // S6
+    expect(calls.some((c) => c.verdict === 'pending_approval')).toBe(true); // S8
   });
 });
