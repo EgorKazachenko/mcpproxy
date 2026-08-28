@@ -1,0 +1,10 @@
+{
+  "feature": "docs/vibe-coding/27.08.2026-e6-audit",
+  "branch": "v2/e6-audit",
+  "baseSha": "e40b7defb42add5ade60cc85192e63ad42aa7b4a",
+  "mode": "attended",
+  "track": "lite",
+  "agentConsent": true,
+  "createdAt": "2026-08-27T20:45:04.494Z",
+  "killReviewDue": "2026-10-26"
+}

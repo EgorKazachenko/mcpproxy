@@ -16,6 +16,11 @@ const ALLOW_LIST = [
   'yarn.lock',
   'docs/vibe-coding/27.08.2026-e1-policy/**',
   'docs/vibe-coding/27.08.2026-e0-contracts/.gates/run.json',
+  // Второе исключение (владелец, 2026-08-28): E6 смержилась раньше E1 и завела в `core`
+  // собственные правила, два из которых E1 нарушает по существу. Обоснование — spec.md, R24.
+  'packages/core/src/deps.test.ts',
+  'packages/core/src/coverage.test.ts',
+  'packages/core/api-surface.snapshot.txt',
 ];
 
 const repoRoot = process.argv[2] ?? process.cwd();
