@@ -1,143 +1,146 @@
-# 10 — Честные границы
+# 10 — Honest Limitations
 
-Этот документ существует, потому что техническая аудитория верит проекту, который
-знает свои пределы, и не верит проекту, который «всё защитил».
-Финальный слайд демо собирается отсюда.
+This document exists because a technical audience trusts a project that knows its limits,
+and does not trust a project that claims to have "protected everything."
+The final demo slide is assembled from this document.
 
-## Что мы защищаем хорошо
+## What We Protect Well
 
-| Область | Механизм | Почему уверены |
+| Area | Mechanism | Why we're confident |
 |---|---|---|
-| Инъекция команд через параметры | argv-only, схемы с обязательным regex | Структурная защита: строки команды не существует |
-| Выход за границы директорий | realpath + confinement, плюс `denyRead`/`allowWrite` в ядре | Две независимые линии |
-| Утечка секретов из окружения | env-allowlist — секреты не попадают в процесс | Защита на входе, а не фильтрация на выходе |
-| Эксфильтрация в неразрешённый домен | Deny-by-default egress через прокси | Ядерное ограничение, наследуется на всё дерево процессов |
-| Persistence через shell-конфиги и git-hooks | Неснимаемые mandatory deny paths | Нельзя разрешить по ошибке |
-| Тихая подмена рецепта | Lock-файл + diff-approve | Подтверждено CVE-2025-54136 как реальный класс |
-| Подделка подтверждения | Out-of-band канал вне контекста модели | Подтверждение не живёт в скомпрометированном канале |
-| Незаметное изменение истории вызовов | Hash-chain аудит | Расхождение обнаруживается детерминированно |
+| Command injection via parameters | argv-only, schemas with mandatory regex | Structural protection: there is no command string to inject into |
+| Escaping directory boundaries | realpath + confinement, plus `denyRead`/`allowWrite` in the kernel | Two independent lines of defense |
+| Secret leakage from the environment | env-allowlist — secrets never enter the process | Protection at the entry point, not filtering at the exit |
+| Exfiltration to a disallowed domain | Deny-by-default egress through the proxy | A kernel-level restriction, inherited by the whole process tree |
+| Persistence via shell configs and git hooks | Non-removable mandatory deny paths | Cannot be allowed by mistake |
+| Silent recipe substitution | Lock file + diff-approve | Confirmed as a real attack class by CVE-2025-54136 |
+| Forging confirmation | Out-of-band channel outside the model's context | The confirmation doesn't live in a channel that can be compromised |
+| Undetected tampering with the call history | Hash-chain audit | A discrepancy is detected deterministically |
 
-## Что мы защищаем частично
+## What We Protect Partially
 
-| Область | Что работает | Где дыра |
+| Area | What works | Where the gap is |
 |---|---|---|
-| **Эксфильтрация в разрешённый домен** | Домены вне allowlist блокируются | Разрешил `github.com` → можно запушить данные в свой репозиторий. Фильтрация по доменам, не по содержимому |
-| **Domain fronting** | Обычный трафик фильтруется | Технически обходится, прокси не инспектирует содержимое |
-| **Indirect prompt injection в выводе** | Вывод помечен как недоверенный, сканируется, обрезается | Модель всё равно его читает. Мы уменьшаем вероятность, не устраняем класс |
-| **Редакция секретов в выводе** | Двусторонний скан: 22 правила из gitleaks/Secrets-Patterns-DB на движке RE2 плюс энтропия по base64. Порядок заморожен — редакция ИДЁТ ДО обрезки, иначе потолок байт разрезает секрет и голова уезжает в модель | Два измеренных предела. **По длине:** энтропийный детектор ловит 1 % токенов длиной 23 символа, 29 % — длиной 28, 98 % — длиной 40. Короче ~28 символов он не работает по существу, и такие секреты держит только regex — то есть лишь те, у кого есть характерный префикс. **По алфавиту:** для hex порога не существует вовсе — 32-символьный ключ Twilio (энтропия p50 3.62) и git sha (3.70) неотличимы, и любой порог, ловящий первый, вырезает каждый второй. Это и есть причина, по которой И4 называет редакцию страховочной сеткой, а настоящей защитой — env-allowlist на входе |
-| **Секрет-параметр без характерного формата** | Именованные правила вырезают его из копии `argv` для журнала | Энтропийный детектор на входящем направлении выключен сознательно: на `argv` он даёт ложняки на путях и идентификаторах сборки, а плейсхолдер вместо них уничтожает криминалистическую ценность записи. Итог: длинный сессионный ключ, переданный моделью в параметре, попадает в append-only журнал **дословно** и уезжает в экспорт |
-| **Потолок вывода считается на каждый поток** | `stdout` и `stderr` режутся по `output.maxBytes` каждый | Значит в модель может уехать до `2 × maxBytes`. Общий бюджет был бы хуже: длинный `stdout` съедал бы `stderr` целиком, и при упавшей сборке модель получила бы гору логов без строки ошибки. Но схема события несёт **одну** пару `output.{bytes,truncated}`, и читать `bytes ≤ maxBytes` как инвариант нельзя |
-| **Качество regex в манифесте** | `string` без `pattern` — ошибка загрузки | Слабый regex, написанный автором, — слабая первая линия. Спасает только вторая |
-| **ReDoS через `pattern` манифеста** | Паттерны компилируются **RE2**, который не бэктрекит вовсе; внутри демона потребителю отдаётся скомпилированный матчер, а не строка | Гарантия кончается на границе демона: **сама строка `pattern` уезжает MCP-клиенту** в `Tool.inputSchema`, а его движок бэктрекает — `^(a+)+$` законен для RE2. Плюс RE2 не поддерживает lookahead и обратные ссылки, то есть законный паттерн может не приняться, и остаточная цена: `re2` собирается нативно у каждого разработчика и на каждом раннере CI |
-| **TOCTOU при резолве путей** | Резолв корректный | Файл можно подменить между резолвом и открытием. Митигируется тем, что `denyRead` в песочнице от резолва не зависит |
-| **Усталость от подтверждений** | Тиры выводятся автоматически, high-risk редок | Если высокорисковых операций много, человек начнёт нажимать не глядя |
-| **Запись в исполняемые файлы проекта** | Persistence-пути вне проекта закрыты | Внутри разрешённой директории проекта запись в скрипт возможна — осознанный компромисс ради работоспособности |
+| **Exfiltration to an allowed domain** | Domains outside the allowlist are blocked | Once you allow `github.com`, you can push data to your own repository. Filtering is by domain, not by content |
+| **Domain fronting** | Normal traffic is filtered | Technically bypassable — the proxy doesn't inspect content |
+| **Indirect prompt injection in output** | Output is marked untrusted, scanned, and truncated | The model still reads it. We reduce the probability; we don't eliminate the class |
+| **Secret redaction in output** | Two-sided scan: 22 rules from gitleaks/Secrets-Patterns-DB on the RE2 engine plus base64 entropy scoring. The order is frozen — redaction happens BEFORE truncation, otherwise the byte cap would cut a secret in half and the head would leak into the model | Two measured limits. **By length:** the entropy detector catches 1% of tokens 23 characters long, 29% at 28 characters, 98% at 40 characters. Below ~28 characters it essentially doesn't work, and such secrets are caught only by regex — meaning only the ones with a characteristic prefix. **By alphabet:** for hex there is no threshold at all — a 32-character Twilio key (entropy p50 3.62) and a git sha (3.70) are indistinguishable, and any threshold that catches the first also cuts out every other git sha. This is exactly why И4 calls redaction a safety net, with the real protection being the env-allowlist at the entry point |
+| **Secret parameter without a characteristic format** | Named rules strip it from the `argv` copy used for logging | The entropy detector is deliberately disabled on the inbound direction: on `argv` it produces false positives on paths and build identifiers, and a placeholder in their place destroys the forensic value of the record. The result: a long session key passed by the model as a parameter lands in the append-only log **verbatim** and ends up in exports |
+| **The output cap applies per stream** | `stdout` and `stderr` are each capped at `output.maxBytes` | This means up to `2 × maxBytes` can reach the model. A shared budget would be worse: a long `stdout` would eat all of `stderr`, and on a failed build the model would get a pile of logs with no error line. But the event schema carries a **single** `output.{bytes,truncated}` pair, so `bytes ≤ maxBytes` cannot be read as an invariant |
+| **Regex quality in the manifest** | A `string` without a `pattern` is a load error | A weak regex written by the author is a weak first line of defense. Only the second line saves you |
+| **ReDoS via the manifest `pattern`** | Patterns are compiled with **RE2**, which never backtracks; inside the daemon, consumers are handed a compiled matcher, not a string | The guarantee ends at the daemon boundary: **the `pattern` string itself travels to the MCP client** inside `Tool.inputSchema`, and the client's engine does backtrack — `^(a+)+$` is a legal RE2 pattern. Also, RE2 doesn't support lookahead or backreferences, so a legitimate pattern may be rejected, and there's a residual cost: `re2` is a native module built on every developer's machine and on every CI runner |
+| **TOCTOU during path resolution** | Resolution is correct | The file can be swapped between resolution and opening. Mitigated by the fact that `denyRead` in the sandbox doesn't depend on resolution |
+| **Confirmation fatigue** | Tiers are assigned automatically, high-risk is rare | If there are too many high-risk operations, a human will start clicking through without looking |
+| **Writing to the project's executable files** | Persistence paths outside the project are closed | Inside the project's allowed directory, writing to a script is possible — a deliberate trade-off for usability |
 
-### ReDoS: чего стоил замер
+### ReDoS: What the Measurement Cost
 
-Вектора не было в модели угроз, и первая формулировка защиты была неверной. Замер на
-node 22.15.0: `(a+)+$` на входе в 30 символов — 4.5 с, рост ×4 на каждые +2 символа;
-экстраполяция на 64 символа — величина порядка 10¹³ мс. **Ограничение длины входа не
-спасает** — 64 символа это длина из нашего же примера `^[\w./-]{0,64}$`. RE2 на том же
-паттерне и той же длине — 0.009 мс.
+This vector wasn't in the threat model, and the first formulation of the defense was wrong.
+Measured on node 22.15.0: `(a+)+$` on a 30-character input — 4.5 s, growing ×4 for every +2
+characters; extrapolated to 64 characters — on the order of 10¹³ ms. **Limiting input length
+does not save you** — 64 characters is the length from our own example `^[\w./-]{0,64}$`. RE2 on
+the same pattern at the same length — 0.009 ms.
 
-Закрыто **внутри демона**, на двух границах: паттерн компилируется RE2 на загрузке манифеста
-(не компилируется — ошибка загрузки с кодом `pattern` и указанием причины), и потребителю
-внутри процесса отдаётся скомпилированный матчер, у которого наружу не выставлены ни
-`source`, ни `flags`. Матчер существует именно затем, чтобы E2 не приходилось звать
-`new RegExp(pattern)` и возвращать вектор, закрытый на загрузке.
+Closed **inside the daemon**, at two boundaries: the pattern is compiled with RE2 at manifest
+load time (if it fails to compile — a load error with code `pattern` and a stated reason), and
+consumers inside the process are handed a compiled matcher that exposes neither `source` nor
+`flags`. The matcher exists precisely so that E2 never has to call `new RegExp(pattern)` and
+reopen a vector that was closed at load time.
 
-**Чего эта граница НЕ закрывает, и раньше здесь было написано сильнее, чем есть на самом
-деле.** Сама строка `pattern` из пакета никуда не исчезает: она обязательна в схеме, из
-схемы же генерируется тип, поэтому лежит в `Manifest`, — и, главное, `toTool` кладёт её в
-`inputSchema`, который уезжает модели через `tools/list`. Без неё модели нечем валидировать
-аргумент. То есть недоверенная строка доезжает до JS-движка MCP-клиента, а он бэктрекает.
-Конкретно: `^(a+)+$` — **законный** паттерн манифеста (RE2 линеен на нём и проходит его за
-0.009 мс, `parseManifest` возвращает `ok: true`), и он же уезжает клиенту строкой. Синтаксис
-RE2 запрещает lookahead и обратные ссылки, но вложенные квантификаторы разрешает, поэтому
-«RE2 принял» не означает «безопасно у потребителя». Гарантия распространяется на демон, не
-на MCP-клиента.
+**What this boundary does NOT close — and earlier this was overstated relative to reality.**
+The `pattern` string from the package doesn't disappear: it's mandatory in the schema, the type
+is generated from that same schema, so it lives in `Manifest` — and, crucially, `toTool` places
+it into `inputSchema`, which travels to the model via `tools/list`. Without it, the model has no
+way to validate the argument. That means the untrusted string does reach the MCP client's JS
+engine, and that engine does backtrack. Concretely: `^(a+)+$` is a **legal** manifest pattern
+(RE2 is linear on it and passes it in 0.009 ms, `parseManifest` returns `ok: true`), and that
+same pattern travels to the client as a string. RE2's syntax forbids lookahead and backreferences
+but allows nested quantifiers, so "RE2 accepted it" does not mean "safe at the consumer." The
+guarantee extends to the daemon, not to the MCP client.
 
-Цена, которую платим: синтаксис RE2 объявлен частью контракта, поэтому lookahead и обратные
-ссылки в манифесте не работают — и не работают они и в **нашей собственной** схеме, потому
-что тот же движок проведён в валидатор. Плюс `re2` — нативный модуль: он собирается у
-каждого разработчика и на каждом раннере CI независимо от того, какой вход его импортирует,
-потому что у пакетных менеджеров нет скоупинга зависимостей по entry point. Проверен только
-macOS arm64; сборка на Linux и Windows не проверялась.
+The price we pay: RE2 syntax is declared part of the contract, so lookahead and backreferences
+don't work in the manifest — and they don't work in **our own** schema either, because the same
+engine is threaded into the validator. Also, `re2` is a native module: it gets built on every
+developer's machine and on every CI runner regardless of which entry point imports it, because
+package managers have no dependency scoping by entry point. Only macOS arm64 has been verified;
+building on Linux and Windows has not been tested.
 
-### Каноничная сериализация: что не покрыто
+### Canonical Serialization: What's Not Covered
 
-Реализация JCS (RFC 8785) проверена на векторах из текста RFC, включая граничные значения
-чисел, порядок ключей по кодовым единицам UTF-16 и экранирование. Полный числовой файл
-`es6testfile100m.txt` (≈3.8 ГБ, 100 млн значений) **не вендорится и не прогоняется** —
-покрытие числового домена частичное.
+The JCS (RFC 8785) implementation is verified against the test vectors from the RFC text,
+including boundary numeric values, key ordering by UTF-16 code units, and escaping. The full
+numeric test file `es6testfile100m.txt` (≈3.8 GB, 100 million values) **is neither vendored nor
+run** — coverage of the numeric domain is partial.
 
-## Что мы не защищаем вообще
+## What We Don't Protect At All
 
-| Не защищаем | Почему |
+| Not protected | Why |
 |---|---|
-| **Злонамеренного пользователя** | Это его машина. Модель угроз — «пользователь доброжелателен, но контент недоверенный» |
-| **Ядро macOS и сам `sandbox-exec`** | Мы полагаемся на ОС. Уязвимость в seatbelt пробивает нас насквозь. Плюс Apple формально считает `sandbox-exec` deprecated |
-| **Саму модель** | Мы не влияем на то, что модель решит вызвать. Мы влияем только на то, что она физически может вызвать и что вызванное может сделать |
-| **Цепочку поставки Node/npm до запуска** | Мы ловим поведение вредоносной зависимости в рантайме. Мы не проверяем провенанс пакетов (это делают Docker MCP Gateway через `--verify-signatures` и подобные) |
-| **Tamper-proof аудит** | Наш лог tamper-**evident**. Атакующий с правами на файл перепишет его целиком и пересчитает цепочку. Лечится публикацией Merkle-корня наружу — дёшево, но не в текущем срезе |
-| **Обрезание хвоста лога** | Удалив последние записи целиком, атакующий оставляет цепочку согласованной: предикат проверки связывает запись с предыдущей, а не с внешним якорем. Нужен тот же Merkle-корень или внешняя метка времени |
-| **Инъекцию обычным текстом в `description`** | Санитизация вырезает невидимое — управляющие символы, ANSI, zero-width, bidi — и ограничивает длину. Текст `IGNORE PREVIOUS INSTRUCTIONS` она не трогает и трогать не может: контракт обещает, что описание **уменьшено**, а не что оно безопасно |
-| **Многопользовательские и корпоративные сценарии** | RBAC, SSO, политика на флот агентов — это задача MCP-гейтвеев, не наша |
-| **Windows и Linux** | Интерфейс песочницы кроссплатформенный, реализована только macOS/seatbelt |
+| **A malicious user** | It's their machine. The threat model is "the user is benevolent, but content is untrusted" |
+| **The macOS kernel and `sandbox-exec` itself** | We rely on the OS. A vulnerability in seatbelt goes straight through us. Also, Apple formally considers `sandbox-exec` deprecated |
+| **The model itself** | We have no influence over what the model decides to call. We only influence what it can physically call and what the called thing can do |
+| **The Node/npm supply chain prior to execution** | We catch a malicious dependency's behavior at runtime. We don't verify package provenance (that's done by Docker MCP Gateway via `--verify-signatures` and similar tools) |
+| **Tamper-proof audit** | Our log is tamper-**evident**. An attacker with file permissions can rewrite it entirely and recompute the chain. Fixed by publishing the Merkle root externally — cheap, but not in the current scope |
+| **Truncating the tail of the log** | By removing the last entries entirely, an attacker leaves the chain internally consistent: the verification predicate links each record to the previous one, not to an external anchor. Needs the same Merkle root or an external timestamp |
+| **Plain-text injection in `description`** | Sanitization strips invisible content — control characters, ANSI, zero-width, bidi — and caps length. It does not and cannot touch text like `IGNORE PREVIOUS INSTRUCTIONS`: the contract promises that the description is **reduced**, not that it is safe |
+| **Multi-user and enterprise scenarios** | RBAC, SSO, fleet-wide agent policy — that's the job of MCP gateways, not ours |
+| **Windows and Linux** | The sandbox interface is cross-platform, but only macOS/seatbelt is implemented |
 
-## Известные слабости заимствованного слоя
+## Known Weaknesses of the Borrowed Layer
 
-Задекларированы в `@anthropic-ai/sandbox-runtime` и наследуются нами:
+Declared in `@anthropic-ai/sandbox-runtime` and inherited by us:
 
-- `allowUnixSockets` с `/var/run/docker.sock` = полный доступ к хосту
-- `enableWeakerNetworkIsolation` (нужен для Go TLS) открывает вектор через `trustd`
-- `allowAppleEvents` «removes code-execution isolation» — приложения, запущенные через
-  `open`/`osascript`, работают вне песочницы
-- Запись в разрешённой директории в файл, который потом исполнится, — обход
-- На Linux bubblewrap блокирует только существующие файлы
+- `allowUnixSockets` with `/var/run/docker.sock` = full host access
+- `enableWeakerNetworkIsolation` (needed for Go TLS) opens a vector through `trustd`
+- `allowAppleEvents` "removes code-execution isolation" — applications launched via
+  `open`/`osascript` run outside the sandbox
+- Writing, inside an allowed directory, to a file that later gets executed — a bypass
+- On Linux, bubblewrap only blocks files that already exist
 
-Мы эти флаги **не поддерживаем вовсе**: `allowUnixSockets`, `allowAppleEvents` и
-`enableWeakerNetworkIsolation` в замороженном `SandboxProfile` манифеста невыразимы — поля под
-них нет и добавить его нельзя. Бейдж «ослабленный режим» в UI носит то, что выразимо: голая
-`*` в `network.allow` и шаблоны, которые схема вендора считает слишком широкими (`*.com`).
+We **don't support these flags at all**: `allowUnixSockets`, `allowAppleEvents`, and
+`enableWeakerNetworkIsolation` are inexpressible in the manifest's frozen `SandboxProfile` — there
+is no field for them and none can be added. The "weakened mode" badge in the UI covers what is
+expressible: a bare `*` in `network.allow` and patterns the vendor's schema considers too broad
+(`*.com`).
 
-## Что показала разведка srt: границы, обнаруженные замером
+## What the srt Investigation Found: Boundaries Discovered by Measurement
 
-Разделено с предыдущим списком намеренно: там — то, что задекларировал вендор, здесь — то,
-что мы выяснили пробами на `@anthropic-ai/sandbox-runtime@0.0.74` (`docs/vibe-coding/27.08.2026-e3-sandbox/probes.md`).
+Deliberately kept separate from the previous list: that one is what the vendor declared;
+this one is what we found through probes on `@anthropic-ai/sandbox-runtime@0.0.74`
+(`docs/vibe-coding/27.08.2026-e3-sandbox/probes.md`).
 
-| Граница | Что именно | Замер |
+| Boundary | Specifics | Measurement |
 |---|---|---|
-| **Настоящих `setrlimit` нет** | Форк-бомба ловится таймаутом и `SIGKILL` по **группе** процессов, а не лимитом на число процессов или на память. Убийство по одному pid оставляет дерево живым | П4: `выживших sleep после kill(pid): 3` против `после kill(-pgid): 0` |
-| **В цепочке на macOS есть `bash -c`** | Обёртка srt отдаёт `['/bin/bash', '-c', <строка>]`. Строки команды не существует **до** песочницы, но внутри обёртки она появляется | П1: `argv[0] = /bin/bash`, `argv.length = 3` |
-| **`none` не видит процесс, игнорирующий proxy-переменные** | Сырой сокет, Go, JVM без агента идут мимо прокси. В baseline они просто не наблюдаются | следствие механизма D2 |
-| **Сырой TCP через SOCKS не доходит до нашего колбэка** | Отказ по нему в поток нарушений попадает (его пишет прокси), а **разрешённое** соединение не порождает записи вовсе: `filterRequest` зовётся только на двух HTTP-путях, а вендор пишет в стор нарушений лишь на отказах. То есть для сырого TCP счётчик «сколько ушло» не просто нулевой — записи нет. Ограничен такой трафик только объединением доменов манифеста | П9: нога с `nc` неинформативна, поведение SOCKS-пути помечено `ASSUMED` |
-| **Мы терминируем TLS дочернего процесса** | `network.tlsTerminate` включён ради байт S5, поэтому демон видит **полные URL с query и тела HTTPS-запросов** ребёнка. Наружу это не уходит — прокси локальный, — но внутри демона содержимое доступно | П10: `bodyBytes: 1234` для HTTPS POST |
-| **Loopback закрыт и адресами не открывается** | `127.0.0.1` и все RFC1918-диапазоны зашиты в `NO_PROXY` вендором, поэтому `network.allow: ["127.0.0.1"]` не даёт ничего: клиент идёт мимо прокси, а seatbelt отказывает. Тесты и корпус атак обязаны ходить на **имя** | чтение `sandbox-utils.js`: `NO_PROXY=localhost,127.0.0.1,::1,169.254.0.0/16,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16` |
-| **Заблокированный HTTP не роняет команду** | Дочерний процесс получает `exit=0` и тело `Connection blocked by network allowlist`. Значит метрика Utility under Attack обязана отличать «команда отработала» от «команду резали» по violations, а не по коду возврата | П2: `exit=0`, тело в stdout |
-| **Сетевая политика применяется по одному вызову за раз** | `updateConfig` подменяет **глобальный** конфиг, поэтому вызовы сериализуются семафором с потолком 1. Демон не исполняет два рецепта параллельно, пока действует сетевое ограничение | П5: `customConfig.network` не действует вовсе |
-| **Исполненный набор записи всегда шире манифестного** | srt при каждой обёртке доливает `getDefaultWritePaths()` — `/tmp/claude`, `~/.npm/_logs`, `~/.claude/debug`, `/dev/*`, — плюс свои mandatory-deny и пути учётных данных. Модалка согласия показывает **манифестный** набор | чтение `sandbox-utils.js` |
-| **Счётчик файловых нарушений — нижняя оценка** | Монитор ядра отдаёт не более одного нарушения на чанк вывода `log stream`, поэтому всплеск файловых отказов коалесцируется вендором. Сетевые отказы считаются точно: каждый — одна запись без дедупликации | чтение `macos-sandbox-utils.js`; замера коалесценции нет |
-| **Обязательные запреты якорятся на cwd демона** | `macGetMandatoryDenyPatterns` строит пути от `process.cwd()` **демона**, а параметр `cwd` у `wrapWithSandboxArgv` на macOS не используется. Мы собираем свой список и якорим его на каждом корне `write.allow`; вендорский остаётся сверх нашего | П3 против П3b: та же запись `exit=0` и `exit=1` при единственном отличии в cwd |
-| **Процесс, ушедший в новую группу через `setsid`** | Переживает убийство группы **и остаётся невидимым для проверки**: пустоту мы спрашиваем у `kill(-pid, 0)`, а он про чужую группу ничего не знает. Значит вызов завершается тихо и зелено, без следа. Громкий отказ (R52) покрывает только потомка, ОСТАВШЕГОСЯ в группе | П4 не покрывает |
+| **There is no real `setrlimit`** | A fork bomb is caught by a timeout and `SIGKILL` sent to the process **group**, not by a limit on the number of processes or on memory. Killing by a single pid leaves the tree alive | П4: "surviving sleep processes after kill(pid): 3" vs. "after kill(-pgid): 0" |
+| **On macOS, `bash -c` is in the chain** | The srt wrapper produces `['/bin/bash', '-c', <string>]`. There is no command string **before** the sandbox, but one appears inside the wrapper | П1: `argv[0] = /bin/bash`, `argv.length = 3` |
+| **`none` doesn't see a process that ignores proxy variables** | A raw socket, Go, or a JVM without an agent bypass the proxy entirely. In the baseline they simply go unobserved | consequence of mechanism D2 |
+| **Raw TCP through SOCKS doesn't reach our callback** | A denial on it does make it into the violations stream (the proxy writes that), but an **allowed** connection produces no record at all: `filterRequest` is only called on the two HTTP paths, and the vendor only writes to the violations store on denials. So for raw TCP, the "how much went out" counter isn't just zero — there's no record. Such traffic is bounded only by the manifest's domain union | П9: the `nc` leg is uninformative, the SOCKS-path behavior is marked `ASSUMED` |
+| **We terminate the child process's TLS** | `network.tlsTerminate` is enabled for S5's byte counts, so the daemon sees the child's **full URLs with query strings and HTTPS request bodies**. This doesn't leave the machine — the proxy is local — but the content is accessible inside the daemon | П10: `bodyBytes: 1234` for an HTTPS POST |
+| **Loopback is closed and cannot be opened by address** | `127.0.0.1` and all RFC1918 ranges are hardcoded by the vendor into `NO_PROXY`, so `network.allow: ["127.0.0.1"]` accomplishes nothing: the client bypasses the proxy and seatbelt denies it. Tests and the attack corpus must connect by **hostname** | reading `sandbox-utils.js`: `NO_PROXY=localhost,127.0.0.1,::1,169.254.0.0/16,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16` |
+| **A blocked HTTP request doesn't fail the command** | The child process gets `exit=0` and a body of `Connection blocked by network allowlist`. This means the Utility under Attack metric must distinguish "the command ran" from "the command was cut off" using violations, not the exit code | П2: `exit=0`, body in stdout |
+| **Network policy is applied one call at a time** | `updateConfig` swaps out the **global** config, so calls are serialized behind a semaphore with a cap of 1. The daemon cannot execute two recipes in parallel while a network restriction is in effect | П5: `customConfig.network` has no effect at all |
+| **The effective write set is always wider than the manifest's** | On every wrap, srt adds in `getDefaultWritePaths()` — `/tmp/claude`, `~/.npm/_logs`, `~/.claude/debug`, `/dev/*` — plus its own mandatory-deny entries and credential paths. The consent modal shows only the **manifest's** set | reading `sandbox-utils.js` |
+| **The file-violation counter is a lower bound** | The kernel monitor emits at most one violation per `log stream` output chunk, so a burst of file denials gets coalesced by the vendor. Network denials are counted exactly: each one is a single record with no deduplication | reading `macos-sandbox-utils.js`; coalescence itself hasn't been measured |
+| **Mandatory denies are anchored to the daemon's cwd** | `macGetMandatoryDenyPatterns` builds paths from the **daemon's** `process.cwd()`, and the `cwd` parameter of `wrapWithSandboxArgv` is not used on macOS. We build our own list and anchor it to every `write.allow` root; the vendor's list stays in effect on top of ours | П3 vs. П3b: the same write gives `exit=0` and `exit=1` with only the cwd differing |
+| **A process that escapes to a new group via `setsid`** | Survives the group kill **and stays invisible to verification**: we check emptiness with `kill(-pid, 0)`, which knows nothing about a different group. So the call finishes quietly and green, with no trace. The loud-failure guarantee (R52) only covers a child that STAYS in the group | not covered by П4 |
 
-## Формулировка для сцены
+## Framing for the Stage
 
-> Мы не решаем prompt injection. Мы сводим поверхность к нулю там, где раньше был shell,
-> и делаем всё остальное видимым.
+> We do not solve prompt injection. We reduce the attack surface to zero where a shell used
+> to be, and we make everything else visible.
 >
-> Мы не делаем атаку невозможной. Мы поднимаем её стоимость и гарантируем,
-> что она оставит след.
+> We do not make an attack impossible. We raise its cost and guarantee
+> that it leaves a trace.
 
-## Что честно считать провалом
+## What Honestly Counts as Failure
 
-Если по итогам замеров окажется, что:
+If the measurements end up showing that:
 
-- корпус атак пробивается через аргументы, пути или вывод — гипотеза опровергнута;
-- типовые задачи требуют больше 5% исключений — гипотеза опровергнута;
-- ложные блокировки выше 5% — гипотеза опровергнута;
-- baseline `sandbox: none` показывает ASR, близкий к seatbelt-режиму — значит песочница
-  не даёт улучшения, и гипотеза опровергнута.
+- the attack corpus gets through via arguments, paths, or output — the hypothesis is falsified;
+- typical tasks require more than 5% exceptions — the hypothesis is falsified;
+- false blocks exceed 5% — the hypothesis is falsified;
+- the `sandbox: none` baseline shows an ASR close to that of seatbelt mode — meaning the
+  sandbox provides no improvement, and the hypothesis is falsified.
 
-Эти пороги зафиксированы **до** прогона. Подгонять их после — значит не проводить эксперимент.
+These thresholds are fixed **before** the run. Adjusting them afterward means you're not
+running an experiment.
