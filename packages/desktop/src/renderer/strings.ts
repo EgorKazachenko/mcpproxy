@@ -2,131 +2,131 @@ import type { CallOutcome } from '../shared/callOutcome.js';
 import type { StageGroup } from '../shared/stageGroup.js';
 
 /**
- * Вся экранная проза приложения.
+ * All UI strings for the application.
  *
- * Один модуль, а не строки по месту: макет заморожен и служит источником истины для копии, и
- * без единственного дома сверить реализацию с ним нечем. Проверяется структурно — тест
- * обходит AST рендерера и общего слоя и падает на кириллице в строковом литерале, в тексте
- * JSX или в куске шаблонной строки. В комментариях кириллица разрешена: ими написан весь
- * репозиторий.
+ * Single module, not scattered strings: the mockup is frozen and serves as the source of truth
+ * for the copy, and without a single home there is no way to verify the implementation against it.
+ * Verified structurally — a test walks the AST of the renderer and shared layer and fails on
+ * Cyrillic in string literals, JSX text, or template string fragments. Cyrillic is allowed in
+ * comments: the entire repository is written that way.
  *
- * Подписи ДОМЕННЫХ значений сюда не дублируются — их дом в `@mcpproxy/design`, и второй
- * источник одного значения разошёлся бы с первым.
+ * Signatures of domain values are not duplicated here — their home is in `@mcpproxy/design`, and
+ * a second source of the same value would diverge from the first.
  */
 export const STRINGS = {
   app: {
     name: 'mcpproxy',
-    sandboxEyebrow: 'песочница',
-    unsandboxedBanner: 'Песочница выключена — baseline. Всё, что запустит вызов, выполняется с вашими правами.',
-    faultBanner: (reason: string): string => `Главный процесс отклонил команду: ${reason}`,
+    sandboxEyebrow: 'sandbox',
+    unsandboxedBanner: 'Sandbox is disabled — baseline. Everything this call executes will run with your permissions.',
+    faultBanner: (reason: string): string => `Main process rejected the command: ${reason}`,
   },
 
   nav: {
-    timeline: 'Таймлайн',
-    violations: 'Нарушения',
-    policy: 'Политика',
-    approvals: 'Апрувы',
-    audit: 'Аудит',
-    laterHead: 'Появится в следующем ране',
-    laterBody: 'Экран спроектирован и прошёл дизайн-ревью. Здесь он появится вместе с остальными поверхностями.',
+    timeline: 'Timeline',
+    violations: 'Violations',
+    policy: 'Policy',
+    approvals: 'Approvals',
+    audit: 'Audit',
+    laterHead: 'Coming in the next run',
+    laterBody: 'Screen designed and reviewed. It will appear here with the other surfaces.',
   },
 
   player: {
-    step: 'Шаг',
-    play: 'Играть',
-    pause: 'Пауза',
-    reset: 'Сброс',
+    step: 'Step',
+    play: 'Play',
+    pause: 'Pause',
+    reset: 'Reset',
     speed: (multiplier: number): string => `×${multiplier}`,
-    speedLabel: 'скорость воспроизведения',
-    position: (position: number, total: number): string => `${position} из ${total}`,
+    speedLabel: 'playback speed',
+    position: (position: number, total: number): string => `${position} of ${total}`,
   },
 
   calls: {
-    head: 'Вызовы',
-    perSession: (count: number): string => `${count} за сессию`,
-    loading: 'загружаем…',
-    emptyHead: 'Вызовов пока не было',
+    head: 'Calls',
+    perSession: (count: number): string => `${count} per session`,
+    loading: 'loading…',
+    emptyHead: 'No calls yet',
     emptyBody:
-      'Прокси запущен и слушает сокет. Здесь появится каждый вызов инструмента — и разрешённый, и отклонённый.',
-    // Остаток строки вызова. Формулировки дословно из макета (`callLine` в `mockup.html`).
+      'Proxy is running and listening on the socket. Each tool call will appear here — allowed or denied.',
+    // Rest of the call string. Formulations match the mockup exactly (`callLine` in `mockup.html`).
     verb: (word: string): string => `${word} —`,
-    deniedBecause: (reason: string, stage: string): string => `${reason} · стадия «${stage}»`,
-    awaitingNote: 'высокий риск — окно вне контекста модели',
+    deniedBecause: (reason: string, stage: string): string => `${reason} · stage "${stage}"`,
+    awaitingNote: 'high risk — confirmation window outside model context',
     completed: (code: number | null, overheadMs: number): string =>
-      `${code === null ? 'завершён сигналом' : `код выхода ${code}`} · оверхед ${overheadMs} мс`,
-    sent: (bytes: number): string => ` — ${bytes} байт`,
-    andMore: (count: number): string => ` и ещё ${count}`,
-    pairSeatbelt: 'тот же вызов, повторён с песочницей',
-    pairNone: 'тот же вызов, четырьмя секундами раньше — без песочницы',
+      `${code === null ? 'terminated by signal' : `exit code ${code}`} · overhead ${overheadMs} ms`,
+    sent: (bytes: number): string => ` — ${bytes} bytes`,
+    andMore: (count: number): string => ` and ${count} more`,
+    pairSeatbelt: 'same call, repeated with sandbox',
+    pairNone: 'same call, four seconds earlier — without sandbox',
   },
 
   outcome: {
-    blocked: 'Отбито',
-    passed: 'Прошло',
-    denied: 'Отказано',
-    awaiting: 'Ждёт подтверждения',
-    clean: 'Выполнено',
-    running: 'Выполняется',
-    failed: 'Ошибка',
+    blocked: 'Blocked',
+    passed: 'Passed',
+    denied: 'Denied',
+    awaiting: 'Awaiting Confirmation',
+    clean: 'Completed',
+    running: 'Running',
+    failed: 'Error',
   } satisfies Record<CallOutcome, string>,
 
   group: {
-    checks: 'проверки',
-    setup: 'подготовка',
-    execution: 'исполнение',
+    checks: 'checks',
+    setup: 'setup',
+    execution: 'execution',
   } satisfies Record<StageGroup, string>,
 
   detail: {
-    head: 'Детали вызова',
-    callSection: 'Вызов',
-    commandSection: 'Команда',
-    stagesSection: 'Стадии',
-    redactSection: 'Редакция',
-    tool: 'инструмент',
-    verdict: 'вердикт',
-    risk: 'риск',
-    cwd: 'рабочий каталог',
-    env: 'разрешённые переменные',
-    profile: 'профиль песочницы',
-    sandbox: 'песочница',
-    notSelectedHead: 'Вызов не выбран',
-    notSelectedBody: 'Выберите строку слева, чтобы увидеть стадии, команду и профиль песочницы.',
-    deniedAt: (stage: string): string => `Отказано на стадии «${stage}»`,
-    deniedNote: 'Вызов до стадии «запуск» не дошёл: процесс не создавался.',
+    head: 'Call Details',
+    callSection: 'Call',
+    commandSection: 'Command',
+    stagesSection: 'Stages',
+    redactSection: 'Redaction',
+    tool: 'tool',
+    verdict: 'verdict',
+    risk: 'risk',
+    cwd: 'working directory',
+    env: 'allowed environment variables',
+    profile: 'sandbox profile',
+    sandbox: 'sandbox',
+    notSelectedHead: 'No call selected',
+    notSelectedBody: 'Select a row on the left to see stages, command, and sandbox profile.',
+    deniedAt: (stage: string): string => `Denied at stage "${stage}"`,
+    deniedNote: 'Call did not reach "spawn" stage: process was not created.',
     notBuilt: (stage: string): string =>
-      `Команда не собиралась: вызов остановлен на стадии «${stage}», до сборки argv он не дошёл.`,
-    fromParams: 'Подсвечено — подставлено из параметров вызова; остальное задано манифестом и модели недоступно.',
-    absent: (stages: string): string => `Не выполнялись и в записи отсутствуют: ${stages}.`,
-    overhead: 'оверхед прокси — сумма стадий вне запуска, нарушений, подтверждения и завершения',
+      `Command was not built: call stopped at stage "${stage}", argv assembly was not reached.`,
+    fromParams: 'Highlighted — substituted from call parameters; rest is defined by the manifest and unavailable to the model.',
+    absent: (stages: string): string => `Were not executed and are absent from the log: ${stages}.`,
+    overhead: 'proxy overhead — sum of stages outside execution, violations, confirmation, and completion',
     noDuration: '—',
-    seconds: 'с',
-    milliseconds: 'мс',
+    seconds: 's',
+    milliseconds: 'ms',
   },
 
   stage: {
-    bytes: 'байт',
-    received: (session: string): string => `вызов от сессии ${session}`,
-    lockMatch: 'рецепт совпадает с lock',
-    lockDrift: 'определение рецепта разошлось с lock',
-    validateOk: 'параметры соответствуют схеме',
-    validateFail: 'параметр не прошёл проверку',
-    pathOk: (cwd: string): string => `рабочий каталог ${cwd}`,
-    pathFail: 'путь вне разрешённого корня',
+    bytes: 'bytes',
+    received: (session: string): string => `call from session ${session}`,
+    lockMatch: 'recipe matches lock',
+    lockDrift: 'recipe definition diverged from lock',
+    validateOk: 'parameters match the schema',
+    validateFail: 'parameter failed validation',
+    pathOk: (cwd: string): string => `working directory ${cwd}`,
+    pathFail: 'path outside allowed root',
     buildArgv: (total: number, fromParams: number): string =>
-      `${total} элемента, из параметров подставлено ${fromParams}`,
-    riskUnknown: 'тир не определён',
-    approvalPending: 'ожидает подтверждения вне контекста модели',
-    approvalDone: 'решение человека получено',
-    envEmpty: 'ни одной переменной не разрешено',
-    profileApplied: 'профиль песочницы применён',
-    profileSkipped: 'профиль не применяется — процесс запущен с вашими правами',
+      `${total} elements, ${fromParams} substituted from parameters`,
+    riskUnknown: 'tier not determined',
+    approvalPending: 'awaiting confirmation outside model context',
+    approvalDone: 'approval decision received',
+    envEmpty: 'no environment variables allowed',
+    profileApplied: 'sandbox profile applied',
+    profileSkipped: 'profile not applied — process runs with your permissions',
     violation: (kind: string, target: string, volume: string): string => `${kind}: ${target}, ${volume}`,
-    spawned: 'процесс запущен',
-    violationUnknown: 'нарушение без описания',
-    redactNone: 'совпадений правил редакции нет',
-    redaction: (rule: string, count: number, stream: string): string => `${rule} — ${count} в ${stream}`,
+    spawned: 'process spawned',
+    violationUnknown: 'violation without description',
+    redactNone: 'no redaction rules matched',
+    redaction: (rule: string, count: number, stream: string): string => `${rule} — ${count} in ${stream}`,
     complete: (code: number | null): string =>
-      code === null ? 'процесс завершён сигналом' : `код выхода ${code}`,
-    unknown: 'стадия неизвестна этой сборке',
+      code === null ? 'process terminated by signal' : `exit code ${code}`,
+    unknown: 'stage unknown to this build',
   },
 } as const;
