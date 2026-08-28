@@ -1,6 +1,6 @@
 > ⚠️ **Waived:** `review-internal` — решение владельца — слияние: 48 файлов E1/E6 отревьюены на своих ветках; `review-scan` — решение владельца — слияние: 48 файлов E1/E6 отревьюены на своих ветках (+2 ещё — см. status.md)
 
-**Гейты @ `a2fbcc7b`:** plan-approved ✓ · build-test ✓ · review-internal ⚠ · review-scan ⚠ · review-bc ⚠ · review-tests ⚠ · review-errors ✗
+**Гейты @ `a2fbcc7b`:** plan-approved ✓ · build-test ✓ · review-internal ⚠ · review-scan ⚠ · review-bc ⚠ · review-tests ⚠ · review-errors ✓
 Бандл: `docs/vibe-coding/27.08.2026-e2-validate`
 
 **Outstanding:**
@@ -19,7 +19,7 @@
 | scan | снят: решение владельца — слияние: 48 файлов E1/E6 отревьюены на своих ветках |
 | bc | снят: решение владельца — слияние: 48 файлов E1/E6 отревьюены на своих ветках |
 | tests | снят: решение владельца — слияние: 48 файлов E1/E6 отревьюены на своих ветках |
-| errors | fail |
+| errors | прошла |
 
 **Доказательства:** plan-approved (1 файл(ов))
 **Скриншоты:** `docs/vibe-coding/27.08.2026-e2-validate/.review`
