@@ -259,6 +259,7 @@ __metadata:
   resolution: "@mcpproxy/design@workspace:packages/design"
   dependencies:
     "@mcpproxy/contracts": "workspace:*"
+    vitest: "npm:^3"
   languageName: unknown
   linkType: soft
 
