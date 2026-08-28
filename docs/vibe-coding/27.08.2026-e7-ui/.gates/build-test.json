@@ -1,0 +1,12 @@
+{
+  "gate": "build-test",
+  "status": "pass",
+  "exit_code": 0,
+  "codeTree": "967e55efd5e185ed82112fe411c4abf0c0dc3c62",
+  "codeDirty": false,
+  "headSha": "7fe0636c6575a104009098227b96eecc7e7c5fff",
+  "startedAt": "2026-08-28T05:45:38.793Z",
+  "command": "node .claude/skills/vibe-code-developing-v2/scripts/run-build-test.mjs --feature docs/vibe-coding/27.08.2026-e7-ui",
+  "evidencePath": null,
+  "artifacts": []
+}
