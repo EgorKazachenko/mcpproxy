@@ -10,15 +10,25 @@
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "bin"
   ],
   "scripts": {
     "build": "tsc -b",
     "typecheck": "tsc -b --noEmit false --emitDeclarationOnly",
-    "clean": "rm -rf dist *.tsbuildinfo"
+    "clean": "rm -rf dist *.tsbuildinfo",
+    "test": "tsc -b && vitest run"
   },
   "dependencies": {
     "@mcpproxy/contracts": "workspace:*",
     "@mcpproxy/core": "workspace:*"
+  },
+  "bin": {
+    "mcpproxy-shim": "./bin/mcpproxy-shim.mjs",
+    "mcpproxyd": "./bin/mcpproxyd.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^22",
+    "vitest": "^3"
   }
 }
