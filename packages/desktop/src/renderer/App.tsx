@@ -8,6 +8,7 @@ import { Nav, type Screen } from './Nav.js';
 import { STRINGS } from './strings.js';
 import { CallDetail } from './timeline/CallDetail.js';
 import { CallList } from './timeline/CallList.js';
+import { CallDetailSkeleton, CallListSkeleton } from './timeline/Skeleton.js';
 
 /**
  * Состояние выбора и фильтра живёт здесь, а не в панелях.
@@ -22,8 +23,15 @@ export function App() {
   const [selected, setSelected] = useState<string | null>(null);
   const [filter, setFilter] = useState<string | null>(null);
 
+  // WHY (R22): «ещё ничего не слышали от main», а не «идёт сетевой запрос». Пустое состояние
+  // утверждает, что вызовов не было; до первого ответа это неизвестно, и показывать его там
+  // значит утверждать факт вместо ожидания.
+  const [loading, setLoading] = useState(true);
+
   useEffect(() => {
     const off = bridge().onEvent((event) => {
+      // Любое сообщение из main — уже ответ: дальше состояние экрана определяют данные.
+      setLoading(false);
       switch (event.kind) {
         case 'trace-event':
           setEvents((previous) => [...previous, event.event]);
@@ -42,11 +50,15 @@ export function App() {
 
     // WHY: подписка происходит позже, чем main начинает работу. Без этого запроса первая
     // отрисовка показала бы пустой список при непустом трейсе.
+    // WHY: скелет снимается на ЛЮБОМ исходе, включая отказной конверт и упавший канал.
+    // Ожидание, из которого нет выхода, — это бесконечный скелет: он показывает движение там,
+    // где ничего уже не произойдёт, и врёт заметнее, чем пустое состояние.
     void bridge()
       .send({ kind: 'hello' })
       .then((reply) => {
         if (reply.ok && reply.value.kind === 'state') setState(reply.value.state);
-      });
+      })
+      .finally(() => setLoading(false));
 
     return off;
   }, []);
@@ -81,16 +93,22 @@ export function App() {
                     {filter}
                   </button>
                 )}
-                <span className="eyebrow">{STRINGS.calls.perSession(calls.length)}</span>
+                <span className="eyebrow">
+                  {loading ? STRINGS.calls.loading : STRINGS.calls.perSession(calls.length)}
+                </span>
               </div>
-              <CallList calls={calls} selected={selected} onSelect={setSelected} />
+              {loading ? (
+                <CallListSkeleton />
+              ) : (
+                <CallList calls={calls} selected={selected} onSelect={setSelected} />
+              )}
             </section>
 
             <section className="pane pane-detail" aria-label={STRINGS.detail.head}>
               <div className="pane-head">
                 <h2>{STRINGS.detail.head}</h2>
               </div>
-              <CallDetail call={current} onFilter={setFilter} />
+              {loading ? <CallDetailSkeleton /> : <CallDetail call={current} onFilter={setFilter} />}
             </section>
           </div>
         ) : (

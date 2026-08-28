@@ -57,6 +57,28 @@ describe('формы подтверждения', () => {
     expect(argsHash(asRecipeName('run_tests'), { tag: 'v1.0.0' })).not.toBe(request.argsHash);
   });
 
+  /**
+   * `R63`. Исполняемого здесь ровно одно, и это намеренно: поле объявлено типом, а тип
+   * держит `tsc -b` — он видит и `*.test.ts`. Утверждение о литерале, объявленном тут же,
+   * не роняется ни одной удалённой строкой продакшена и потому не пишется. Роняется
+   * расхождение двух объявлений одного и того же поля: они обязаны совпадать, иначе
+   * значение, законное в событии, окажется невыразимым в форме подтверждения — а это ровно
+   * та пара, между которой поле и ходит.
+   */
+  it('argvFromParams — то же поле, что у события: расхождение объявлений ловит компилятор', () => {
+    expectTypeOf<ApprovalRequest['argvFromParams']>().toEqualTypeOf<AuditEvent['argvFromParams']>();
+  });
+
+  it('индекс — число, а не имя элемента: строка в argvFromParams не компилируется', () => {
+    // Структурная проверка того же рода, что ниже для IpcRequest: R41 велит вычислять токен
+    // из позиции, и «подставим сюда сам токен» обязано быть ошибкой компиляции, а не
+    // принятой формой — иначе в запрос подтверждения приезжает произвольная строка из
+    // параметров, ради отсутствия которой поле и сделано индексами.
+    // @ts-expect-error argvFromParams несёт индексы, а не значения
+    const smuggled: ApprovalRequest = { ...request, argvFromParams: ['v1.0.0'] };
+    expect(smuggled.argvFromParams).toEqual(['v1.0.0']);
+  });
+
   it('requestId брендирован и не принимает SessionId', () => {
     expectTypeOf<ApprovalVerdict['requestId']>().toEqualTypeOf<RequestId>();
     expectTypeOf<SessionId>().not.toExtend<RequestId>();

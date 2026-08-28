@@ -117,6 +117,12 @@
   border-radius:var(--radius-full);background:var(--border-default);
   animation:pulse 1.4s ease-in-out infinite}
 @keyframes pulse{0%,100%{opacity:.55}50%{opacity:1}}
+/* Строка скелета в панели деталей. В макете отступ задан инлайном в 8px — здесь он берётся
+   токеном той же величины: значение из дизайн-системы в коде E7 не дублируется. */
+.skel-line{margin-bottom:var(--space-4)}
+/* Анимация — украшение ожидания, а не его смысл: при просьбе убрать движение полосы остаются
+   на месте, и состояние загрузки продолжает читаться геометрией. */
+@media (prefers-reduced-motion: reduce){.skel{animation:none}}
 
 /* ═══ 6. Панель деталей ═════════════════════════════════════════════════ */
 .detail-scroll{flex:1;overflow-y:auto;min-height:0;padding:var(--space-7)}

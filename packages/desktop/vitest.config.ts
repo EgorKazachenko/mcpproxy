@@ -10,4 +10,10 @@ export default defineConfig({
     include: ['src/**/*.test.ts', 'src/**/*.test.tsx'],
     exclude: ['src/e2e/**'],
   },
+  // Тест импортирует компоненты, а корневой `tsconfig.json` пакета — solution-style: в нём
+  // нет `compilerOptions`, и esbuild не находит там `jsx`. Без этой строки он берёт свой
+  // классический дефолт, зовёт `React.createElement` и падает на `React is not defined` в
+  // файлах, которые React не импортируют. Значение повторяет `jsx: react-jsx` из
+  // `tsconfig.renderer.json`, то есть сборка и тест трансформируют JSX одинаково.
+  esbuild: { jsx: 'automatic' },
 });
