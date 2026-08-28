@@ -4,15 +4,16 @@
 - branch: `v2/e2-validate`
 - mode: attended
 - track: full
-- codeTree: `6caaab4834f0`
+- codeTree: `9e558879ada5`
 - kill-review due: 2026-10-26
+- handoff: prompt recorded, no carrier spawned (attended) — SessionStart re-injects it after /clear
 
 | gate | status | artifacts |
 |---|---|---|
 | plan-approved | pass | 1 file(s) |
-| build-test | **NOT RUN** | — |
-| review-internal | **NOT RUN** | — |
-| review-scan | **NOT RUN** | — |
-| review-bc | **NOT RUN** | — |
-| review-tests | **NOT RUN** | — |
-| review-errors | **NOT RUN** | — |
+| build-test | pass | — |
+| review-internal | pass — отревьюено на `3a4cc888`, после него изменено 9 файл(ов) | — |
+| review-scan | pass — отревьюено на `3a4cc888`, после него изменено 9 файл(ов) | — |
+| review-bc | pass — отревьюено на `3a4cc888`, после него изменено 9 файл(ов) | — |
+| review-tests | pass — отревьюено на `3a4cc888`, после него изменено 9 файл(ов) | — |
+| review-errors | pass | — |
