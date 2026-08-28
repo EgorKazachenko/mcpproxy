@@ -16,6 +16,14 @@ const TARGET_RENDERER = 'chrome134';
 
 const BUNDLED_WORKSPACE_DEPS = ['@mcpproxy/contracts', '@mcpproxy/design'];
 
+/**
+ * Флаг наблюдения за настройками созданных web contents. В отгружаемой сборке — ложь, и
+ * бандлер вырезает и вызов, и модуль; смоук собирает с истиной. Отдельный флаг, а не
+ * `NODE_ENV`: смоук обязан гонять production-политику CSP и при этом видеть настройки, а
+ * один переключатель на оба назначения сделал бы это невозможным.
+ */
+const OBSERVE = process.env['MCPPROXY_OBSERVE'] === '1';
+
 export default defineConfig({
   main: {
     build: {
@@ -25,6 +33,7 @@ export default defineConfig({
     resolve: { noExternal: BUNDLED_WORKSPACE_DEPS },
   },
   preload: {
+    define: { MCPPROXY_OBSERVE: JSON.stringify(OBSERVE) },
     build: {
       target: TARGET_MAIN,
       rollupOptions: {
