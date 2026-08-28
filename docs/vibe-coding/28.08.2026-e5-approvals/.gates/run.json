@@ -1,0 +1,10 @@
+{
+  "feature": "docs/vibe-coding/28.08.2026-e5-approvals",
+  "branch": "v2/e5-approvals",
+  "baseSha": "b9093c62981a3224165a8af054528572f08ad261",
+  "mode": "attended",
+  "track": "full",
+  "agentConsent": false,
+  "createdAt": "2026-08-28T07:19:00.961Z",
+  "killReviewDue": "2026-10-27"
+}
