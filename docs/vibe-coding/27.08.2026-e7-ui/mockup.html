@@ -917,7 +917,6 @@ function renderDetail() {
       <span class="eyebrow">Вызов</span>
       <dl class="kv">
         <dt>инструмент</dt><dd><button class="chipfilter">${esc(c.toolName)}</button></dd>
-        <dt>параметры</dt><dd><button class="chipfilter">${esc(c.params)}</button></dd>
         <dt>вердикт</dt><dd><span class="badge badge--${verdictRole[c.verdict]}">${verdictLabel[c.verdict]}</span></dd>
         ${c.risk ? `<dt>риск</dt><dd><span class="badge badge--${riskRole[c.risk.tier]}">${riskLabel[c.risk.tier]}</span></dd>` : ''}
         ${c.cwd ? `<dt>рабочий каталог</dt><dd><button class="chipfilter">${esc(c.cwd)}</button></dd>` : ''}
