@@ -3,7 +3,19 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AuditEvent, ChainedEvent, Stage } from '@mcpproxy/contracts';
 import { asRecipeName, asSessionId } from '@mcpproxy/contracts';
-import { buildLock, createRedactor, startStore, writeLock, type ExecOutcome, type Sandbox, type StartedStore } from '@mcpproxy/core';
+import {
+  buildLock,
+  createBroker,
+  createRedactor,
+  startStore,
+  writeLock,
+  type ApprovalPort,
+  type Broker,
+  type ExecOutcome,
+  type Sandbox,
+  type StartedStore,
+} from '@mcpproxy/core';
+import type { ApprovalRequest, ApprovalVerdict } from '@mcpproxy/contracts';
 import type { AuditLog } from '@mcpproxy/core/audit';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { DEFAULT_CONFIG, type DaemonConfig } from '../config.js';
@@ -79,7 +91,7 @@ interface Harness {
   readonly pipeline: Pipeline;
 }
 
-async function harness(config: DaemonConfig = DEFAULT_CONFIG, outcome: ExecOutcome = OUTCOME): Promise<Harness> {
+async function harness(config: DaemonConfig = DEFAULT_CONFIG, outcome: ExecOutcome = OUTCOME, approvals?: Broker): Promise<Harness> {
   const dir = mkdtempSync(join(tmpdir(), 'mcpproxy-pipeline-'));
   mkdirSync(join(dir, 'scripts'));
   writeFileSync(join(dir, 'scripts/ok.sh'), '#!/bin/sh\necho готово\n');
@@ -124,6 +136,7 @@ async function harness(config: DaemonConfig = DEFAULT_CONFIG, outcome: ExecOutco
     sandbox,
     config,
     manifestDir: dir,
+    ...(approvals === undefined ? {} : { approvals }),
   });
 
   return { dir, store, events, pipeline };
@@ -214,7 +227,7 @@ describe('отказы — событие пишется, но выдуманн�
     expect(Object.hasOwn(last as object, 'argv')).toBe(false);
   });
 
-  it('high-risk отказывается на approval, потому что брокера ещё нет', async () => {
+  it('high-risk без подключённого канала отказывается: headless есть отказ (R44)', async () => {
     const outcome = await call(h, 'publish');
     expect(outcome.kind).toBe('refused');
     if (outcome.kind !== 'refused') return;
@@ -264,5 +277,95 @@ describe('lock — жёсткий стоп, а не апрув', () => {
     expect(parseDenyReason(outcome.denyReason)?.code).toBe('lock-drifted');
     expect(stages(h.events)).toEqual(['received', 'lock_check']);
     expect(Object.hasOwn(h.events.at(-1) as object, 'argv')).toBe(false);
+  });
+});
+
+describe('стадия approval — E5', () => {
+  /** Окно, подменённое портом: сам порт живёт в другом процессе, решение — здесь. */
+  const port = (reply: (req: ApprovalRequest) => ApprovalVerdict | null): ApprovalPort & { seen: ApprovalRequest[] } => {
+    const seen: ApprovalRequest[] = [];
+    return {
+      channel: 'electron',
+      seen,
+      async ask(request) {
+        seen.push(request);
+        return reply(request);
+      },
+    };
+  };
+
+  const ok = (request: ApprovalRequest): ApprovalVerdict => ({
+    requestId: request.requestId,
+    sessionId: request.sessionId,
+    channel: 'electron',
+    decision: 'approved',
+    scope: 'once',
+    expiresAt: null,
+  });
+
+  it('одобренный high-risk идёт дальше, и запись вердикта лежит в событии стадии', async () => {
+    const electron = port(ok);
+    const local = await harness(DEFAULT_CONFIG, OUTCOME, createBroker({ ports: [electron] }));
+    const outcome = await call(local, 'publish');
+
+    expect(outcome.kind).toBe('allowed');
+    expect(stages(local.events)).toContain('spawn');
+    const approval = local.events.find((one) => one.stage === 'approval');
+    expect(approval?.approval).toMatchObject({ channel: 'electron', decision: 'approved', scope: 'once' });
+    // Обе части ключа дублируются в запись: append-only строку читают отдельно от события.
+    expect(approval?.approval?.sessionId).toBe('sess-1');
+    expect(approval?.approval?.argsHash).toHaveLength(64);
+  });
+
+  it('отказ человека останавливает вызов и остаётся записью, а не молчанием', async () => {
+    const electron = port((request) => ({ ...ok(request), decision: 'denied' as const }));
+    const local = await harness(DEFAULT_CONFIG, OUTCOME, createBroker({ ports: [electron] }));
+    const outcome = await call(local, 'publish');
+
+    expect(outcome.kind).toBe('refused');
+    if (outcome.kind !== 'refused') return;
+    expect(parseDenyReason(outcome.denyReason)?.code).toBe('approval-denied');
+    expect(local.events.at(-1)?.approval?.decision).toBe('denied');
+    expect(stages(local.events)).not.toContain('spawn');
+  });
+
+  it('окну достаётся отредактированный argv и cwd целиком — не усечённые (ADR-0005)', async () => {
+    const electron = port(ok);
+    const local = await harness(DEFAULT_CONFIG, OUTCOME, createBroker({ ports: [electron] }));
+    await call(local, 'publish');
+
+    const shown = electron.seen[0];
+    const built = local.events.find((one) => one.stage === 'build_argv');
+    // Тот же массив, что лёг в событие: индексы `argvFromParams` обязаны указывать в то,
+    // что человек видит, а не в другую копию команды.
+    expect(shown?.argv).toEqual(built?.argv);
+    expect(shown?.cwd).toBe(built?.cwd);
+    expect(shown?.tier).toBe('high');
+    // Профиль — ЭФФЕКТИВНЫЙ: собственный блок рецепта молчит о запретах из `defaults`.
+    expect(shown?.profile.read?.allow).toEqual(['.']);
+  });
+
+  it('стадия на medium проходит БЕЗ записи вердикта: решения не требовалось', async () => {
+    await call(h, 'run_ok');
+    const approval = h.events.find((one) => one.stage === 'approval');
+    expect(approval?.verdict).toBe('allowed');
+    expect(Object.hasOwn(approval as object, 'approval')).toBe(false);
+  });
+});
+
+describe('argvFromParams — расписка WORK.md закрыта', () => {
+  it('индексы едут в событие build_argv и указывают на значения параметров', async () => {
+    await call(h, 'run_ok', { pattern: 'auth' });
+    const built = h.events.find((one) => one.stage === 'build_argv');
+    // argv: [бинарь, '--filter', 'auth'] — из параметра пришёл только третий элемент.
+    // `--filter` в индексы не попадает: его текст — константа манифеста.
+    expect(built?.argvFromParams).toEqual([2]);
+    expect((built?.argv ?? [])[2]).toBe('auth');
+  });
+
+  it('вызов без параметров индексов не несёт КЛЮЧОМ, а не пустым массивом', async () => {
+    await call(h, 'run_ok');
+    const built = h.events.find((one) => one.stage === 'build_argv');
+    expect(Object.hasOwn(built as object, 'argvFromParams')).toBe(false);
   });
 });
