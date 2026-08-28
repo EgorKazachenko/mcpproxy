@@ -1,0 +1,12 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist/types/renderer",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "jsx": "react-jsx",
+    "types": []
+  },
+  "include": ["src/renderer/**/*.ts", "src/renderer/**/*.tsx", "src/css.d.ts"],
+  "references": [{ "path": "./tsconfig.shared.json" }, { "path": "../contracts" }, { "path": "../design" }]
+}
