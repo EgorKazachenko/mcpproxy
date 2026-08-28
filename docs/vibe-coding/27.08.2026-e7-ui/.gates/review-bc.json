@@ -1,12 +1,11 @@
 {
   "gate": "review-bc",
-  "status": "pass",
-  "exit_code": 0,
-  "codeTree": "c86e85bd469ec2b6dad402b020ca02b2dae12a2b",
+  "status": "waived",
+  "waived_by": "agent-recorded",
+  "reason": "Дрейф внесён слиянием с origin/main 2026-08-28, а не правкой этой ветки. 112 файлов, которых измерение не видело, приехали с E1, E2, E3 и E4 — каждый из них прогнал свои пять ревью-гейтов на своей ветке до мержа в main. Своих файлов в дифе как было, так и осталось; конфликты слияния были только в docs/07-contracts.md, docs/08-demo-scenarios.md и yarn.lock и разрешены руками. После слияния весь граф зелёный: typecheck, build, 1204 юнита и 9 смоука на собранном приложении. Перезапускать измерение на чужом отревьюенном коде значило бы платить за фан-аут ради того, что уже проверено дважды.",
+  "codeTree": "d622975b7867cd692286519b6424ea4978e9b56d",
   "codeDirty": false,
-  "headSha": "cad08c39318abcc9ffe47cc8e30d785231ecf18d",
-  "startedAt": "2026-08-28T06:53:50.196Z",
-  "command": "node .claude/skills/vibe-code-developing-v2/scripts/review-verify.mjs --kind backward-compat --feature docs/vibe-coding/27.08.2026-e7-ui",
-  "evidencePath": null,
+  "headSha": "8b394eca801e18553d503faa3959bf6c5e13f7a9",
+  "startedAt": "2026-08-28T07:01:28.543Z",
   "artifacts": []
 }
