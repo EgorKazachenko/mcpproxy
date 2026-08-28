@@ -35,6 +35,15 @@ const WITHOUT_TEST = new Map<string, string>([
   ],
   ['policy/policy.fixture.ts', 'оснастка тестов политики: диск в памяти и честный lock, её ломает любой из тринадцати тестов policy/**'],
   ['policy/watch.fixture.ts', 'ручной триггер вместо fs.watch: его ломает watch.test.ts'],
+  ['exec/index.ts', 'баррель E3: его состав утверждает снапшот поверхности, а изоляцию вендора — обход графа в exec/events.test.ts'],
+  [
+    'exec/pure.ts',
+    'баррель входа ./exec-pure: его смысл — отсутствие вендора в графе, и это утверждает exec/events.test.ts, а не сосед-тест',
+  ],
+  [
+    'exec/errors.ts',
+    'класс отказа и его коды: проверяются там, где бросаются, — коды режима в exec/sandbox.test.ts, disposed и proxy-down в exec/modes/none.test.ts',
+  ],
 ]);
 
 function walk(dir: string): string[] {

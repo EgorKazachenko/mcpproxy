@@ -15,6 +15,10 @@
     "./pure": {
       "types": "./dist/policy/pure.d.ts",
       "default": "./dist/policy/pure.js"
+    },
+    "./exec-pure": {
+      "types": "./dist/exec/pure.d.ts",
+      "default": "./dist/exec/pure.js"
     }
   },
   "files": [
@@ -29,6 +33,7 @@
     "update:api-surface": "tsc -b && node scripts/update-api-surface.mjs"
   },
   "dependencies": {
+    "@anthropic-ai/sandbox-runtime": "0.0.74",
     "@mcpproxy/contracts": "workspace:*",
     "re2": "1.26.1"
   },

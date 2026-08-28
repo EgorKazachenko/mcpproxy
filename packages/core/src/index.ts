@@ -57,3 +57,12 @@ export * from './policy/render-diff.js';
 export * from './policy/shapes.js';
 export * from './policy/store.js';
 export * from './policy/watch.js';
+
+// Стадии `build_env` … `violation` — E3. Обёртка над `@anthropic-ai/sandbox-runtime`,
+// доменный allowlist сети, ресурсные ограничители, cap на вывод, поток нарушений.
+//
+// Реэкспорт из барреля `./exec`, а не из модулей напрямую, по той же причине, что и у
+// журнала выше: чистая половина E3 доступна вторым входом — `@mcpproxy/core/exec-pure`, —
+// который НЕ тянет вендорский SDK. Корневой вход тянет, потому что `createSandbox` без него
+// не существует.
+export * from './exec/index.js';
