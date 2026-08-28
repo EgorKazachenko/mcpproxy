@@ -1,11 +1,11 @@
 {
   "gate": "review-errors",
-  "status": "pass",
-  "exit_code": 0,
-  "codeTree": "cad3c3b200ab35ab59b8fd1a8afd3caf9eca76fb",
+  "status": "fail",
+  "exit_code": 1,
+  "codeTree": "9e558879ada5a1084e067ffe7c232c9bd5836b06",
   "codeDirty": false,
-  "headSha": "6524623d56f64385757b700fed691f74e2599108",
-  "startedAt": "2026-08-27T23:24:48.105Z",
+  "headSha": "70edc14f108377cb49bcf8f0afa64ac2f9e149d4",
+  "startedAt": "2026-08-28T00:04:47.878Z",
   "command": "node .claude/skills/vibe-code-developing-v2/scripts/review-verify.mjs --kind error-observability --feature docs/vibe-coding/27.08.2026-e2-validate",
   "evidencePath": null,
   "artifacts": []
