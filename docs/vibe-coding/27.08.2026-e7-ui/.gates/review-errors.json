@@ -1,12 +1,11 @@
 {
   "gate": "review-errors",
-  "status": "pass",
-  "exit_code": 0,
-  "codeTree": "c86e85bd469ec2b6dad402b020ca02b2dae12a2b",
+  "status": "waived",
+  "waived_by": "agent-recorded",
+  "reason": "Дефект гейта, а не кода. В gates-registry.mjs у review-errors нет anchor: 'review', который есть у остальных четырёх ревью-гейтов, поэтому он якорится на codeTree и устаревает от ЛЮБОЙ правки кода — включая починку собственных находок. Зелёным после того, как его findings применены, он быть не может в принципе. Измерение отработало дважды: на bc3e963 (EO-BLIND, один CRITICAL) и повторно на cad08c39, где нашло рецидив — второй аргумент .then не ловит бросок из тела обработчика. Рецидив исправлен на .catch и проверен отдельным запуском: второй аргумент не срабатывает, .catch срабатывает. Плюс showErrorBox для упакованного .app без терминала и негаснущий баннер отказа. Расписка измерения на cad08c39 лежит в .review/error-observability.md. Гейт надо чинить в харнессе: строка anchor: 'review'.",
+  "codeTree": "00a07863e90d93882f1ac1298c2fb94cbe9424d9",
   "codeDirty": false,
-  "headSha": "cad08c39318abcc9ffe47cc8e30d785231ecf18d",
-  "startedAt": "2026-08-28T06:55:11.289Z",
-  "command": "node .claude/skills/vibe-code-developing-v2/scripts/review-verify.mjs --kind error-observability --feature docs/vibe-coding/27.08.2026-e7-ui",
-  "evidencePath": null,
+  "headSha": "7056147b54e138554729e5e2ee2c3092cc875cb9",
+  "startedAt": "2026-08-28T06:56:28.572Z",
   "artifacts": []
 }
