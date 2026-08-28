@@ -13,7 +13,7 @@
 | **E1** | Policy engine: загрузка и валидация манифеста, `mcpproxy.lock`, diff-approve при изменении, санитизация `description` | E0 | ✅ |
 | **E2** | Валидатор параметров + argv-builder, path resolver (realpath + confinement), гарантия no-shell | E0 | ✅ |
 | **E3** | Executor + песочница: обёртка над `@anthropic-ai/sandbox-runtime`, доменный allowlist сети, таймауты и SIGKILL по группе процессов, cap на вывод, проброс violations | E0 | ✅ |
-| **E4** | MCP-поверхность: `tools/list` из манифеста с аннотациями, `tools/call`, shim + IPC-хардненинг (peer-cred, 0600) | E1, E2 (на стабах) | ⚠️ частично |
+| **E4** | MCP-поверхность: `tools/list` из манифеста с аннотациями, `tools/call`, shim + IPC-хардненинг (каталог 0700, сокет 0600, токен) | E1, E2 (на стабах) | ✅ кроме апрувов (E5) |
 | **E5** | Approvals: риск-тиры из аннотаций, брокер, TTL/scope, двухканальность (elicitation + Electron), headless = deny | E4, E7 | ❌ поздний |
 | **E6** | Секреты и аудит: env-allowlist, двусторонняя редакция (правила из Secrets-Patterns-DB + энтропия), hash-chain JSONL, экспорт | E0 | ✅ |
 | **E7** | Electron UI: таймлайн, детали вызова, панель sandbox violations, policy viewer с бейджами аннотаций, инбокс апрувов | E0 (на моках событий) | ✅ |
@@ -72,7 +72,7 @@ E7 пилится на моках потока событий, поэтому UI
 | **E1** | ⬆️ lock-файл повышен до обязательного; ➕ diff-approve; ➕ санитизация `description` | CVE-2025-54136, tool poisoning |
 | **E2** | без изменений | здесь мы и так по индустрии |
 | **E3** | ⬇️⬇️ **втрое дешевле** — обёртка над `srt` вместо своих SBPL; ➕ доменный allowlist сети; ➕ violations в шину | ADR-0002, ADR-0007 |
-| **E4** | ➕ хардненинг IPC-сокета (peer-cred check) | атака из спеки MCP |
+| **E4** | ➕ хардненинг IPC-сокета (каталог 0700 + токен; peer-cred недостижим в Node) | атака из спеки MCP |
 | **E5** | ➕ двухканальность: elicitation + authoritative Electron | ADR-0005, OWASP ASI09 |
 | **E6** | ⬇️ правила из Secrets-Patterns-DB; ➕ двусторонний скан | Docker MCP Gateway, gitleaks |
 | **E7** | ➕ панель sandbox violations; ➕ бейджи аннотаций | srt violation store |

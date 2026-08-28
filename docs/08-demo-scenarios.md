@@ -54,9 +54,11 @@ injection. Просим «разбери логи и скажи, что не т�
 
 **Показываем.** `run_tests` с параметром `pattern: "auth"`.
 
-**Что видит зал.** Таймлайн из 13 стадий: `received → lock_check → validate →
-resolve_paths → build_argv → classify_risk → build_env → build_profile → spawn →
-redact → complete`. На каждой — точные данные: собранный argv, cwd, список
+**Что видит зал.** Таймлайн вызова: `received → lock_check → validate →
+resolve_paths → build_argv → classify_risk → approval → build_env → build_profile → spawn →
+redact → complete` — двенадцать событий. Тринадцатая стадия `stageOrder`, `violation`,
+на чистом прогоне не эмитится: контракт помечает её как «может быть много», и ноль —
+законное число. На каждой — точные данные: собранный argv, cwd, список
 разрешённых env-переменных, профиль песочницы. В выводе — сработавшая редакция секрета.
 Внизу — оверхед прокси в миллисекундах.
 

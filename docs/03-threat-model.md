@@ -52,7 +52,7 @@ pnpm test
 | A2 | Path traversal (`../../.ssh/id_rsa`) | базовая | 1 | realpath + root confinement |
 | A3 | Симлинк-эскейп из разрешённой директории | базовая | 1+2 | realpath **после** резолва + seatbelt |
 | A4 | Запуск не того бинаря (PATH hijack) | базовая | 1 | резолв в абсолютный путь из allowlist |
-| A5 | **Кража токена IPC → спавн через прокси** | [спека MCP](https://modelcontextprotocol.io/specification/draft/basic/security_best_practices) | арх. | peer-cred + сокет 0600 + И5 (только имена рецептов) |
+| A5 | **Кража токена IPC → спавн через прокси** | [спека MCP](https://modelcontextprotocol.io/specification/draft/basic/security_best_practices) | арх. | каталог 0700 + сокет 0600 + токен рукопожатия + И5 (только имена рецептов) |
 | A6 | **Rug pull манифеста между вызовами** | CVE-2025-54136 | 1 | `mcpproxy.lock` + diff-approve |
 | A7 | **Инъекция в `description` рецепта** | tool poisoning / line jumping | 1 | санитизация при генерации `tools/list` |
 | A8 | **Индиректная инъекция через вывод скрипта** | OWASP ASI01 | 1 | untrusted-обёртка + скан + обрезка |
