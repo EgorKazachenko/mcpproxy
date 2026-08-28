@@ -283,14 +283,6 @@ export interface BuiltEnv {
     /** Окружение дочернего процесса. Свежий объект: мутация не достаёт до источника. */
     readonly env: Record<string, string>;
     /**
-     * `PATH` дочернего процесса — наш минимальный, а не унаследованный из окружения.
-     *
-     * Провенанс отдаётся наружу, потому что без него запись аудита утверждает, что у процесса
-     * был `PATH`, и умалчивает, ЧЕЙ. Разбор инцидента «под-вызов не нашёл бинарь» начинается
-     * ровно с этого вопроса, а `env.allowed` в контракте несёт только имена.
-     */
-    readonly pathSubstituted: boolean;
-    /**
      * Ссылкой на контракт, а не повторением его формы: структурная копия совпадала бы сегодня
      * и разошлась бы молча, когда E0 сдвинет форму. Имена для `AuditEvent.env.allowed` —
      * отсортированные, без дублей.
@@ -312,14 +304,646 @@ export interface BuiltEnv {
  * появиться имя, которого владелец манифеста не разрешал, и пересчитывать слияние тут
  * нечего — вторая копия правила разошлась бы с первой на первой же правке.
  * @param source — окружение, из которого берутся значения; обычно `process.env` демона.
+ * @param injected — переменные, которые добавляет **режим песочницы**, минуя allowlist.
+ *
+ * Третий параметр существует потому, что два режима E3 устроены по-разному, и без него
+ * фильтр противоречил бы сам себе: в `seatbelt` прокси-переменные вшивает в строку команды
+ * сам `srt`, значит `injected` пуст; в `none` seatbelt-обёртки нет вовсе, и прокси-переменные
+ * вместе с переменными доверия к CA обязан передать режим.
+ *
+ * Мимо allowlist — намеренно: это не переменные рецепта, а механика песочницы, и провести их
+ * через фильтр значило бы дать манифесту право отключить наблюдение за собственной сетью.
  */
-export declare function buildEnv(allow: readonly string[], source: Readonly<Record<string, string | undefined>>): BuiltEnv;
+export declare function buildEnv(allow: readonly string[], source: Readonly<Record<string, string | undefined>>, injected?: Readonly<Record<string, string | undefined>>): BuiltEnv;
+
+// ==== exec/errors.d.ts ====
+import type { RecipeName } from '@mcpproxy/contracts';
+import type { CommandId } from './sandbox.js';
+/**
+ * Отказы E3 — отдельным модулем, а не рядом с интерфейсом.
+ *
+ * Иначе получается цикл: `netpolicy.ts` бросает отказ политики, `sandbox.ts` знает про
+ * режимы, режимы знают про `netpolicy.ts`. Тип отказа не зависит ни от чего в этом графе,
+ * поэтому и живёт в его основании.
+ */
+/**
+ * Код отказа E3. Дискриминант, а не текст сообщения.
+ *
+ * Существует потому, что `Verdict` (`domain.ts:9`) знает четыре значения, и E4 обязан
+ * выбрать одно по тому, что бросил E3. Без кода единственным дискриминатором остаётся
+ * строка сообщения — и безопасным умолчанием становится `verdict: 'error'`, то есть **вызов,
+ * заблокированный политикой, попадает в лог как сбой прокси**. D6 говорит ровно обратное:
+ * отказ политики — штатный исход решения, а не отказ сервиса.
+ *
+ * `poisoned` и `group-not-drained` разведены намеренно: первый означает «демон больше не
+ * выдаёт вызовов, нужно вмешательство», второй — «вмешательство понадобилось из-за ЭТОГО
+ * вызова». Оператору это разные новости.
+ */
+export type ExecErrorCode = 
+/** Режим не поддержан: `container` вовсе или `seatbelt` вне macOS (R2, R3). */
+'mode-unsupported'
+/** Шаблон домена не прошёл перепроверку перед принуждением (R13). Отказ политики. */
+ | 'invalid-domain'
+/** `run()` у освобождённой песочницы (R50). */
+ | 'disposed'
+/** Демон отравлен предыдущим вызовом и новых не выдаёт (R52). */
+ | 'poisoned'
+/** Пустота группы процессов ЭТОГО вызова не подтверждена (R52). */
+ | 'group-not-drained'
+/** Прокси или трастовый бандл CA не подняты — baseline был бы слепым (R31). */
+ | 'proxy-down'
+/** `allowedDomains: ['*']` не доехал до srt: вендор начал валидировать (R54). */
+ | 'wildcard-dropped'
+/** Ребёнка не удалось запустить: нет бинаря, нет оболочки. */
+ | 'spawn-failed'
+/** Синглтон srt ещё не инициализирован. */
+ | 'srt-uninitialized';
+/**
+ * Что именно отказало. Поля необязательные, потому что не в каждой точке отказа известны
+ * все три: `assertModeSupported` вызывается до всякого рецепта.
+ */
+export interface ExecErrorContext {
+    readonly recipeName?: RecipeName;
+    readonly commandId?: CommandId;
+    /** Pid лидера группы, если отказ про группу процессов. Оператору его и искать. */
+    readonly pid?: number;
+    /** Подтверждена ли пустота группы на момент отказа. */
+    readonly groupDrained?: boolean;
+}
+/**
+ * Единственный класс отказа E3.
+ *
+ * Экспортируется наружу пакета (`exec/index.ts`), иначе `instanceof` у E4 невозможен, и
+ * различать отказ политики от сбоя пришлось бы сравнением текста — ровно та связь, которую
+ * заморозка поверхности должна убирать.
+ */
+export declare class ExecError extends Error {
+    readonly code: ExecErrorCode;
+    readonly context: ExecErrorContext;
+    constructor(code: ExecErrorCode, message: string, context?: ExecErrorContext);
+}
+
+// ==== exec/events.d.ts ====
+import type { AuditEvent } from '@mcpproxy/contracts';
+import type { StreamOutcome } from './sandbox.js';
+/**
+ * События стадий E3.
+ *
+ * Стадий ровно **четыре** — `build_env`, `build_profile`, `spawn`, `violation` — и ни одной
+ * больше: `redact` принадлежит E6 по решению D4, `complete` пишет тот, кто закрывает вызов
+ * (E4). Событие пишется на **каждой** из них, включая отказ: «отказ без записи в аудит —
+ * баг, а не оптимизация» (`07-contracts.md:365`).
+ */
+/**
+ * Подмножество замороженного `AuditEvent`, которое заполняет E3, — именно `Pick`, а не
+ * своя форма. Тогда компилятор, а не ревью, держит совпадение: поле, переименованное в
+ * контракте, ломает сборку здесь, а `exactOptionalPropertyTypes` исполняет R34 —
+ * `{ signal?: string }` не принимает `undefined` как значение, и «отсутствует ключом» с
+ * «приехало с null» перестают быть взаимозаменяемы на уровне типов.
+ *
+ * Остальные поля вписывает E4: у него есть `traceId`, `sessionId` и вердикт, которых E3 не
+ * знает и знать не должен.
+ */
+export type ExecEvent = Pick<AuditEvent, 'stage' | 'durationUs' | 'env' | 'sandbox'>;
+/** Стадии E3, перечисленные явно — компилятор проверит, что каждая из них есть в `Stage`. */
+export declare const EXEC_STAGES: readonly ['build_env', 'build_profile', 'spawn', 'violation'];
+export type ExecStage = (typeof EXEC_STAGES)[number];
+export type EventSink = (event: ExecEvent) => void;
+/**
+ * Монотонная длительность стадии в **микросекундах целым числом** (R35).
+ *
+ * Разность ISO-меток не годится: она квантована до миллисекунды — то есть до порядка самого
+ * измерения — и вдобавок прыгает по NTP. `process.hrtime.bigint()` не делает ни того ни
+ * другого.
+ */
+export declare function measure<T>(body: () => T): {
+    value: T;
+    durationUs: number;
+};
+export declare function measureAsync<T>(body: () => Promise<T>): Promise<{
+    value: T;
+    durationUs: number;
+}>;
+/**
+ * Схлопывание двух потоков в одну пару события (R20). `AuditEvent.output`
+ * (`event.ts:100`) несёт одну пару `{bytes, truncated}`, а потоков два: `bytes` — **сумма**,
+ * `truncated` — **дизъюнкция**.
+ *
+ * Иначе событие сообщало бы про stdout и молчало про stderr — а секрет, вылезший за потолок,
+ * с равной вероятностью вылезает во второй поток.
+ */
+export declare function collapseOutput(stdout: StreamOutcome, stderr: StreamOutcome): {
+    readonly bytes: number;
+    readonly truncated: boolean;
+};
+
+// ==== exec/index.d.ts ====
+/**
+ * Публичная поверхность E3.
+ *
+ * Реэкспортируется **поимённо**, а не `export *` по всем модулям: `srt-manager.ts` и
+ * `modes/` держат вендорские типы в своих сигнатурах, и звёздочка утащила бы их в граф
+ * деклараций пакета — то есть ADR-0002 («изолируем за своим интерфейсом `Sandbox`») перестал
+ * бы выполняться молча. Проверяет это обход графа `.d.ts` в `events.test.ts` (R1), но список
+ * ниже — первая линия.
+ *
+ * **Каждый символ здесь назван вместе со своим потребителем.** Публичная поверхность, за
+ * которой никто не стоит, поддерживается вечно и бесплатно не бывает; то, что нужно только
+ * тестам, остаётся экспортом своего модуля и сюда не поднимается. Состав закреплён
+ * снапшотом в `surface.test.ts` — новый экспорт краснеет, как в `packages/contracts`.
+ */
+/** E4 — единственный вход в исполнение; `newCommandId` он же зовёт на каждый вызов. */
+export { asCommandId, createSandbox, newCommandId } from './sandbox.js';
+/**
+ * E5 и E7 — «доступен ли seatbelt на этой машине». Спрашивать через `createSandbox` нельзя:
+ * он на первой строке берёт ссылку на синглтон, то есть проба режима либо течёт ссылкой,
+ * либо требует парного `dispose()` ради вопроса, на который отвечает чистая функция.
+ */
+export { assertModeSupported, isModeSupported } from './sandbox.js';
+/**
+ * E4 — различить отказ политики от сбоя прокси. Без экспортированного класса единственным
+ * дискриминатором осталась бы строка сообщения, и вызов, заблокированный политикой, лёг бы
+ * в лог как `verdict: 'error'` — ровно то, что запрещает D6.
+ */
+export { ExecError } from './errors.js';
+export type { ExecErrorCode, ExecErrorContext } from './errors.js';
+export type { CommandId, ExecOutcome, ExecRequest, Sandbox, StreamOutcome, Termination, } from './sandbox.js';
+/** E4 — принимает события стадий; E6 — схлопывает два потока в пару `output` события (R20). */
+export { collapseOutput } from './events.js';
+export type { EventSink, ExecEvent } from './events.js';
+/** E5 — модалка согласия: показывает профиль и сверяет хэш применённой политики (D10, R47). */
+export { buildProfile, policyHash } from './profile.js';
+export type { ResolvedSandboxPolicy } from './profile.js';
+/** E7 — бейдж «ослабленный режим» на рецепте (R14). */
+export { isWeakened } from './netpolicy.js';
+/**
+ * E8 — разбор корпуса атак: отличить «команду резали» от «команда отработала» (R41).
+ *
+ * Тем, кому нужна только эта половина, лучше брать её из `@mcpproxy/core/exec-pure`: корневой
+ * вход тянет за собой вендорский SDK, а `./exec-pure` — нет.
+ */
+export { classify, parseAndClassify, parseLine, typeForOperation } from './violation.js';
+export type { ClassifyPolicy, ParsedLine, RawViolationRecord } from './violation.js';
+
+// ==== exec/netpolicy.d.ts ====
+/**
+ * Валидатор доменных шаблонов. **Не матчер.**
+ *
+ * Матчит домены сам srt (`matchesDomainPatternWithPort`), потому что по D11 принуждение
+ * делает `updateConfig`. Второй матчер с другой семантикой на пути принуждения был бы дырой,
+ * а не запасом: расхождение между «что мы считаем разрешённым» и «что пропустит прокси»
+ * невидимо в тестах и наблюдаемо только атакующим.
+ *
+ * Поэтому модуль делает ровно две вещи, и обе — вокруг вендорского матчера, а не вместо
+ * него: проверяет шаблоны манифеста (R13) и решает, носит ли рецепт бейдж «ослабленный»
+ * (R14). Согласие нашего понимания с вендорским закрепляет таблица конформанса в
+ * `netpolicy.test.ts`, где каждая строка вызывает настоящую вендорскую функцию.
+ *
+ * Модуль чистый: ни ФС, ни процессов, ни сети, ни импорта вендора в рантайме.
+ */
+/**
+ * Разделение необязательного суффикса `:port`, по правилу вендора
+ * (`domain-pattern.d.ts` `splitDomainPatternPort`): портом считается только строго
+ * числовой суффикс 1–65535 без ведущих нулей, поэтому подсунутый хвост вида
+ * `evil.com:443.allowed.com` остаётся целым и проваливается на проверке хоста.
+ */
+export declare function splitPort(pattern: string): {
+    host: string;
+    port: number | undefined;
+};
+/**
+ * Наша проверка шаблона. Шире вендорской намеренно: голая `*` и `*.com` для нас
+ * **валидны**, но носят бейдж «ослабленный» (R14). Вендор их отвергает, и это расхождение —
+ * не дефект, а разделение ролей: он решает, что безопасно по умолчанию, мы решаем, что
+ * автор рецепта имел право написать, показав человеку цену.
+ *
+ * Отвергается то, что доменом не является ни при каком чтении: схема, путь, пробел,
+ * управляющий символ, пустая строка, неоднозначный IPv6 без скобок.
+ */
+export declare function isValidDomainPattern(pattern: string): boolean;
+/**
+ * Зеркало вендорского `isValidDomainPattern` из `sandbox-config.js:20-46` — то, что схема
+ * вендора принимает в `allowedDomains`.
+ *
+ * Копия, а не импорт: функция не экспортирована наружу пакета вовсе, а вход `./validate`
+ * этого модуля обязан оставаться чистым. Расхождение копии с оригиналом краснеет в
+ * `netpolicy.test.ts`, где утверждения гоняют настоящую `NetworkConfigSchema`.
+ */
+export declare function isVendorAcceptableAllow(pattern: string): boolean;
+/**
+ * Бейдж «ослабленный» (R14) — на **голой** звёздочке, а не на любой.
+ *
+ * `*.github.com` и `*.npmjs.org` — обычные рабочие правила; пометив их, бейдж перестаёт
+ * что-либо значить на слайде S5, а бейдж, который носят все, не носит никто.
+ *
+ * Вторая половина — всё, что вендорская схема считает слишком широким (`*.com`): это мы
+ * принимаем, а он отвергает, и разницу обязан видеть человек, а не только тест.
+ */
+export declare function isWeakened(allow: readonly string[]): boolean;
+/**
+ * Перепроверка перед принуждением (R13). Между загрузкой манифеста (E1) и `updateConfig`
+ * нет ни одной проверки — `updateConfig` не валидирует **ничего**, это голый
+ * `structuredClone`, — а «доверяем предвалидированному входу» в продукте про безопасность
+ * не аргумент. Падаем закрыто: список, который нельзя разобрать, не превращается в пустой.
+ */
+export declare function assertDomainPatterns(allow: readonly string[], deny: readonly string[]): void;
+
+// ==== exec/profile.d.ts ====
+import type { NormalizedSandbox, SandboxProfile } from '@mcpproxy/contracts';
+/**
+ * Профиль песочницы: чистое преобразование `NormalizedSandbox` → резолвнутая политика.
+ * Ни ФС, ни процессов, ни сети — только `os.homedir()` и арифметика путей.
+ */
+export interface ResolvedSandboxPolicy {
+    readonly read: {
+        readonly allow: readonly string[];
+        readonly deny: readonly string[];
+    };
+    readonly write: {
+        readonly allow: readonly string[];
+        readonly deny: readonly string[];
+    };
+    /**
+     * Обязательные запреты этого вызова — **та же самая** посчитанная величина, что уехала в
+     * `write.deny`, а не вторая, собранная независимо.
+     *
+     * Поле есть потому, что список нужен ДВАЖДЫ: в принуждении (`write.deny` профиля) и в
+     * классификации (бейдж `mandatory-deny` из S6). Считая его в двух местах по независимо
+     * собранным входам, мы получили бы бейдж, который расходится с реальной политикой молча —
+     * а тест классификации строит `mandatoryPaths` руками и такого расхождения не увидит.
+     */
+    readonly mandatory: readonly string[];
+    /** Рецепт с голой `*` в `network.allow` или с шаблоном, который вендор считает широким (R14). */
+    readonly weakened: boolean;
+}
+/**
+ * Файлы, запись в которые — исполнение кода при следующем запуске оболочки или git.
+ * Копия `DANGEROUS_FILES` из `sandbox-utils.js:10`; наружу пакета список не экспортирован
+ * (`index.d.ts`, 19 строк), поэтому копия неизбежна — а копия без детектора дрейфа
+ * устаревает молча. Детектор — `modes/seatbelt.test.ts`, тест «детектор дрейфа:
+ * вендорский набор обязательных запретов не изменился», рядом с `RECORDED_VENDOR_DENIALS` (R10).
+ */
+export declare const MANDATORY_DENY_FILES: readonly string[];
+/**
+ * Каталоги, чьё содержимое исполняется или конфигурирует исполнение. Копия
+ * `getDangerousDirectories()` (`sandbox-utils.js:31`): `.git` из списка исключён самим
+ * вендором — он нужен записываемым для обычных git-операций, — и вместо него закрываются
+ * два конкретных пути внутри, `.git/hooks` и `.git/config`.
+ */
+export declare const MANDATORY_DENY_DIRECTORIES: readonly string[];
+/**
+ * Пути внутри `.git`. `.git/config` здесь **обязателен** (R9): `core.pager`,
+ * `core.sshCommand` и алиасы — такой же вектор исполнения кода, как и хуки, и вендор
+ * закрывает его лишь при `allowGitConfig: false`, то есть по умолчанию — но якорем на своём
+ * cwd, а не на нашем (проба П3b).
+ */
+export declare const MANDATORY_DENY_GIT_PATHS: readonly string[];
+/**
+ * Разворачивание `~` и относительных путей (R8).
+ *
+ * Нерезолвнутый `~/.ssh` не закрывает ничего, а строка в профиле выглядит так, будто
+ * закрывает: `denyRead: ['~/.ssh']` уезжает в srt дословно, `normalizePathForSandbox`
+ * развернёт тильду сам — но относительный путь он развернёт от cwd **демона**, а не рецепта,
+ * и вот это уже молча промахивается мимо цели.
+ *
+ * Поэтому резолвим сами и от `recipeCwd`, а не полагаемся на вендора.
+ */
+export declare function resolveProfilePath(pattern: string, recipeCwd: string): string;
+/**
+ * Обязательные запреты записи, якорённые на **каждом** корне `write.allow` (R9).
+ *
+ * Почему не `cwd` рецепта: запись — allow-only, поэтому запрет имеет смысл только внутри
+ * разрешённого. Рецепт с `write.allow: ['~/work/repo']` при другом `cwd` иначе получил бы
+ * незащищённый `~/work/repo/.git/hooks`.
+ *
+ * Почему глоб на поддерево, а не литерал в корне: литерал оставляет
+ * `<корень>/sub/.git/hooks/pre-commit` записываемым — это S6 ровно на уровень глубже.
+ * Глобстар-слеш у вендора компилируется в необязательную группу «любые каталоги»
+ * (`sandbox-utils.js:756`), то есть покрывает и
+ * сам корень, и любую глубину под ним; а `denyGlobRegex` дополнительно расширяет запрет на
+ * всё, что лежит под совпадением.
+ */
+export declare function mandatoryDenyGlobs(writeRoots: readonly string[]): string[];
+/**
+ * Вход — **лист** `NormalizedSandbox`, а не агрегат `NormalizedRecipe`: R5 и §1 требуют
+ * `effective`, никогда `own`, и передача целого рецепта оставила бы это правилом ревью
+ * вместо ошибки компиляции.
+ *
+ * Корни для якоря обязательных запретов выводятся **здесь, из `write.allow`**, а не
+ * приходят параметром. Отдельный параметр обещал бы вызывающему свободу анкерить запреты
+ * шире — свободу, которой не пользуется ни один вызывающий, — и одновременно давал бы
+ * возможность передать корни, не совпадающие с разрешённой записью: профиль тогда получил
+ * бы глобы, якорёные там, где писать всё равно нельзя, то есть защиту, которая ничего не
+ * защищает. R9 говорит «каждый корень `write.allow`», и подпись теперь говорит то же.
+ *
+ * Сети в результате нет намеренно: её принуждает `updateConfig` под семафором (D11), и
+ * поле `network` здесь только соблазняло бы записать её ещё и в `customConfig`, где она
+ * не действует вовсе (проба П5).
+ */
+export declare function buildProfile(sandbox: NormalizedSandbox, recipeCwd: string): ResolvedSandboxPolicy;
+/**
+ * Конверсия для события (R36): `sandbox.profile` в `AuditEvent` — **сырой** `SandboxProfile`
+ * из манифеста, а не `NormalizedSandbox`.
+ *
+ * Типы не взаимозаменяемы и приведением не связываются: у `SandboxProfile`
+ * (`manifest.generated.ts:56`) `allow`/`deny` необязательны и массивы изменяемы, у
+ * `NormalizedSandbox` (`lock.ts:60`) обязательны и `readonly`. Поэтому явная сборка, а не
+ * каст, — иначе событие понесло бы замороженные массивы под изменяемым типом.
+ */
+export declare function toSandboxProfile(sandbox: NormalizedSandbox): SandboxProfile;
+/**
+ * Хэш JCS применённой политики — **вместе с доменными списками** (R47).
+ *
+ * Без сетевой части два вызова с `network.allow: []` и `['*']` дали бы один хэш, и материал
+ * для сверки согласия в E5 оказался бы бесполезен ровно там, где решение человека важнее
+ * всего.
+ *
+ * Формулировка узкая намеренно: хэш доказывает тождество **нашего входа**, а не итоговой
+ * политики. srt при обёртке доливает `getDefaultWritePaths()`, mandatory-deny и пути
+ * учётных данных, поэтому исполненный набор всегда шире манифестного — это записано в
+ * `docs/10-honest-limitations.md`.
+ */
+export declare function policyHash(policy: ResolvedSandboxPolicy, net: {
+    readonly allowedDomains: readonly string[];
+    readonly deniedDomains: readonly string[];
+}): string;
+
+// ==== exec/sandbox.d.ts ====
+import type { NormalizedDefaults, RecipeName, SandboxMode, SandboxViolation } from '@mcpproxy/contracts';
+import type { EventSink } from './events.js';
+/**
+ * Публичная поверхность E3. Ни один тип из `@anthropic-ai/sandbox-runtime` здесь не
+ * появляется и появиться не может: ADR-0002 требует изоляции дословно, а проверяет её
+ * обход графа `.d.ts` в `events.test.ts` (R1).
+ */
+/**
+ * Идентичность вызова, брендированная так же, как `RecipeName` в контрактах
+ * (`packages/contracts/src/ipc.ts:13`).
+ *
+ * Голая строка здесь была бы дырой, а не мелочью: `run({recipeName: id, commandId: name})`
+ * прошло бы проверку типов, а R30 существует ровно потому, что идентичность вызова путают
+ * с текстом команды — и тогда srt, сравнивающий ключи по первым 100 символам, атрибутирует
+ * нарушения чужому вызову.
+ */
+export type CommandId = string & {
+    readonly __brand: 'CommandId';
+};
+/**
+ * Энтропия обязана лежать в **первых 100 символах** (R48): дальше srt идентификатор
+ * обрезает, и два ключа с общим стосимвольным префиксом слились бы в один.
+ *
+ * Счётчик или хэш от текста команды не годятся: имя пользователя прокси вшито в env
+ * ребёнка, то есть предсказуемый идентификатор даёт процессу внутри песочницы способ
+ * подписаться чужим ключом и переложить свои нарушения на другой вызов.
+ */
+export declare function newCommandId(): CommandId;
+export declare function asCommandId(value: string): CommandId;
+export interface ExecRequest {
+    readonly recipeName: RecipeName;
+    /**
+     * Уже собранный argv (E2). Кортеж, а не массив: под `noUncheckedIndexedAccess`
+     * (`tsconfig.base.json:10`) `command[0]` у массива — `string | undefined`, и `spawn`
+     * потребовал бы `!` ровно в security-значимой точке.
+     */
+    readonly command: readonly [string, ...string[]];
+    /**
+     * Каталог **рецепта**, не демона. Различие несущее: `macGetMandatoryDenyPatterns` якорит
+     * пути на `process.cwd()` демона (проба П3b), поэтому свой mandatory-deny E3 якорит сам —
+     * и здесь лежит авторитетное значение, от которого резолвятся относительные пути профиля.
+     */
+    readonly recipeCwd: string;
+    /**
+     * Эффективный профиль, никогда `own`: пол и потолок применены именно в `effective`
+     * (`packages/contracts/src/lock.ts:239-244`), и передача `own` тихо сняла бы их.
+     */
+    readonly effective: NormalizedDefaults;
+    readonly commandId: CommandId;
+}
+/**
+ * Чем закончился прогон. Отдельным полем, а не выводом из `exit.signal`: единственная улика
+ * в `exit` — `signal === 'SIGKILL'`, неотличимый от убийства чем угодно ещё на машине.
+ * R18 требует, чтобы таймаут дал `verdict: 'denied'` как решение политики (D6), и без
+ * дискриминатора E4 выводил бы политику из артефакта ОС.
+ */
+export type Termination = 'exited' | 'timeout' | 'output-cap';
+export interface StreamOutcome {
+    readonly text: string;
+    /** Байты, доехавшие до потребителя: после редакции E6 и после обрезки (R20). */
+    readonly bytes: number;
+    /** Истинно тогда и только тогда, когда данные отброшены. */
+    readonly truncated: boolean;
+}
+export interface ExecOutcome {
+    readonly termination: Termination;
+    readonly exit: {
+        readonly code: number | null;
+        readonly signal: string | null;
+    };
+    readonly stdout: StreamOutcome;
+    readonly stderr: StreamOutcome;
+    /** Полный набор, включая каждое уже отданное в `onViolation` — если `violationsLost` ноль. */
+    readonly violations: readonly SandboxViolation[];
+    /** Сколько нарушений вытеснило кольцо стора srt. Ненуль означает, что набор неполон (R45). */
+    readonly violationsLost: number;
+    /**
+     * Наблюдаемость атрибуции и разбора (R45, R27, R39). Поля, а не строчки в логе, потому что
+     * «докладывается громко» обязано быть проверяемо — и потому что ноль в каждом из них
+     * означает разное.
+     *
+     * Нарушение по расхождению ключа **не отбрасывается**: иначе процесс, переписавший имя
+     * пользователя прокси — а оно вшито в его же env, — выкинул бы свои отказы из нашей
+     * корзины, и S5 показал бы ноль при работающей защите.
+     */
+    /** Нарушений без ключа атрибуции. Обычное дело: вендор ставит ключ не всегда. */
+    readonly attributionMissing: number;
+    /** Нарушений с ЧУЖИМ ключом. Не рутина, а сигнал: кто-то подписался не своим именем. */
+    readonly attributionForeign: number;
+    /**
+     * Строк ядра, чью операцию не знает ни отображение в `ViolationType`, ни список шума.
+     * Каждая — отказ, который произошёл; ненуль означает, что в `violations` его нет.
+     */
+    readonly unrecognizedLines: number;
+    /** Строк, отброшенных как шум по явному списку (R39). Ноль подозрителен: шум есть всегда. */
+    readonly suppressedLines: number;
+    /**
+     * Сколько раз бросил колбэк потребителя. Ненуль означает, что часть потока нарушений до
+     * него не доехала, — и что демон это пережил, а не упал внутри обработчика вендора.
+     */
+    readonly consumerFailures: number;
+    /**
+     * Сколько разрешённых запросов не удалось посчитать по байтам. Запись о самом запросе при
+     * этом **не теряется** — она едет с `bytes: 0`, иначе запрос, ради показа которого S5 и
+     * существует, исчезал бы из аудита ровно в момент сбоя счётчика.
+     */
+    readonly bodyCountFailures: number;
+    /**
+     * Нарушений, приехавших, когда ни один вызов не был активен, — то есть после drain-окна
+     * предыдущего. Считается на уровне синглтона и докладывается следующим вызовом.
+     *
+     * Ненуль означает, что `DRAIN_WINDOW_MS` мал для этой машины: нарушения вызова опоздали и
+     * не попали в его собственный набор, хотя он уже отчитался `violationsLost: 0`. Без этого
+     * счётчика недостаточное окно не наблюдаемо ничем.
+     */
+    readonly lateUnattributed: number;
+    /**
+     * Хэш JCS применённой политики, **включая доменные списки** (R47). Материал для сверки
+     * согласия в E5. Узко намеренно: он доказывает тождество нашего входа, а не итоговой
+     * политики — srt при обёртке доливает `getDefaultWritePaths()`, mandatory-deny и пути
+     * учётных данных, поэтому исполненный набор всегда шире манифестного.
+     */
+    readonly policyHash: string;
+}
+export interface Sandbox {
+    readonly mode: SandboxMode;
+    /**
+     * `onViolation` зовётся **по мере возникновения**, пока процесс ещё жив (R29): красная
+     * строка S5 появляется в таймлайне до выхода, а не пакетом после него.
+     */
+    run(request: ExecRequest, onViolation: (violation: SandboxViolation) => void, 
+    /**
+     * Сток событий четырёх стадий E3 (R32). Третьим параметром, а не полем запроса: событие
+     * пишется и на вызове, остановленном отказом, то есть до того, как `run()` вернёт
+     * что-либо вообще.
+     */
+    onEvent?: EventSink): Promise<ExecOutcome>;
+    /** Считает ссылки; после последнего вызова любой `run()` бросает (R50). */
+    dispose(): Promise<void>;
+}
+/**
+ * Поддержан ли режим на этой платформе — **вопросом**, а не броском.
+ *
+ * Бросок как способ ответить «поддерживается ли» заставляет UI строить `try/catch` вокруг
+ * проверки, которую делает чистая функция. E5 и E7 спрашивают именно так; `createSandbox`
+ * для этого не годится — он на первой строке берёт ссылку на синглтон.
+ */
+export declare function isModeSupported(mode: SandboxMode, platform?: NodeJS.Platform): boolean;
+/**
+ * Проверка режима, отделённая от конструирования, чтобы её можно было утверждать без
+ * поднятия прокси и seatbelt.
+ *
+ * `container` бросает, а не откатывается на `seatbelt` (R3, D7): fail-closed, как везде в
+ * проекте. Молчаливый откат дал бы вызывающему песочницу слабее запрошенной и слайд,
+ * утверждающий контейнер там, где его нет.
+ *
+ * `seatbelt` вне macOS бросает, а не деградирует до `none` (R2): `10-honest-limitations.md:84`
+ * объявляет ровно эту границу, и тихая деградация сняла бы её без следа в аудите.
+ */
+export declare function assertModeSupported(mode: SandboxMode, platform?: NodeJS.Platform): void;
+/**
+ * Единственный вход. Режим приходит **параметром вызова**, а не из манифеста (R4): в
+ * замороженной схеме поля под режим нет и добавить его нельзя, а переключение режима в UI
+ * для одного и того же рецепта — требование S5.
+ *
+ * Проверка отделена в `assertModeSupported`, чтобы её можно было утверждать, не поднимая
+ * прокси и seatbelt; здесь она стоит **первой** — до любого импорта режима, до `initialize`
+ * и до единой строки в аудите.
+ */
+export declare function createSandbox(mode: SandboxMode, platform?: NodeJS.Platform): Sandbox;
+
+// ==== exec/violation.d.ts ====
+import type { SandboxViolation, ViolationType } from '@mcpproxy/contracts';
+/**
+ * Грамматика строки нарушения — отдельно от политики классификации.
+ *
+ * Две функции, а не одна: у прежней единой было четыре причины меняться — грамматика лога,
+ * список шума, семантика путей и бейдж S6, — и тест любой из них строил бы вход,
+ * удовлетворяющий всем четырём сразу.
+ *
+ * Модуль чистый: `resolvePath` **инжектируется** (R40), потому что `realpathSync.native` —
+ * синхронный сисколл, и модуль, зовущий его сам, не чист, а его тест требовал бы настоящих
+ * путей на диске вместо стаба. Он же оказался бы на горячем пути каждой строки лога живого
+ * процесса.
+ */
+export interface RawViolationRecord {
+    readonly source: 'kernel' | 'proxy';
+    readonly operation: string;
+    readonly target: string;
+    /**
+     * Исходная строка целиком. Поле есть, чтобы «неразобрано» докладывалось честно: без него
+     * `classify` реконструировал бы строку из разобранных частей и терял ровно то, из-за чего
+     * она и не разобралась.
+     */
+    readonly line: string;
+}
+/**
+ * Размеченное объединение, потому что `SandboxViolation` заморожен на четырёх полях
+ * (`packages/contracts/src/event.ts:116`) и слота под «неразобрано» не имеет.
+ *
+ * Складывать неузнанные строки в `type: 'process'` нельзя: это **настоящий** член
+ * `ViolationType`, означающий нарушение процесса, и, разделив с ним тег, ни то ни другое
+ * больше не посчитать и не отфильтровать — то есть требование «явный неразобрано, а не
+ * молча роняет» было бы побеждено классификацией.
+ *
+ * `null` при этом перестаёт значить две разные вещи разом: «шум, отброшен намеренно» —
+ * это `kind: 'suppressed'`, а не отсутствие результата.
+ */
+export type ParsedLine = {
+    readonly kind: 'violation';
+    readonly violation: SandboxViolation;
+} | {
+    readonly kind: 'suppressed';
+    readonly operation: string;
+} | {
+    readonly kind: 'unrecognized';
+    readonly line: string;
+};
+/**
+ * Операции, не отображаемые ни в один член `ViolationType` (R39).
+ *
+ * Список не выдуман: это ровно те операции, которые вендорский профиль разрешает адресно
+ * (`macos-sandbox-utils.js:450-640`), то есть которые `(deny default)` логирует всякий раз,
+ * когда узкий `allow` не совпал. Проба П1 поймала два `sysctl-read kern.iossupportversion`
+ * на тривиальный `cat` и `mach-lookup com.apple.SystemConfiguration.configd` на каждый
+ * `curl`; сырой проброс залил бы таймлайн мусором на каждом вызове и утопил бы в нём
+ * настоящее нарушение.
+ *
+ * Список — **явная константа**, а не префиксная регулярка: операция, которой здесь нет,
+ * приходит как «неразобрано» и потому громко видна. Это дороже, чем тихо подавить, и
+ * дешевле, чем тихо потерять.
+ */
+export declare const SUPPRESSED_OPERATIONS: readonly string[];
+/**
+ * Строка → запись. `null` — строка ни одной из трёх грамматик не соответствует; решение,
+ * что с этим делать, принимает вызывающий (`parseAndClassify` даёт `unrecognized`).
+ *
+ * **Дедупликации нет и быть не должно.** Дедуплицировать нечего, а правило «commandId плюс
+ * хост плюс близость по времени» было бы вредным: под семафором `commandId` постоянен на
+ * весь вызов, и цикл, стучащийся на один хост пятьдесят раз, схлопнулся бы в одно событие,
+ * занизив ровно ту цифру, которую показывает S5.
+ */
+export declare function parseLine(line: string): RawViolationRecord | null;
+export interface ClassifyPolicy {
+    /** Глобы обязательных запретов, как их отдал `mandatoryDenyGlobs` (R9). */
+    readonly mandatoryPaths: readonly string[];
+    readonly resolvePath: (path: string) => string;
+}
+/**
+ * Запись → классифицированная строка.
+ *
+ * Сопоставление идёт **глоба с реальным путём**, а не строки со строкой (R28): наши
+ * `mandatoryPaths` после R9 — глобы, цель из лога ядра приходит реальным путём (проба П1),
+ * и статический префикс шаблона srt резолвит тоже. Реализация через `includes(target)`
+ * зеленеет на литеральной фикстуре и вырождается в `file-write` в продакшене — то есть
+ * бейдж S6 умирает молча.
+ */
+export declare function classify(record: RawViolationRecord, policy: ClassifyPolicy): ParsedLine;
+/**
+ * Операция → член `ViolationType`, или `null`, если такого члена нет.
+ *
+ * Экспортируется ради теста, и это не удобство: список подавления обязан не пересекаться с
+ * отображением, иначе одна строка в константе выключает бейдж S6 целиком. Утверждать это
+ * свойство перечислением двух имён — значит проверять два имени; утверждать его через эту
+ * функцию — значит проверять весь список, включая имена, которых там ещё нет.
+ */
+export declare function typeForOperation(operation: string): ViolationType | null;
+/** Шов для вызывающего: неразобранная строка получает свой тег, а не молча исчезает (R27). */
+export declare function parseAndClassify(line: string, policy: ClassifyPolicy): ParsedLine;
 
 // ==== index.d.ts ====
 /**
  * `@mcpproxy/core` — ядро демона. Без импортов Electron (ADR-0001).
  *
- * E1 policy · E2 validate · E3 exec · **E6 audit** — реализовано в этом эпике.
+ * E1 policy · **E2 validate** · E3 exec · **E6 audit** — реализовано в этих эпиках.
  *
  * **Поверхность узкая намеренно.** Наружу выходит то, что зовут E3, E4 и E7; примитивы
  * детектора (`shannonEntropy`, `findHighEntropyRuns`, пороги) остаются внутри. Добавить
@@ -340,6 +964,724 @@ export type { SecretRule } from './redact/rules.js';
 export { redactInbound, redactOutput } from './redact/output.js';
 export type { InboundInput, OutputLimits, ProcessOutput, RedactedInbound, RedactedOutput, } from './redact/output.js';
 export * from './audit/index.js';
+export * from './policy/approve.js';
+export * from './policy/confirm-tty.js';
+export * from './policy/diagnostics-log.js';
+export * from './policy/event.js';
+export * from './policy/lock-check.js';
+export * from './policy/lock-command.js';
+export * from './policy/lock-write.js';
+export * from './policy/render-diff.js';
+export * from './policy/shapes.js';
+export * from './policy/store.js';
+export * from './policy/watch.js';
+export * from './exec/index.js';
+export * from './validate/index.js';
+
+// ==== policy/approve.d.ts ====
+import type { ApprovalDecision, Diagnostic, LockDiff, NormalizedRecipe } from '@mcpproxy/contracts';
+import type { LoadedManifest } from './lock-check.js';
+import type { LoadedPolicy } from './store.js';
+/**
+ * Формы апрува дрифта. Объявлены **здесь**, а не в `@mcpproxy/contracts`: контракт заморожен,
+ * и E1 его не трогает (R16, решение владельца D2).
+ *
+ * E1 объявляет форму запроса и производит решение — доставку решения человеку через два
+ * канала строит E5. Канала апрува здесь нет как класса, и это структурная половина R17:
+ * `checkLock` отказывает на `drifted` и `absent` безусловно, а единственный выход — явная
+ * команда, запущенная человеком в терминале. Отдельной проверки «мы в headless?» нет: она
+ * была бы поверхностью без потребителя.
+ */
+/**
+ * Что показывают человеку. Размеченное объединение из трёх ветвей, а не тотальная форма с
+ * обязательным `diff`: у `unreadable` и `unparsed` `LockFile` нет вовсе, диффа взять негде, а
+ * подстановка пустого диффа столкнулась бы с веткой «дрифт есть, показать нечего» — и человек
+ * получил бы текст про подделку на ошибке доступа.
+ */
+/**
+ * Рецепт, который команда собирается закрепить, — **вместе с содержимым**.
+ *
+ * Одного имени мало, и это не стилистика. R15b заведён против последовательности «удалить lock →
+ * отравить манифест → человек упирается в `denied (absent)` и запускает команду». Показав ему
+ * `- run_tests` — имя, которое стояло там и до атаки, — команда закрепляет отравленные `exec` и
+ * `description`, **ни разу их не показав**: ровно тот исход, который требование объявляет
+ * предотвращённым. Спека говорит «список рецептов», но предыдущим же предложением требует
+ * «показывает **то, что собирается закрепить**», и выиграть обязано второе.
+ */
+export interface PinnedRecipe {
+    readonly name: string;
+    readonly snapshot: NormalizedRecipe;
+}
+export type LockApprovalRequest = {
+    readonly kind: 'first';
+    /** Рецепты, которые впервые получают одобрение, с содержимым. */
+    readonly recipes: readonly PinnedRecipe[];
+    readonly manifestHash: string;
+    readonly requestedAt: string;
+} | {
+    readonly kind: 'drift';
+    readonly diff: LockDiff;
+    readonly mismatched: readonly string[];
+    readonly digest: {
+        readonly was: string;
+        readonly is: string;
+    } | null;
+    readonly manifestHash: string;
+    readonly requestedAt: string;
+} | {
+    readonly kind: 'unusable';
+    readonly reason: 'unreadable' | 'unparsed';
+    readonly diagnostics: readonly Diagnostic[];
+    /** То же и по той же причине: испорченный lock закрепляется так же вслепую, как удалённый. */
+    readonly recipes: readonly PinnedRecipe[];
+    readonly manifestHash: string;
+    readonly requestedAt: string;
+};
+/**
+ * Ответ человека. Поле названо `manifestHash` так же, как в запросе и в `LockFile`: прецедент
+ * — `packages/contracts/src/lock.ts:113`, где замороженная формула носит имя своего поля.
+ */
+export interface LockApprovalVerdict {
+    readonly manifestHash: string;
+    readonly decision: ApprovalDecision;
+    readonly decidedAt: string;
+}
+export type VerdictApplicability = 'applies' | 'stale' | 'denied';
+/**
+ * Запрос на подтверждение, или `null` — если спрашивать не о чем.
+ *
+ * `null` возвращается **только** для `verified`. Ветвь `'first'` существует потому, что
+ * «файла нет» перестало быть беззвучной записью (R15b): удалить lock дешевле, чем испортить,
+ * а по модели угроз ADR-0006 репозиторий правит в том числе сама модель. Последовательность
+ * «удалить lock → отравить манифест → человек упирается в `denied (absent)` и запускает
+ * команду» закрепила бы отравленный манифест, ни разу его не показав.
+ */
+export declare function requestFor(policy: LoadedPolicy, requestedAt: string): LockApprovalRequest | null;
+/**
+ * Действует ли вердикт на **этот** манифест.
+ *
+ * Сверка идёт по дайджесту, и только по нему. Счётчик перезагрузок для этого не годится
+ * дважды: он растёт при каждой успешной загрузке, поэтому перечитка после ответа человека
+ * всегда меняла бы его и всякий законный апрув отвергался бы как устаревший; и он локален для
+ * процесса, тогда как команда `mcpproxy lock` — отдельный процесс от демона. Дайджест
+ * переживает границу процесса, счётчик — нет, и дайджест же есть то, что человек одобрял.
+ *
+ * `'denied'` проверяется раньше `'stale'`: отказ человека — сам по себе исход, и подменять его
+ * рассказом про устаревание значило бы прятать решение, которое он принял.
+ */
+export declare function verdictApplicability(verdict: LockApprovalVerdict, manifest: LoadedManifest): VerdictApplicability;
+
+// ==== policy/confirm-tty.d.ts ====
+import type { ApprovalDecision } from '@mcpproxy/contracts';
+import type { LockApprovalRequest, LockApprovalVerdict } from './approve.js';
+/**
+ * Разбор `--expect`: **три** исхода, а не два.
+ *
+ * `mcpproxy lock` — отдельный процесс от демона, поэтому связать «дайджест, на котором демон
+ * отказал» с «манифестом, который команда подписывает», может только значение, переживающее
+ * границу процесса (R15a).
+ *
+ * Прежняя редакция возвращала `null` и на «флага нет», и на «флаг есть, значения нет», а
+ * `runLockCommand` на `null` проверку пропускает — то есть **allow-on-input-error на средстве
+ * защиты**. Достижимо одной незакавыченной пустой переменной: `mcpproxy-lock --expect $DIGEST`
+ * при незаданном `DIGEST` молча снимал ограничение и подписывал тот манифест, который на диске
+ * СЕЙЧАС, вместо того чтобы отказаться подписывать не тот, ради которого команду позвали.
+ * Всегда отказывать — fail-closed; молча снять ограничение — нет.
+ */
+export type ExpectArgument = {
+    readonly kind: 'absent';
+} | {
+    readonly kind: 'digest';
+    readonly digest: string;
+} | {
+    readonly kind: 'invalid';
+    readonly reason: string;
+};
+export declare function parseExpect(argv: readonly string[]): ExpectArgument;
+export declare function decisionOf(answer: string): ApprovalDecision;
+export interface TtyDeps {
+    readonly print: (text: string) => void;
+    readonly ask: (question: string) => Promise<string>;
+    readonly now: () => string;
+}
+/**
+ * Вопрос, который завершается и на конце потока.
+ *
+ * `rl.question` на закрытом stdin не резолвится **никогда**: измерено на Node 22 — команда
+ * печатает весь дифф, затем `Warning: Detected unsettled top-level await`, и процесс выходит с
+ * кодом 13, минуя и `finally`, и весь документированный контракт кодов выхода. То есть любой
+ * неинтерактивный запуск (CI, пайп, `< /dev/null`) не отказывал, а исчезал.
+ *
+ * Гонка с событием `close` доводит EOF до пустой строки, а её `decisionOf` уже считает отказом.
+ * Это не проверка «мы в headless?» (её R17 запрещает как поверхность без потребителя) — это
+ * обработка конца потока.
+ */
+/**
+ * Ответ человека ИЛИ конец потока, что наступит раньше.
+ *
+ * Вынесено отдельной функцией, чтобы семантику можно было закрепить тестом без настоящего
+ * терминала: измерено, что `rl.question` на закрытом stdin не резолвится никогда, и команда
+ * выходила с кодом 13 мимо всего документированного контракта. Пустая строка — уже отказ
+ * (`decisionOf`), поэтому EOF доезжает как fail-closed.
+ */
+export declare const answerOrEof: (answer: Promise<string>, closed: Promise<unknown>) => Promise<string>;
+/**
+ * Показать и спросить.
+ *
+ * Вердикт наследует `manifestHash` **из запроса**, а не читает его заново: он обязан быть
+ * привязан ровно к тому манифесту, который человеку показали.
+ */
+export declare function confirmTty(request: LockApprovalRequest, rendered: string, deps?: Partial<TtyDeps>): Promise<LockApprovalVerdict>;
+
+// ==== policy/diagnostics-log.d.ts ====
+import type { Diagnostic, DiagnosticCode } from '@mcpproxy/contracts';
+/**
+ * Диагностики загрузки — в структурный лог демона, и **не** в цепочку аудита (R2): у события
+ * аудита нет стадии `manifest_load`, и `Stage` для этого не расширяется.
+ *
+ * Ключ записи строится **не по одному `pointer`**. Указатель лоссовый и не уникален: ключ с
+ * невидимыми символами приезжает без них, поэтому `tools.a<U+200B>b` и законный `tools.ab`
+ * дают один и тот же указатель, — и по нему диагностики враждебного ключа приписались бы
+ * невиновному рецепту. Для манифеста хватило бы тройки `pointer` + `line` + `column`, **а для
+ * lock не хватает и её**: все его диагностики несут `line: 1, column: 1`
+ * (`packages/contracts/src/validate/lock.ts:62`), а `pointer` у них — это `tools.${имя}`,
+ * пропущенный через санитизацию.
+ *
+ * Развести две враждебные записи может только порядковый номер в пределах разбора — из одной
+ * диагностики его не вычислить. Поэтому функция берёт **пачку**, а не запись.
+ */
+export interface DiagnosticRecord {
+    readonly key: string;
+    readonly pointer: string;
+    readonly code: DiagnosticCode;
+    readonly message: string;
+    readonly line: number;
+    readonly column: number;
+}
+export declare function toLogRecords(diagnostics: readonly Diagnostic[], origin: 'manifest' | 'lock'): readonly DiagnosticRecord[];
+
+// ==== policy/event.d.ts ====
+import type { AuditEvent, RecipeName, SessionId } from '@mcpproxy/contracts';
+import type { LockVerdict } from './lock-check.js';
+/**
+ * Событие стадии `lock_check`.
+ *
+ * Пишется **всегда, включая отказ** (R12): отказ без записи в аудит контракт называет багом.
+ * Событие остановленного здесь вызова не несёт `argv` — ключ **отсутствует**, а не равен
+ * `null`: JCS различает это побайтово, и обе формы попадают внутрь `chain.self`, то есть
+ * выдуманный `argv: []` был бы ложным утверждением в доказательстве, а UI отрисовал бы его
+ * как настоящую пустую команду.
+ *
+ * Сам вызов ничего не считает: вердикт уже произведён на изменении файлов и читается полем.
+ */
+export interface LockCheckEventInput {
+    readonly verdict: LockVerdict;
+    /** Идёт и в `toolName`, и в `recipe.name`: у `AuditEvent` это два обязательных поля. */
+    readonly recipeName: RecipeName;
+    /** `undefined` — имени нет в манифесте, значит и дайджеста у него нет. */
+    readonly recipeDigest: string | undefined;
+    /**
+     * Ревизия MCP, **согласованная в этой сессии** (R12b). Константа сборки сюда не годится:
+     * контракт называет запись собственной константы вместо согласованного значения ложным
+     * утверждением в доказательстве, а поле попадает в `chain.self`.
+     */
+    readonly protocolVersion: string;
+    readonly sessionId: SessionId;
+    readonly traceId: string;
+    readonly spanId: string;
+    readonly parentSpanId: string | null;
+    readonly startTime: string;
+    readonly endTime: string;
+    readonly durationUs: number;
+}
+export declare function lockCheckEvent(input: LockCheckEventInput): AuditEvent;
+
+// ==== policy/lock-check.d.ts ====
+import type { Diagnostic, LockCheck, LockFile, Manifest, PatternMatcher } from '@mcpproxy/contracts';
+/**
+ * Сверка манифеста с `mcpproxy.lock` — единственная точка, производящая `LockCheck`.
+ *
+ * `LockCheck` и `LockStatus` объявлены в контракте и до E1 не производились ничем: это долг,
+ * оставленный E0 явно (R7). Три шага замороженных функций — `parseLockFile` → `verifyLockEntries`
+ * → `diffLock` — распределены между двумя местами. Разбор файла принадлежит загрузке (`store.ts`):
+ * он делается при изменении файла, а не при вызове. Здесь — сверка.
+ *
+ * **На пути вызова эта функция не зовётся.** `lock_check` — стадия каждого вызова и она не
+ * входит в `OVERHEAD_EXCLUDED_STAGES`, то есть попадает в бюджет ≤ 50 мс p95, тогда как
+ * `diffLock` нормализует каждый рецепт: замер сопоставимой работы — 2.2 с CPU на манифесте в
+ * 258 КБ. Вердикт производится на изменении файлов и читается полем.
+ *
+ * `deriveRiskTier` здесь не импортируется и не может появиться: там `high` означает out-of-band
+ * апрув обычного вызова, а расхождение с lock требует жёсткого стопа (R13). Запрет исполняемый —
+ * скан `policy/**` в `scan.ts`.
+ */
+export interface LoadedManifest {
+    readonly manifest: Manifest;
+    /**
+     * Матчеры едут **вместе** с манифестом, одним значением (R5a): потребитель, взявший матчеры
+     * от одной загрузки, а манифест от следующей, проверял бы новые `pattern` старыми объектами
+     * RE2 — молчаливое расхождение на пути валидации.
+     */
+    readonly matchers: ReadonlyMap<string, PatternMatcher>;
+    /** `manifestHash` — то, чем связывается одобрение, и то, что переживает границу процесса. */
+    readonly digest: string;
+    readonly recipeDigests: ReadonlyMap<string, string>;
+}
+/**
+ * Причина отсутствия одобрения не схлопывается в один `null` (R6a). Три формы отказа —
+ * файла нет; файл есть, но не читается; файл есть и читается, но не разбирается — fail-closed
+ * все три, но для оператора это разные истории, а для команды записи — разные тексты.
+ */
+export type LoadedLock = {
+    readonly present: true;
+    readonly lock: LockFile;
+} | {
+    readonly present: false;
+    readonly reason: 'missing';
+} | {
+    readonly present: false;
+    readonly reason: 'unreadable';
+    readonly code: string;
+    readonly message: string;
+} | {
+    readonly present: false;
+    readonly reason: 'unparsed';
+    readonly diagnostics: readonly Diagnostic[];
+};
+/**
+ * Машиночитаемая причина отказа, низкой кардинальности.
+ *
+ * Отдельно от `denyReason`, потому что тот несёт путь и список имён и как измерение телеметрии
+ * непригоден: атрибут, значение которого содержит путь, нельзя ни сгруппировать, ни посчитать.
+ * Ветвиться потребитель обязан по коду, а `denyReason` читать глазами.
+ */
+export type LockDenyCode = 'lock-absent' | 'lock-unreadable' | 'lock-too-large' | 'lock-unparsed' | 'lock-tampered' | 'lock-drifted';
+export interface LockVerdict {
+    readonly check: LockCheck;
+    /**
+     * Диагностики `parseLockFile` не выбрасываются (R17a): у `LockCheck` слота под них нет, а
+     * «lock старой версии», «lock испорчен» и «lock отсутствует» обязаны различаться в логе
+     * оператора — ради этого различия в `DiagnosticCode` и существует член `lock`.
+     */
+    readonly diagnostics: readonly Diagnostic[];
+    /** Записи, чей `recipeHash` противоречит собственному снапшоту. Пусто, если таких нет. */
+    readonly mismatched: readonly string[];
+    /**
+     * Обе стороны дайджеста, когда разошёлся именно он.
+     *
+     * Поле, а не локальная переменная, потому что путей «дрифт есть, а дифф пуст» **два**, и
+     * улики у них разные. Первый — подделанный `snapshot`: записи называет `mismatched`. Второй —
+     * lock, пересчитанный целиком под изменённый манифест с оставленным прежним `manifestHash`:
+     * тогда `verifyLockEntries` доволен, `diffLock` чист, `mismatched` пуст, и расходится только
+     * дайджест. Не неси вердикт обе его стороны — и на этом пути рендеру нечего сказать вообще
+     * (R19a), а это ровно тот путь, ради которого существует сверка дайджеста (R11).
+     */
+    readonly digest: {
+        readonly was: string;
+        readonly is: string;
+    } | null;
+    /**
+     * Причина отказа. Уезжает в OTLP как `mcpproxy.deny_reason` и как сообщение статуса спана
+     * (R12a), поэтому без неё самый важный отказ продукта приезжает оператору без причины.
+     * `null` — только на `verified`.
+     */
+    readonly denyReason: string | null;
+    /** `null` — только на `verified`. Ветвиться следует по нему, а не по префиксу `denyReason`. */
+    readonly denyCode: LockDenyCode | null;
+}
+/**
+ * Производит вердикт. `diffLock` считается **всегда**, до всякого ветвления: иначе ветка
+ * «разошёлся дайджест» отдала бы `drifted` с пустым диффом даже там, где рецепт изменён, и
+ * рендеру нечего было бы показать человеку.
+ */
+export declare function checkLock(manifest: LoadedManifest, lock: LoadedLock): LockVerdict;
+
+// ==== policy/lock-command.d.ts ====
+import type { Diagnostic, LockFile } from '@mcpproxy/contracts';
+import type { LockApprovalRequest, LockApprovalVerdict } from './approve.js';
+import type { WriteResult } from './lock-write.js';
+import type { StartedStore } from './store.js';
+/**
+ * Команда `mcpproxy lock` — единственный способ появления lock (R15). Ничто не пишет его
+ * автоматически, поэтому на репозитории без lock каждый вызов упирается в `denied (absent)`:
+ * первый запуск не притворяется одобренным.
+ *
+ * Когда lock уже есть, та же команда **не** перезаписывает его молча (R15a). Она показывает
+ * дифф, требует подтверждения и — вот главное — **перечитывает манифест после ответа
+ * человека** и сверяет его с тем, что ему показали. Сравнение снимка, взятого до показа, с
+ * самим собой — не проверка, а тавтология: она проходит всегда, в том числе когда файл на
+ * диске уже другой. Это и есть окно CVE-2025-54136: человек читает дифф в T₀, атакующий
+ * правит манифест в T₁, команда подписывает T₁, не показав его.
+ *
+ * Беззвучной ветки не осталось ни одной, включая «файла нет» (R15b): удалить lock дешевле,
+ * чем испортить, а по модели угроз ADR-0006 репозиторий правит в том числе сама модель.
+ * Последовательность «удалить lock → отравить манифест → человек упирается в
+ * `denied (absent)` и запускает команду» иначе закрепила бы отравленный манифест, ни разу его
+ * не показав.
+ */
+/**
+ * Исход команды.
+ *
+ * Отказы несут **улику, а не тег**. `stale` — это подпись CVE-2025-54136: манифест изменился
+ * между показом диффа и ответом человека, то есть самое высокосигнальное событие, ради которого
+ * этот модуль существует. Прежняя редакция сообщала его оператору одним словом и не сохраняла
+ * нигде; теперь он видит, какой дайджест одобрил и какой лежит на диске. `reload-failed`
+ * по той же причине несёт диагностики: «манифест стал неразбираем, пока вы читали дифф» и
+ * «манифест удалён» — разные истории.
+ *
+ * `write-failed` — отдельный член, а не `refused`: отказ записи не есть отказ человека, и до
+ * этой правки он вообще не был выразим — исключение уходило в необработанное отклонение
+ * `bin/mcpproxy-lock.mjs` и давало код 1, тот же, что и «человек сказал нет».
+ */
+export type LockCommandOutcome = {
+    readonly kind: 'written';
+    readonly durable: boolean;
+    readonly reason?: string;
+} | {
+    readonly kind: 'up-to-date';
+} | {
+    readonly kind: 'refused';
+    readonly why: 'denied';
+} | {
+    readonly kind: 'refused';
+    readonly why: 'stale';
+    readonly approved: string;
+    readonly onDisk: string;
+} | {
+    readonly kind: 'refused';
+    readonly why: 'expect-mismatch';
+    readonly expected: string;
+    readonly onDisk: string;
+} | {
+    readonly kind: 'refused';
+    readonly why: 'reload-failed';
+    readonly detail: string;
+    readonly diagnostics: readonly Diagnostic[];
+} | {
+    readonly kind: 'write-failed';
+    readonly code: string;
+    readonly message: string;
+};
+export interface LockCommandDeps {
+    readonly lockPath: string;
+    readonly now: () => string;
+    readonly write?: (lockPath: string, lock: LockFile) => Promise<WriteResult>;
+}
+export type Confirm = (request: LockApprovalRequest, rendered: string) => Promise<LockApprovalVerdict>;
+export declare function runLockCommand(store: StartedStore, confirm: Confirm, expectDigest: string | null, deps: LockCommandDeps): Promise<LockCommandOutcome>;
+export declare const MANIFEST_FILE = 'mcpproxy.yaml';
+export declare const LOCK_FILE = 'mcpproxy.lock';
+/**
+ * Точка входа скрипта запуска. Возвращает код выхода, а не завершает процесс: решать, когда
+ * умирать, — дело приложения, а не библиотеки.
+ */
+export declare function mainLockCommand(argv: readonly string[], cwd: string): Promise<number>;
+
+// ==== policy/lock-write.d.ts ====
+import type { LockFile } from '@mcpproxy/contracts';
+import type { LoadedManifest } from './lock-check.js';
+/**
+ * Сборка и запись `mcpproxy.lock`.
+ *
+ * `buildLock` берёт `LoadedManifest`, а не `Manifest`: предусловие «манифест прошёл
+ * `parseManifest`» держится типом, поэтому `durationToMs` внутри `normalizeRecipe` не
+ * встретит непроверенный текст и не бросит на пути записи.
+ *
+ * `recipeHash` считается **от того же значения**, которое ложится в `snapshot`. Именно эту
+ * пару потом сверяет `verifyLockEntries`, и выводя обе стороны из одного `snapshot`, мы
+ * делаем инвариант истинным по построению, а не по дисциплине.
+ */
+export declare function buildLock(loaded: LoadedManifest, approvedAt: string): LockFile;
+export interface FileHandleLike {
+    write(text: string): Promise<void>;
+    sync(): Promise<void>;
+    close(): Promise<void>;
+}
+/**
+ * Исход записи. `durable: false` означает «lock записан и виден, но каталог не синхронизирован»
+ * — это НЕ отказ записи, и путать их нельзя: `rename` уже произошёл, файл на месте и корректен.
+ * Прежняя редакция бросала на этом месте, и человек получал стек поверх успешно записанного
+ * lock, после чего разумно одобрял заново.
+ */
+export interface WriteResult {
+    readonly durable: boolean;
+    readonly reason?: string;
+}
+/** Отказ записи с машиночитаемым кодом. Отличать его от `durable: false` — работа вызывающего. */
+export declare class LockWriteError extends Error {
+    readonly code: string;
+    constructor(code: string, message: string);
+}
+export interface WriteDeps {
+    /** Полный путь временного файла. Обязан лежать в том же каталоге, что и lock. */
+    readonly tempPath: (lockPath: string) => string;
+    readonly open: (path: string, flags: string) => Promise<FileHandleLike>;
+    readonly rename: (from: string, to: string) => Promise<void>;
+}
+/**
+ * Атомарная запись: временный файл в том же каталоге, `fsync`, затем `rename`.
+ *
+ * Флаг `wx`, а не `w`: имя уникально, и столкновение означает, что рядом работает второй
+ * процесс, — это ошибка, а не повод перезаписать чужой файл.
+ *
+ * Содержимое сбрасывается на диск **до** `rename`. `rename` атомарен по видимости, но не по
+ * долговечности: обрыв питания после него оставляет lock нулевой длины. Это не дыра — пустой
+ * lock читается как `absent` и даёт отказ, — но он уничтожает запись об одобрении и заставляет
+ * человека одобрять заново. По той же причине после `rename` синхронизируется и каталог: сама
+ * запись в каталог тоже не долговечна.
+ *
+ * Печать — с отступом: файл читают глазами в ревью гита. Хэши к этому моменту уже посчитаны
+ * `buildLock` по канонической форме и от печатных байтов не зависят.
+ */
+export declare function writeLock(lockPath: string, lock: LockFile, deps?: Partial<WriteDeps>): Promise<WriteResult>;
+
+// ==== policy/render-diff.d.ts ====
+import type { LockApprovalRequest } from './approve.js';
+/** `U+202E` в тексте становится восемью печатными символами `<U+202E>`. */
+export declare function renderVisible(raw: string): string;
+/** Полный текст запроса. Возвращается строкой: печатать её — дело вызывающего. */
+export declare function renderRequest(request: LockApprovalRequest): string;
+
+// ==== policy/shapes.d.ts ====
+import type { LockDiff } from '@mcpproxy/contracts';
+/**
+ * Формы и предикаты политики, **не требующие `node:crypto`**.
+ *
+ * Живут отдельно от `lock-check.ts` не ради красоты: производство вердикта зовёт
+ * `verifyLockEntries`, то есть тянет `node:crypto`, а рендер диффа и формы апрува — нет.
+ * Держи предикат рядом с производителем — и чистый вход `@mcpproxy/core/pure` затащил бы
+ * криптографию в бандл рендерера через один-единственный импорт.
+ */
+/**
+ * Код `LoadedLock.unreadable`, означающий превышение предела размера. Отличим от отказа
+ * доступа: у оператора это разные истории, и лечатся они противоположным.
+ */
+export declare const SIZE_LIMIT_CODE = 'ERR_SIZE_LIMIT';
+/**
+ * Дифф пуст во всех четырёх слотах.
+ *
+ * Общий для `checkLock` и рендера намеренно. Держи каждый собственную копию условия — и
+ * расхождение двух определений «пустоты» показало бы человеку текст про подделку там, где есть
+ * обычный дифф, или наоборот.
+ */
+export declare const isEmptyDiff: (diff: LockDiff) => boolean;
+
+// ==== policy/store.d.ts ====
+import type { Diagnostic } from '@mcpproxy/contracts';
+import type { LoadedLock, LoadedManifest, LockVerdict } from './lock-check.js';
+/**
+ * Единственная точка загрузки политики в `core` (R1).
+ *
+ * Она читает оба файла с диска и **никогда не бросает**: и отсутствие файла, и ошибка чтения,
+ * и диагностики парсера возвращаются размеченным результатом. Прямой вызов `parseManifest` в
+ * обход этого модуля не появляется нигде в `core` — запрет исполняемый, его держит скан
+ * `scan.ts`, а не обещание в этом комментарии.
+ *
+ * Асимметрия реакций намеренная и требуется `docs/07-contracts.md:402` (R3): сломанный манифест
+ * — отказ старта; сломанный или устаревший lock — повторный апрув. Поэтому неудача загрузки
+ * манифеста имеет **форму** (`StartResult`, `ReloadResult`), по которой демон E4 отказывается
+ * стартовать, а неудача загрузки lock — это его значение (`absent`), а не отказ загрузки.
+ */
+/**
+ * Предел размера `mcpproxy.lock` — до чтения в память (R1a).
+ *
+ * У манифеста предел есть (`MANIFEST_MAX_BYTES`), но срабатывает он уже внутри парсера, то есть
+ * после того, как файл целиком прочитан строкой; у lock предела нет вовсе. Оба файла
+ * недоверенные по модели угроз, оба лежат на пути решения, и оба перечитываются вотчером при
+ * каждой записи в каталоге.
+ *
+ * Значение — **бюджет памяти, а не гарантия вместимости**, и это различие существенно.
+ *
+ * Отношение «манифест → lock» не ограничено сверху ничем. `snapshot.effective` копирует весь
+ * нормализованный блок `defaults` в **каждую** запись, поэтому манифест из множества крошечных
+ * рецептов при богатых `defaults` раздувает lock произвольно. Измерено на законных манифестах у
+ * самого потолка `MANIFEST_MAX_BYTES`:
+ *
+ * | форма | рецептов | манифест | lock | отношение |
+ * |---|---:|---:|---:|---:|
+ * | обычные рецепты, 12 `deny` | 1 700 | 260 777 B | 4 030 340 B | 15.5x |
+ * | минимальные рецепты, 12 `deny` | 5 500 | 259 712 B | 15 858 439 B | 61x |
+ * | минимальные рецепты, 60 `deny` | 5 400 | 258 276 B | 41 494 363 B | 161x |
+ *
+ * Значит **никакая константа не делает «законный манифест ⇒ lock влезает» истинным**, и искать
+ * её бессмысленно. Прежнее `4 *` было хуже вдвойне: оно лежало ниже даже типичного отношения,
+ * и — главное — писатель о нём не знал. Манифест в 152 КБ давал честный lock в 1.05 МБ, команда
+ * писала его, печатала «записан» и выходила с нулём, а читатель той же сборки объявлял файл
+ * непригодным и отказывал каждому вызову; повторный запуск команды писал те же байты. Выхода из
+ * цикла не было.
+ *
+ * Дыру закрывает не константа, а инвариант **«потолок писателя ≡ потолок читателя»**: `writeLock`
+ * меряет сериализованный lock тем же пределом и отказывается его писать, поэтому превышение —
+ * диагностируемый отказ с ненулевым кодом выхода, а не молчаливый клин. Держит инвариант тест, а
+ * не симметрия констант.
+ *
+ * Сама же величина отвечает только за то, ради чего предел и заведён, — «не дать вотчеру
+ * прочитать в память произвольный файл». 4 МиБ покрывают порядка полутора тысяч рецептов при
+ * реалистичных `defaults`, то есть любой манифест, написанный человеком.
+ */
+export declare const LOCK_MAX_BYTES: number;
+export type StartResult = {
+    readonly outcome: 'started';
+    readonly store: StartedStore;
+} | {
+    readonly outcome: 'invalid-manifest';
+    readonly diagnostics: readonly Diagnostic[];
+} | {
+    readonly outcome: 'unreadable-manifest';
+    readonly code: string;
+    readonly message: string;
+};
+/**
+ * Перечитка отдаёт результат, а не `void` (R2a): иначе диагностики некуда деть, и вызывающий не
+ * отличает «перечитка не удалась» от «перечитка удалась, ничего не изменилось» — молчаливый
+ * fail-open на пути решения.
+ */
+export type ReloadResult = {
+    readonly outcome: 'reloaded';
+    readonly policy: LoadedPolicy;
+} | {
+    readonly outcome: 'invalid';
+    readonly diagnostics: readonly Diagnostic[];
+} | {
+    readonly outcome: 'unreadable';
+    readonly code: string;
+    readonly message: string;
+};
+export interface LoadedPolicy {
+    readonly manifest: LoadedManifest;
+    readonly lock: LoadedLock;
+    readonly verdict: LockVerdict;
+}
+export interface StoreDeps {
+    readonly statSize: (path: string) => Promise<number>;
+    /** Обязана читать не больше `limit + 1` байт и отказывать на превышении — см. `nodeReadFile`. */
+    readonly readFile: (path: string, limit: number) => Promise<string>;
+}
+/**
+ * Снимок политики выдаётся только отсюда, и объект существует **только** внутри
+ * `{outcome:'started'}` (R6b): до первой успешной загрузки политики нет, и вызов в этом
+ * состоянии невозможен по построению, а не по проверке. Тип, а не гарантия словом.
+ */
+export interface StartedStore {
+    current(): LoadedPolicy;
+    reloadManifest(): Promise<ReloadResult>;
+    reloadLock(): Promise<ReloadResult>;
+    /**
+     * Число успешных перезагрузок. Наблюдаемое, **не участвующее в решении**: одобрение связывает
+     * дайджест манифеста, а не этот счётчик — почему именно, развёрнуто в `approve.ts`.
+     */
+    reloadCount(): number;
+}
+/**
+ * Чтение, **ограниченное сверху на самом дескрипторе**.
+ *
+ * `statSize` → `readFile` — две независимые операции по пути, который по модели угроз правит в
+ * том числе атакующий: между ними файл можно подменить на сколь угодно больший, и обычный
+ * `readFile` втянул бы его в память целиком. Проверка порядка вызовов (R1a) от этого не
+ * защищает — она утверждает очерёдность, а не эффект. Здесь читается не больше `limit + 1`
+ * байт, поэтому окно между проверкой и чтением перестаёт что-либо давать: превышение
+ * обнаруживается по факту чтения, а память ограничена в любом случае.
+ *
+ * Усечённая строка наружу не отдаётся: `limit + 1` прочитанных байт — это отказ, а не значение,
+ * поэтому разрезанная пополам кодовая точка никогда не доезжает до разбора.
+ */
+export declare const readBounded: (path: string, limit: number) => Promise<string>;
+export declare function startStore(manifestPath: string, lockPath: string, deps?: Partial<StoreDeps>): Promise<StartResult>;
+
+// ==== policy/watch.d.ts ====
+import type { ReloadResult, StartedStore } from './store.js';
+/**
+ * Наблюдение за манифестом и lock.
+ *
+ * Живёт за интерфейсом (R5): продакшн-реализация — `fs.watch`, тестовая — ручной триггер.
+ * Ни один тест E1 не ждёт настоящего события файловой системы по таймеру, поэтому
+ * коалесценция вынесена отдельной чистой функцией и проверяется прямо на ней.
+ *
+ * **Наблюдается каталог, а не путь файла** (R5c). Замерено на macOS, Node 22: `fs.watch` по
+ * пути файла пропустил обычную запись на месте и замолчал навсегда после первой же атомарной
+ * подмены (`file=1` событие против `dir=6`), тогда как наблюдение за каталогом увидело все
+ * изменения. А подмена — это наш собственный способ записи lock (`temp` + `rename`), и точно
+ * так же сохраняют файл vim и VSCode: вотчер по пути файла умер бы при первом же запуске
+ * команды `mcpproxy lock`.
+ *
+ * **Наблюдаются оба файла** (R5b). Иначе `mcpproxy lock` не расклинивает работающий демон:
+ * команда пишет `mcpproxy.lock`, время правки `mcpproxy.yaml` не меняется, вотчер не
+ * срабатывает, и `absent` в памяти остаётся навсегда.
+ */
+export interface PathWatcher {
+    start(onChange: () => void): void;
+    /** Без `stop` утекает дескриптор ФС, а вместе с ним — висящий таймер коалесценции. */
+    stop(): void;
+}
+export interface Debounced {
+    (): void;
+    cancel(): void;
+}
+/**
+ * Коалесценция событий. Одна атомарная подмена даёт на каталоге несколько событий (замерено:
+ * три на первый `rename`), и каждое из них перечитывало бы файл заново.
+ */
+export declare function debounce(fn: () => void, ms: number): Debounced;
+/** Ровно та часть `fs.watch`, которой пользуется `dirWatcher`. Инъектируется ради теста R5c. */
+export type WatchPrimitive = (dir: string, listener: (event: string, filename: string | null) => void, onError: (error: unknown) => void) => {
+    close(): void;
+};
+/**
+ * `FSWatcher` — это `EventEmitter`, и его документированное событие `'error'` (каталог удалён
+ * или переименован, EPERM, исчерпан лимит наблюдателей) **без слушателя бросается наверх и
+ * убивает процесс**. Для долгоживущего демона это отказ обслуживания из операции над каталогом
+ * репозитория, поэтому слушатель обязателен, а не желателен.
+ */
+/** Ровно та часть `fs.watch`, которую использует `nodeWatch`. Параметр — ради теста ниже. */
+export interface WatcherLike {
+    on(event: 'error', listener: (error: unknown) => void): unknown;
+    close(): void;
+}
+export type WatchFactory = (dir: string, listener: (event: string, filename: unknown) => void) => WatcherLike;
+export declare const nodeWatchWith: (factory: WatchFactory) => WatchPrimitive;
+/**
+ * Вотчер одного файла, поставленный на его **каталог** с фильтром по имени.
+ *
+ * Примитив инъектируется, чтобы это свойство было под тестом, а не только под пробой: иначе
+ * будущая правка тихо вернёт `fs.watch(filePath)` и сломает R5b/R5c, не уронив ничего.
+ */
+export declare function dirWatcher(filePath: string, debounceMs: number, watch?: WatchPrimitive, onError?: (error: unknown) => void): PathWatcher;
+export interface WatchPaths {
+    readonly manifestPath: string;
+    readonly lockPath: string;
+}
+/** Что именно перечитывалось. Без этого получатель не знает, к какому файлу относится исход. */
+export type ReloadSource = 'manifest' | 'lock';
+export interface WatchOptions {
+    readonly debounceMs: number;
+    readonly make?: (filePath: string, ms: number) => PathWatcher;
+    /**
+     * Исход каждой перезагрузки.
+     *
+     * **Обязателен по смыслу, а не по типу.** `watchPolicy` — единственная продакшн-проводка
+     * `reloadManifest`/`reloadLock`, и без этого шва она уничтожала результат: `current()` по R4
+     * остаётся прежним, `reloadCount()` растёт только на успехе, диагностики выбрасывались, — то
+     * есть «перечитка не удалась» и «перечитка удалась, ничего не изменилось» были наблюдаемо
+     * неразличимы. Ровно это состояние R2a называет fail-open на пути решения: оператор правит
+     * манифест с опечаткой и получает прокси, вечно обслуживающий устаревшую политику без единой
+     * записи о том, что файл на диске перестал быть политикой.
+     *
+     * Сюда же приходят ошибки самого наблюдения (`outcome: 'unreadable'`, код `EWATCH`).
+     */
+    readonly onReload?: (source: ReloadSource, result: ReloadResult) => void;
+}
+/**
+ * Связывает оба вотчера со снимком политики.
+ *
+ * Возвращает `{stop()}`, а не `PathWatcher`: он уже владеет `store` и сам делает перезагрузку,
+ * поэтому `start(onChange)` у него смысла не имеет.
+ *
+ * Обновление lock не влечёт перечитку манифеста и наоборот: это разные файлы с разным
+ * временем жизни (R5b).
+ */
+export declare function watchPolicy(store: StartedStore, paths: WatchPaths, options: WatchOptions): {
+    stop(): void;
+};
 
 // ==== redact/engine.d.ts ====
 import type { SecretRule } from './rules.js';
@@ -570,3 +1912,378 @@ export interface SecretRule {
     readonly pattern: string;
 }
 export declare const SECRET_RULES: readonly SecretRule[];
+
+// ==== validate/argv.d.ts ====
+import type { ResolvedValues } from './denial.js';
+import { type PreparedRecipe } from './prepare.js';
+export declare function buildArgv(prepared: PreparedRecipe, values: ResolvedValues): readonly string[];
+
+// ==== validate/confinement.d.ts ====
+export type Confinement = 'inside' | 'root-itself' | 'outside';
+/**
+ * Предикат confinement (R15). Строится на `path.relative`, а не на `startsWith`: голый
+ * `startsWith` считает `/logs-evil/a` лежащим внутри `/logs` (Ф3).
+ *
+ * `rel === '..'` проверяется отдельно от `startsWith('..' + sep)` по той же причине, по
+ * которой она стоит в `checkRootConfinement` (`packages/contracts/src/validate/refine.ts:223`):
+ * каталог `..cache` даёт `relative` = `..cache`, и голый `startsWith('..')` объявил бы законный
+ * подкаталог выходом за пределы. Обратная сторона той же клаузы — значение ровно `..`, то есть
+ * родительский каталог корня без хвоста: без неё он проходит границу целиком.
+ *
+ * Живёт отдельным модулем, а не внутри `paths.ts`, с E4: тот же вопрос задаётся дважды и о
+ * разных вещах — о резолвнутом значении параметра относительно его `root` (R13) и о рабочем
+ * каталоге рецепта относительно каталога манифеста (R34 E4). Две копии одной границы
+ * расходятся молча, и ровно это записано границей в спеке E2.
+ */
+export declare function confinementOf(root: string, candidate: string): Confinement;
+
+// ==== validate/denial.d.ts ====
+/**
+ * Общие типы E2 и словарь отказов.
+ *
+ * Словарь свой, внутри `core`: замороженная поверхность контрактов не расширяется (D2, R24).
+ * `Stage` уже различает `validate` и `resolve_paths`, а потребителю, которому нужна причина
+ * точнее, доступен импорт отсюда.
+ */
+/** Значение параметра после валидации. Три типа — ровно то, что выражает схема манифеста. */
+export type ParamValue = string | number | boolean;
+/**
+ * Стадии, которые исполняет E2. Массив с `as const satisfies`, а не инлайновый `Extract`:
+ * `Extract<Stage, 'validaet'>` даёт `never` молча и всё остальное продолжает компилироваться,
+ * а `satisfies readonly Stage[]` роняет сборку на опечатке. Идиом стоит в
+ * `packages/contracts/src/domain.test.ts:25`.
+ */
+export declare const E2_STAGES: readonly ['validate', 'resolve_paths', 'build_argv'];
+export type E2Stage = (typeof E2_STAGES)[number];
+/**
+ * Стадии, на которых возможен отказ. Уже `E2_STAGES`: `buildArgv` тотальна, отказать ей
+ * нечем, поэтому `build_argv` в стадии отказа недостижим. `E2Stage` остаётся широким —
+ * длительность меряется у всех трёх.
+ */
+export declare const DENIAL_STAGES: readonly ['validate', 'resolve_paths'];
+export type DenialStage = (typeof DENIAL_STAGES)[number];
+/**
+ * Абсолютный потолок длины строкового значения, независимый от `maxLength` манифеста (R30).
+ *
+ * Нужен потому, что `PathParam` не имеет **ни** `pattern`, **ни** `maxLength` вовсе, то есть
+ * без него путь в мегабайт доехал бы до `realpath`, argv, `argsHash` и записи аудита.
+ * Прецедента в доках у него нет: родственный `JCS_MAX_DEPTH` ограничивает глубину
+ * вложенности, а не длину, и это другой класс.
+ */
+export declare const VALUE_MAX_CODE_POINTS = 4096;
+/**
+ * Потолок на длину списка отказов (R30а). Значение выбрано так, чтобы человек в модалке мог
+ * их прочитать: список длиннее уже не диагностика, а стена текста. `IpcRequest` потолка
+ * размера не несёт, а полный контроль над сокетом входит в модель угроз (И6).
+ *
+ * При усечении список получает `DENIALS_MAX + 1` элемент: тридцать два отказа плюс
+ * суммирующий `denials-truncated`. Маркер не входит в потолок намеренно — иначе факт
+ * усечения вытеснял бы одну из строк, ради которых потолок и существует.
+ */
+export declare const DENIALS_MAX = 32;
+declare const validated: unique symbol;
+declare const resolved: unique symbol;
+/**
+ * Карта проверенных значений — выход `validateParams`. Бренд стирается в рантайме, цены нет.
+ *
+ * Существует потому, что на шве фасада обе карты живут одновременно, а без бренда они одного
+ * типа: передать в `buildArgv` **до**резолвную карту — то есть сырую непроверенную строку
+ * прямо в argv — компилятор молча позволил бы.
+ */
+export type ValidatedValues = ReadonlyMap<string, ParamValue> & {
+    readonly [validated]: true;
+};
+/** Карта значений после резолва путей — выход `resolvePaths`. Вторая половина того же шва. */
+export type ResolvedValues = ReadonlyMap<string, ParamValue> & {
+    readonly [resolved]: true;
+};
+/**
+ * Причины отказа, машиночитаемо. Массивом, а не только юнионом, — по тому же доводу, по
+ * которому `CHECK_IDS` объявлен массивом (`packages/contracts/src/validate/branch-checks.ts:10`):
+ * перепись «код ↔ вектор» в `corpus.test.ts` иначе была бы односторонней, и код, переставший
+ * производиться, не уронил бы ничего.
+ *
+ * Таблица кодов стоит ЗДЕСЬ, а не построчным JSDoc внутри массива, и причина исполняемая.
+ * Снапшот публичной поверхности сверяется побайтово, а declaration emit не детерминирован:
+ * одна пересборка переиспользует исходные узлы и печатает массив многострочно вместе с JSDoc,
+ * другая синтезирует его одной строкой. Замерено на этом дереве — два прогона при неизменном
+ * исходнике дали разный `.d.ts`, и гейт `api-surface` флакал. `api-surface.ts` по этой же
+ * причине уже нормализует кавычки; вынос документации из массива убирает вторую половину той
+ * же непостоянности в источнике, а не ещё одной нормализацией.
+ *
+ * | код | когда |
+ * |---|---|
+ * | `bad-params-container` | `params` — не объект: `null`, массив, строка, число. Претензия к запросу, не к параметру. |
+ * | `unknown-param` | Ключ запроса, которого нет в `recipe.params`. |
+ * | `missing-required` | Обязательный параметр не передан. |
+ * | `wrong-type` | `typeof` значения не тот, что объявлен веткой параметра. |
+ * | `not-canonicalizable` | Строка не переживёт `canonicalizeJcs` — одиночный суррогат. |
+ * | `value-oversized` | Строка длиннее `VALUE_MAX_CODE_POINTS`, независимо от `maxLength` манифеста. |
+ * | `pattern-mismatch` | `matcher.test` вернул `false`. |
+ * | `too-long` | Строка длиннее `maxLength` манифеста, в кодовых точках. |
+ * | `not-in-enum` | Значения нет в `values`. |
+ * | `not-finite` | Число не конечно: `1e400` из JSON даёт `Infinity`. |
+ * | `out-of-range` | Число вне `min`/`max`. |
+ * | `not-integer` | `integer: true`, а значение дробное. |
+ * | `path-not-found` | `realpath` бросил `ENOENT`: пути нет. |
+ * | `path-escapes-root` | Резолвнутый путь лежит вне `root` (И3). |
+ * | `path-unusable` | Путь непригоден: нулевой байт, нерезолвимый `root`, не-строка. |
+ * | `denials-truncated` | Список отказов усечён по `DENIALS_MAX`; общее число — в тексте причины. |
+ */
+export declare const DENIAL_CODES: readonly ['bad-params-container', 'unknown-param', 'missing-required', 'wrong-type', 'not-canonicalizable', 'value-oversized', 'pattern-mismatch', 'too-long', 'not-in-enum', 'not-finite', 'out-of-range', 'not-integer', 'path-not-found', 'path-escapes-root', 'path-unusable', 'denials-truncated'];
+export type DenialCode = (typeof DENIAL_CODES)[number];
+export interface Denial {
+    readonly stage: DenialStage;
+    /** Ветвиться потребитель обязан по нему. `reason` — для человека. */
+    readonly code: DenialCode;
+    /** `null` значит «претензия к самому запросу, а не к параметру»: известно и пусто. */
+    readonly paramName: string | null;
+    readonly reason: string;
+}
+/**
+ * Конструктор отказа. Аргумент **объектный**, а не позиционный: позиционная форма ставит
+ * рядом `paramName` и `reason`, оба строковые, их перестановка компилируется и кладёт прозу
+ * в имя, а имя — в причину, ровно в том единственном месте, где значение может проехать
+ * мимо R25.
+ *
+ * `paramName` санитизируется наравне с `reason`, а не «на всякий случай»: он недоверен ровно
+ * в коде `unknown-param`, где берётся из ключей **запроса**. Имена манифеста ограничены
+ * `propertyNames` схемы, ключи запроса — нет.
+ */
+export declare function denial(input: {
+    stage: DenialStage;
+    code: DenialCode;
+    paramName: string | null;
+    reason: string;
+}): Denial;
+/**
+ * Переживёт ли строка `canonicalizeJcs` (R28).
+ *
+ * Реализуется проверкой на непарные суррогаты, а не вызовом `canonicalizeJcs` в `try/catch`:
+ * предикат зовётся на каждое строковое значение каждого вызова, и городить исключение на
+ * горячем пути ради булева ответа дорого. Эквивалентность двух реализаций фиксируется тестом —
+ * иначе предикат и канонизатор разъезжаются молча, и гейт R28 становится декоративным.
+ */
+export declare function isCanonicalizable(value: string): boolean;
+/**
+ * Длина в кодовых точках, а не в единицах UTF-16: для эмодзи это 1 против 2 (Ф11).
+ *
+ * Разворачивает строку целиком, поэтому зовётся ТОЛЬКО там, где длина уже ограничена —
+ * после того, как `codePointLengthAtMost` пропустил значение. На недоверенном входе вместо
+ * неё стоит ограниченный счётчик: см. его комментарий.
+ */
+export declare function codePointLength(value: string): number;
+/**
+ * «Кодовых точек не больше `max`?» — с ограниченной работой и без единой аллокации.
+ *
+ * Существует потому, что гейт, введённый ПРОТИВ гигантских значений, не может позволить себе
+ * их разворачивать. Замерено на этом дереве: `[...value].length` на строке в 16 млн единиц —
+ * 30.6 мс и +122 МБ кучи, на 100 млн — фатальный OOM процесса, который `try/catch` не ловит,
+ * то есть вызов не получает отказа, а демон исчезает вместе с незаписанным решением. Вход
+ * достижим по И6: `IpcRequest` потолка размера не несёт, а у `PathParam` нет ни `pattern`,
+ * ни `maxLength`, так что до этой проверки не стоит ни одной другой.
+ *
+ * Две дешёвые отсечки точны, потому что кодовых точек всегда `≥ length / 2` и `≤ length`.
+ * За ними цикл, который обрывается на `max + 1`-й точке, то есть смотрит не более
+ * `2 * (max + 1)` единиц независимо от длины входа.
+ */
+export declare function codePointLengthAtMost(value: string, max: number): boolean;
+export {};
+
+// ==== validate/index.d.ts ====
+import type { Denial, E2Stage, ParamValue } from './denial.js';
+import type { PreparedRecipe } from './prepare.js';
+/**
+ * Фасад трёх стадий E2. Чистые функции: ни часов кроме измерения, ни ввода-вывода кроме
+ * `realpath`, ни записи событий (R23, D3). `AuditEvent` собирает E4 — и обязанность «событие
+ * пишется на каждой стадии, включая отказ» переходит к нему, поэтому здесь наружу отдаётся
+ * всё, что ему для этого нужно.
+ */
+export interface StageTiming {
+    readonly stage: E2Stage;
+    readonly durationUs: number;
+}
+export type CallResult = {
+    ok: true;
+    argv: readonly string[];
+    cwd: string;
+    /**
+     * Проверенные значения ПОСЛЕ валидации и резолва — вход `argsHash` (R31). Без них E4
+     * посчитал бы хэш по сырым `params`, и `{file: './logs/a.log'}` и
+     * `{file: '/abs/logs/a.log'}` перестали бы быть одним вызовом.
+     */
+    params: Readonly<Record<string, ParamValue>>;
+    timings: readonly StageTiming[];
+} | {
+    ok: false;
+    /** Непустой кортеж: ветка отказа не может оказаться пустой. */
+    denials: readonly [Denial, ...Denial[]];
+    /**
+     * Присутствует, если стадия `resolve_paths` была достигнута, — в том числе при отказе
+     * на ней. При отказе на `validate` ключ ОТСУТСТВУЕТ, а не равен `null`:
+     * `packages/contracts/src/event.ts:90` объявляет `readonly cwd?: string` без `null`.
+     */
+    cwd?: string;
+    timings: readonly StageTiming[];
+};
+/**
+ * Третьего аргумента нет: `manifestDir` доехал до `prepared` на подготовке (R2). Каталог,
+ * определяющий `cwd` и границы confinement, в сигнатуре отсутствует — как и argv, путь к
+ * бинарю и профиль песочницы (R5, И5).
+ */
+export declare function validateCall(prepared: PreparedRecipe, params: Readonly<Record<string, unknown>>): CallResult;
+export { prepareRecipe } from './prepare.js';
+export type { PreparedParam, PreparedRecipe, PrepareResult } from './prepare.js';
+export { validateParams } from './params.js';
+export type { ValidateParamsResult } from './params.js';
+export { resolvePaths } from './paths.js';
+export type { ResolvePathsResult } from './paths.js';
+export { buildArgv } from './argv.js';
+export { DENIAL_CODES, DENIAL_STAGES, DENIALS_MAX, E2_STAGES, VALUE_MAX_CODE_POINTS } from './denial.js';
+export type { Denial, DenialCode, DenialStage, E2Stage, ParamValue, ResolvedValues, ValidatedValues, } from './denial.js';
+/**
+ * E4 — confinement рабочего каталога рецепта под каталог манифеста (A4 и R34). Поднят в
+ * поверхность именно затем, чтобы у границы был ОДИН вычислитель: в этом же репозитории уже
+ * записано границей, что копия предиката в `contracts` и копия в `core` ничем не сверяются,
+ * и третья копия в `mcp-server` продолжила бы ряд.
+ */
+export { confinementOf } from './confinement.js';
+export type { Confinement } from './confinement.js';
+
+// ==== validate/params.d.ts ====
+import { type Denial, type ValidatedValues } from './denial.js';
+import type { PreparedRecipe } from './prepare.js';
+/**
+ * Стадия `validate`: недоверенный словарь параметров → проверенные значения либо непустой
+ * список отказов. Резолва путей здесь нет — он стадия спустя.
+ *
+ * Ни одна ветка не кладёт `value` в `reason` (R25). Текст называет имя, тип и нарушенное
+ * ограничение: паттерн, список `values`, границы.
+ */
+export type ValidateParamsResult = {
+    ok: true;
+    values: ValidatedValues;
+} | {
+    ok: false;
+    denials: readonly [Denial, ...Denial[]];
+};
+export declare function validateParams(prepared: PreparedRecipe, params: Readonly<Record<string, unknown>>): ValidateParamsResult;
+
+// ==== validate/paths.d.ts ====
+import { type Denial, type ResolvedValues, type ValidatedValues } from './denial.js';
+import type { PreparedRecipe } from './prepare.js';
+/**
+ * Стадия `resolve_paths`. Единственная стадия E2, которая трогает файловую систему.
+ *
+ * Порядок шагов несущий и замерен: `realpath` корня → советующая лексическая предпроверка →
+ * `realpath` кандидата → confinement по результату. Проверка «строка не содержит `..`»
+ * защитой не является и как таковая не применяется (R13, И3).
+ */
+export type ResolvePathsResult = {
+    ok: true;
+    values: ResolvedValues;
+} | {
+    ok: false;
+    denials: readonly [Denial, ...Denial[]];
+};
+export declare function resolvePaths(prepared: PreparedRecipe, values: ValidatedValues): ResolvePathsResult;
+
+// ==== validate/prepare.d.ts ====
+import { type PatternMatcher, type Recipe, type RecipeName } from '@mcpproxy/contracts';
+/**
+ * Подготовка рецепта — первая из двух фаз (R2, D1). Выполняется один раз после загрузки
+ * манифеста; всё, что можно сделать один раз, делается здесь, потому что три стадии вызова
+ * целиком лежат внутри оверхед-бюджета ≤50 мс p95.
+ */
+/**
+ * Замкнутая форма параметра: из схемы переносится только то, что нужно проверке.
+ *
+ * Поля `schema: StringParam` в ней **нет**, и это структурная часть R3: `StringParam.pattern` —
+ * недоверенная строка, ради недоступности которой существует `PatternMatcher`
+ * (`packages/contracts/src/types.ts:95`), и положить её в горячую структуру значит оставить
+ * `new RegExp(param.schema.pattern)` на расстоянии одного нажатия.
+ *
+ * Ветка `path` несёт **только** резолвнутый `root`. Сырого `schema.root` рядом нет по тому же
+ * доводу, по которому R18 запрещает два поля `cwd`: два поля с одним смыслом, одно
+ * проверенное, другое нет, — это приглашение взять не то.
+ */
+export type PreparedParam = {
+    readonly kind: 'string';
+    readonly name: string;
+    readonly required: boolean;
+    readonly argv: readonly string[];
+    /**
+     * Не `PatternMatcher | null`. Тип обязан выражать то, что гарантирует проверка
+     * подготовки: иначе `validateParams` не скомпилируется без второй проверки, а второй
+     * проверкой будет либо запрещённая R4 развилка, либо `matcher!`.
+     */
+    readonly matcher: PatternMatcher;
+    readonly maxLength: number | null;
+} | {
+    readonly kind: 'enum';
+    readonly name: string;
+    readonly required: boolean;
+    readonly argv: readonly string[];
+    readonly values: readonly string[];
+} | {
+    readonly kind: 'number';
+    readonly name: string;
+    readonly required: boolean;
+    readonly argv: readonly string[];
+    readonly min: number | null;
+    readonly max: number | null;
+    readonly integer: boolean;
+} | {
+    readonly kind: 'boolean';
+    readonly name: string;
+    readonly required: boolean;
+    readonly argv: readonly string[];
+} | {
+    readonly kind: 'path';
+    readonly name: string;
+    readonly required: boolean;
+    readonly argv: readonly string[];
+    readonly root: string;
+};
+declare const prepared: unique symbol;
+/**
+ * Форма, которую умеет выдать только `prepareRecipe` (R2). Бренд стирается в рантайме, цены
+ * нет, а «инвариант закрыт на подготовке» перестаёт быть соглашением: `buildArgv` тотальна и
+ * отказать не умеет, поэтому единственный её `throw` — страховка на случай `PreparedRecipe`,
+ * собранного мимо конструктора. Бросок на третьей стадии стоит дороже, чем кажется: он
+ * проходит сквозь измерение и уносит массив `timings` целиком, то есть E4 не сможет записать
+ * ни одной стадии — ровно то, что R29 называет неприемлемым.
+ */
+export interface PreparedRecipe {
+    readonly [prepared]: true;
+    readonly recipeName: RecipeName;
+    /** В порядке объявления: из него собирается argv (R19, ADR-0006). */
+    readonly params: readonly PreparedParam[];
+    /**
+     * Единственный вычислитель `cwd` — эта фаза (R18). По контракту события `cwd` впервые
+     * **появляется** на стадии `resolve_paths`; это утверждение о том, где он виден, а не о том,
+     * кто его считает.
+     */
+    readonly cwd: string;
+    readonly exec: readonly string[];
+}
+export type PrepareResult = {
+    ok: true;
+    prepared: PreparedRecipe;
+}
+/** Текст для человека: ветвиться по нему нельзя. Станет причин много — заведётся код. */
+ | {
+    ok: false;
+    problems: readonly string[];
+};
+/**
+ * Слот подстановки. Литерал, а не регулярка: считать вхождения дешевле и без движка.
+ *
+ * Объявлен здесь и импортируется сборкой argv: две копии одного литерала в двух модулях,
+ * которые обязаны считать одно и то же, разъезжаются молча, и разъезд попадает прямо в argv.
+ * (Третья копия живёт в `contracts/validate/refine.ts`; свести её сюда нельзя, не открыв
+ * `@mcpproxy/contracts/validate` белому списку R1, — записано в ограничениях спеки.)
+ */
+export declare const ARGV_SLOT = '{}';
+export declare function prepareRecipe(recipeName: RecipeName, recipe: Recipe, matchers: ReadonlyMap<string, PatternMatcher>, manifestDir: string): PrepareResult;
+export {};

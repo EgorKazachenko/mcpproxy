@@ -134,3 +134,41 @@ describe('verifyChain', () => {
     expect(verifyChain(events)).toEqual({ ok: false, brokenAt: 1 });
   });
 });
+
+describe('sandbox.evidence — добавлено аддитивно (E4)', () => {
+  const withEvidence = (): AuditEvent => ({
+    ...event(0),
+    sandbox: {
+      mode: 'seatbelt',
+      evidence: {
+        policyHash: 'c'.repeat(64),
+        violationsLost: 0,
+        attributionMissing: 0,
+        attributionForeign: 0,
+        unrecognizedLines: 0,
+        suppressedLines: 0,
+        consumerFailures: 0,
+        bodyCountFailures: 0,
+        lateUnattributed: 0,
+      },
+    },
+  });
+
+  it('событие без поля даёт тот же дайджест, что и до добавления поля', () => {
+    // Тот же вектор, что и выше по файлу. Он и есть доказательство аддитивности: если бы
+    // необязательное поле как-то входило в каноничную форму отсутствующим, эта строка ушла бы,
+    // и уже записанные цепочки перестали бы верифицироваться.
+    expect(chainHash(event(0), null)).toBe('ba1bb478e1fdf5f060043b7fc368f6bd4c15d271a7a56d7b87d5f2fccba0c98b');
+    expect(Object.hasOwn(event(0), 'sandbox')).toBe(false);
+  });
+
+  it('событие с полем даёт другой дайджест — иначе поле не доказывало бы ничего', () => {
+    expect(chainHash(withEvidence(), null)).not.toBe(chainHash(event(0), null));
+  });
+
+  it('нулевые счётчики — не то же самое, что отсутствие evidence', () => {
+    const { sandbox } = withEvidence();
+    const withoutEvidence: AuditEvent = { ...event(0), sandbox: { mode: sandbox!.mode } };
+    expect(chainHash(withEvidence(), null)).not.toBe(chainHash(withoutEvidence, null));
+  });
+});

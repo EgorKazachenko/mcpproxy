@@ -1,27 +1,29 @@
-# 07 — Контракты (E0)
+# 07 — Contracts (E0)
 
-Всё в этом документе **заморожено** в `packages/contracts`. От него зависят семь эпиков.
+Everything in this document is **frozen** in `packages/contracts`. Seven epics depend on it.
 
-**Что означает «заморожено».** Публичная поверхность пакета — `.d.ts` всех трёх входов
-плюс файл схемы — снята снапшотом `packages/contracts/api-surface.snapshot.txt`, и
-`api-surface.test.ts` краснеет на любом изменении. Снапшот обновляется командой
-`node packages/contracts/scripts/update-api-surface.mjs` и только вместе с явным решением
-владельца. Обновление живёт в отдельном скрипте, а **не** в самом тесте: гейт, умеющий
-переписать собственный эталон по переменной окружения, гейтом не является — переменная,
-выставленная один раз в шелле или в CI-джобе, делает его зелёным навсегда.
+**What "frozen" means.** The package's public surface — the `.d.ts` of all three entry
+points plus the schema file — is captured as a snapshot in `packages/contracts/api-surface.snapshot.txt`,
+and `api-surface.test.ts` turns red on any change. The snapshot is updated with the command
+`node packages/contracts/scripts/update-api-surface.mjs`, and only together with an explicit
+decision from the owner. The update lives in a separate script, and **not** in the test
+itself: a gate that can rewrite its own reference via an environment variable is not a gate —
+a variable set once in the shell or in a CI job would make it green forever.
 
-`CONTRACTS_VERSION` двигается **только** при несовместимом изменении публичной поверхности —
-удалении или сужении экспорта, смене формы замороженного типа, изменении любой из **четырёх**
-формул дайджеста. Добавление опционального поля версию не двигает. Бамп всегда идёт одним
-коммитом со снапшотом и с ревизией зависимых веток.
+`CONTRACTS_VERSION` moves **only** on an incompatible change to the public surface —
+removal or narrowing of an export, a change to the shape of a frozen type, a change to any
+of the **four** digest formulas. Adding an optional field does not move the version. A bump
+always goes out in a single commit together with the snapshot and a review of dependent
+branches.
 
-Три входа, у каждого свои права на зависимости: `.` — типы и чистые функции без зависимостей
-вообще; `./validate` — `parseManifest` (`ajv`, `yaml`, `re2`); `./audit` — хэши (`node:crypto`).
-Границу держит `deps.test.ts`, а не обещание в этом абзаце.
+Three entry points, each with its own dependency rights: `.` — types and pure functions with
+no dependencies at all; `./validate` — `parseManifest` (`ajv`, `yaml`, `re2`); `./audit` —
+hashes (`node:crypto`). The boundary is enforced by `deps.test.ts`, not by a promise in this
+paragraph.
 
-## Манифест рецептов — `mcpproxy.yaml`
+## Recipe Manifest — `mcpproxy.yaml`
 
-Лежит в репозитории проекта. Считается **недоверенным** содержимым (см. модель угроз).
+Lives in the project repository. Treated as **untrusted** content (see the threat model).
 
 ```yaml
 version: 1
@@ -32,29 +34,29 @@ defaults:
     maxBytes: 65536
     redact: true
   env:
-    allow: ["PATH", "HOME", "LANG", "CI"]     # всё остальное вырезается
+    allow: ["PATH", "HOME", "LANG", "CI"]     # everything else is stripped
   sandbox:
     read:  { deny: ["~/.ssh", "~/.aws", "~/.config/gh"], allow: ["."] }
     write: { allow: [] }
     network: { allow: [] }
 
 tools:
-  # Рецепт может переопределить любой лист defaults: sandbox, timeout, env, output.
-  # Правило слияния — ниже, в разделе «Слияние с defaults».
+  # A recipe can override any leaf of defaults: sandbox, timeout, env, output.
+  # The merge rule is below, in the "Merging with defaults" section.
   run_tests:
-    description: "Прогнать тесты проекта"
-    exec: ["pnpm", "test"]         # exec[0] резолвится в абсолютный путь из allowlist
+    description: "Run the project's tests"
+    exec: ["pnpm", "test"]         # exec[0] is resolved to an absolute path from the allowlist
     cwd: "."
     params:
       pattern:
         type: string
         required: false
         pattern: "^[\\w./-]{0,64}$"
-        argv: ["--testPathPattern", "{}"]     # ДВА отдельных элемента argv
-      update_snapshots:                       # имя обязано подходить под ^[a-z][a-z0-9_]{0,63}$
+        argv: ["--testPathPattern", "{}"]     # TWO separate argv elements
+      update_snapshots:                       # name must match ^[a-z][a-z0-9_]{0,63}$
         type: boolean
         required: false
-        argv: ["-u"]                          # boolean → флаг присутствует или нет
+        argv: ["-u"]                          # boolean → flag present or absent
     annotations:
       readOnlyHint: false
       destructiveHint: false
@@ -66,7 +68,7 @@ tools:
     timeout: 300s
 
   build_project:
-    description: "Собрать проект"
+    description: "Build the project"
     exec: ["pnpm", "build"]
     cwd: "."
     params:
@@ -86,12 +88,12 @@ tools:
     timeout: 600s
 
   analyze_logs:
-    description: "Разобрать логи приложения"
+    description: "Parse the application logs"
     exec: ["./scripts/analyze-logs.sh"]
     params:
       file:
-        type: path                            # спец-тип: realpath + confinement
-        root: "./logs"                        # обязателен для type: path
+        type: path                            # special type: realpath + confinement
+        root: "./logs"                        # required for type: path
         required: true
         argv: ["{}"]
     annotations:
@@ -100,7 +102,7 @@ tools:
       read: { allow: ["./logs"] }
 
   publish_release:
-    description: "Опубликовать релиз"
+    description: "Publish a release"
     exec: ["./scripts/publish.sh"]
     params:
       tag: { type: string, pattern: "^v\\d+\\.\\d+\\.\\d+$", required: true, argv: ["{}"] }
@@ -113,83 +115,97 @@ tools:
       network: { allow: ["registry.npmjs.org", "api.github.com"] }
 ```
 
-### Типы параметров
+### Parameter Types
 
-| `type` | Валидация | Раскрытие в argv |
+| `type` | Validation | Expansion in argv |
 |---|---|---|
-| `string` | `pattern` — **синтаксис RE2**, обязателен; `maxLength` | подстановка в `{}` |
-| `enum` | значение из `values` | подстановка в `{}` |
-| `number` | `min`, `max`, целочисленность | подстановка в `{}` |
-| `boolean` | — | флаг присутствует или отсутствует |
-| `path` | realpath, затем confinement под `root`; отказ при выходе за пределы | абсолютный резолвнутый путь |
+| `string` | `pattern` — **RE2 syntax**, required; `maxLength` | substituted into `{}` |
+| `enum` | value from `values` | substituted into `{}` |
+| `number` | `min`, `max`, integrality | substituted into `{}` |
+| `boolean` | — | flag present or absent |
+| `path` | realpath, then confinement under `root`; rejected if it escapes the boundary | absolute resolved path |
 
-**Инварианты схемы** — выражены структурно и проверяются на загрузке, а не комментарием:
+**Schema invariants** — expressed structurally and checked on load, not by a comment:
 
-- `string` **обязан** иметь `pattern`. Отсутствие regex = ошибка загрузки манифеста, не warning.
-- `pattern` компилируется движком **RE2**: lookahead и обратные ссылки — ошибка загрузки.
-  Это часть контракта (ADR: решение D3), а не дефект. Ограничение длины входа от
-  катастрофического бэктрекинга не спасает — замер в `10-honest-limitations.md`.
-- `path` **обязан** иметь `root`. `root: "/"` и относительный `root`, выходящий за каталог
-  манифеста, — ошибка загрузки.
-- `exec[0]` — абсолютный путь, голое имя или путь вниз от манифеста (`./scripts/x.sh`), без
-  метасимволов оболочки. Резолв в абсолютный путь и сверка с binary allowlist — дело демона.
-- Никакой параметр не может влиять на `exec`, `cwd` или профиль песочницы: слот `{}` в любом
-  из них — ошибка загрузки.
-- `argv` каждого параметра — массив литералов; `{}` допустим не более одного раза на элемент.
-- Имена рецептов и параметров ограничены `^[a-z][a-z0-9_]{0,63}$` **и** явным запретом на
-  `constructor`, `prototype`, `__proto__`. Одного паттерна мало: `constructor` ему
-  соответствует.
-- Значения `enum` не могут содержать управляющих и форматирующих символов (`\p{Cc}`,
-  `\p{Cf}`) — отравленное значение становится ошибкой загрузки, а не тихо переписывается
-  санитайзером. Санитизации подлежит только свободный текст описаний.
-- Рецептный `deny`, если ключ присутствует, обязан быть **непустым**: пустой массив —
-  единственная синтаксическая форма «снять запрет из defaults», и она запрещена.
-- Документ с директивой `%YAML` отвергается целиком, неизвестный тег и дубли ключей — тоже.
-  Размер файла ограничен до разбора.
+- `string` **must** have a `pattern`. A missing regex is a manifest load error, not a warning.
+- `pattern` is compiled by the **RE2** engine: lookahead and backreferences are a load error.
+  This is part of the contract (ADR: decision D3), not a defect. Limiting input length does
+  not protect against catastrophic backtracking — measured in `10-honest-limitations.md`.
+- `path` **must** have a `root`. `root: "/"` and a relative `root` that escapes the manifest's
+  directory are both load errors.
+- `exec[0]` is an absolute path, a bare name, or a path descending from the manifest
+  (`./scripts/x.sh`), with no shell metacharacters. Resolving it to an absolute path and
+  checking it against the binary allowlist is the daemon's job.
+- No parameter can affect `exec`, `cwd`, or the sandbox profile: a `{}` slot in any of them
+  is a load error.
+- Each parameter's `argv` is an array of literals; `{}` may appear at most once per element.
+- `number` bounds must be **satisfiable**: `min > max` is a load error, and so is `integer: true`
+  with no integers in the range (`min: 1.2, max: 1.8`). A recipe whose bounds admit no value
+  used to reject 100% of calls anyway — but silently, on every value and with no diagnostic;
+  now it fails to load.
 
-### Слияние с defaults
+  **This tightening applies to a file an installation already has**, and a `parseManifest`
+  rejection is whole-manifest: an installation with one such recipe loses **all** of its
+  tools, not just one. There is no "warning" tier at load time, and none can be added —
+  `Diagnostic` has no `severity` field, and the surface is frozen. An update must carry this
+  in the release notes as a breaking change.
+- Recipe and parameter names are constrained to `^[a-z][a-z0-9_]{0,63}$` **and** an explicit
+  ban on `constructor`, `prototype`, `__proto__`. The pattern alone is not enough: `constructor`
+  matches it.
+- `enum` values cannot contain control or format characters (`\p{Cc}`, `\p{Cf}`) — a poisoned
+  value becomes a load error rather than being silently rewritten by a sanitizer. Only the
+  free-text descriptions are subject to sanitization.
+- A recipe's `deny`, if the key is present, must be **non-empty**: an empty array is the only
+  syntactic form for "lift a defaults-level deny", and that form is forbidden.
+- A document with a `%YAML` directive is rejected outright, and so are unknown tags and
+  duplicate keys. File size is bounded before parsing.
 
-| Узел | Операция | Почему |
+### Merging with defaults
+
+| Node | Operation | Why |
 |---|---|---|
-| `sandbox.*.allow` | замена по листу | рецепт осознанно сужает или расширяет свой blast radius |
-| `sandbox.*.deny` | **объединение**; рецепт не может сокращать | запрет из `defaults` неснимаем |
-| `env.allow` | замена по листу, **но только подмножеством** `defaults.env.allow` | список рецепт задаёт целиком, однако `defaults` — потолок, а не значение по умолчанию: иначе рецепт выдавал бы себе переменную, которой в `defaults` нет, тогда как `sandbox.*.deny` неснимаем. Надмножество — ошибка загрузки |
-| `output.*`, `timeout` | замена | скаляры |
-| молчание `defaults.output` | `redact: true`, `maxBytes: 65536` | молчание манифеста обязано делать вызов **опаснее** для атакующего, а не безопаснее — тот же принцип, что у аннотаций, где отсутствие даёт `high` |
-| рецептный `output` | замена скаляров, **но только в сторону ужесточения** | `defaults.output` — пол: снять редакцию, включённую в `defaults`, или поднять потолок байт рецепт не может. Иначе принцип строкой выше соблюдался бы для молчания и не соблюдался для явного ослабления, а `redact: false` довёз бы секрет до модели. Включить редакцию и опустить потолок — законно |
+| `sandbox.*.allow` | replaced leaf-wise | the recipe deliberately narrows or widens its own blast radius |
+| `sandbox.*.deny` | **union**; a recipe cannot shrink it | a deny from `defaults` cannot be lifted |
+| `env.allow` | replaced leaf-wise, **but only as a subset of** `defaults.env.allow` | the recipe sets the list in full, but `defaults` is a ceiling, not a default value: otherwise a recipe could grant itself a variable that isn't in `defaults`, even though `sandbox.*.deny` cannot be lifted. A superset is a load error |
+| `output.*`, `timeout` | replaced | scalars |
+| silence in `defaults.output` | `redact: true`, `maxBytes: 65536` | manifest silence must make a call **more dangerous** to attempt, not safer — the same principle as with annotations, where absence yields `high` |
+| a recipe's `output` | scalars replaced, **but only in the direction of tightening** | `defaults.output` is a floor: a recipe cannot lift redaction enabled in `defaults` or raise the byte ceiling. Otherwise the principle in the row above would hold for silence and not for explicit relaxation, and `redact: false` would carry a secret through to the model. Turning redaction on and lowering the ceiling is legal |
 
-Пол и потолок держатся **в двух местах**: правилами загрузки в `./validate` и самим слиянием в
-`normalizeRecipe`. Второе не дублирование: правила живут в валидаторе, а слияние — в корневом
-входе, и потребитель, собравший `Recipe` программно, минует загрузчик вместе со всеми его
-диагностиками. `effective` при этом клампится, а `own` хранит объявленное — хэш считается по
-нему, иначе дифф lock показывал бы не то, что лежит в манифесте.
-| ключ отсутствует | наследуется из `defaults` | |
-| пустой массив в `allow` | «обнулить», не «наследовать» | `network: {allow: []}` — сеть закрыта |
-| пустой массив в `deny` | **ошибка загрузки** | см. инварианты выше |
+The floor and ceiling are held **in two places**: the load rules in `./validate`, and the
+merge itself in `normalizeRecipe`. The second is not duplication: the rules live in the
+validator, while the merge lives in the root entry point, and a consumer that assembles a
+`Recipe` programmatically bypasses the loader along with all of its diagnostics. `effective`
+is clamped in that path, while `own` holds what was declared — the hash is computed over
+`own`, otherwise a lock diff would show something other than what's in the manifest.
+| key absent | inherited from `defaults` | |
+| empty array in `allow` | "zero out", not "inherit" | `network: {allow: []}` — network is closed |
+| empty array in `deny` | **load error** | see invariants above |
 
-### Риск-тиры
+### Risk Tiers
 
-Выводятся из аннотаций, не задаются напрямую. Дефолты пессимистичные (как в спеке MCP).
+Derived from annotations, not set directly. Defaults are pessimistic (as in the MCP spec).
 
-| Условие | Тир | Поведение |
+| Condition | Tier | Behavior |
 |---|---|---|
-| `readOnlyHint: true` | low | авто |
-| `readOnlyHint: true` **и** `destructiveHint: true` | low | `destructiveHint` игнорируется — см. ниже |
-| `readOnlyHint: false`, `destructiveHint: false`, `openWorldHint: false` | medium | авто, громкая запись в лог |
-| `readOnlyHint: false` и (`destructiveHint: true` **или** `openWorldHint: true`) | **high** | **out-of-band апрув в Electron** |
-| аннотации не заданы | **high** | пессимистичные дефолты спеки |
+| `readOnlyHint: true` | low | automatic |
+| `readOnlyHint: true` **and** `destructiveHint: true` | low | `destructiveHint` is ignored — see below |
+| `readOnlyHint: false`, `destructiveHint: false`, `openWorldHint: false` | medium | automatic, loud log entry |
+| `readOnlyHint: false` and (`destructiveHint: true` **or** `openWorldHint: true`) | **high** | **out-of-band approval in Electron** |
+| annotations not set | **high** | pessimistic spec defaults |
 
-Вторая строка — оговорка спеки MCP: `destructiveHint` и `idempotentHint` значимы **только**
-при `readOnlyHint == false`. Её легко реализовать неверно, поэтому она проверяется тестом.
+The second row is an MCP spec caveat: `destructiveHint` and `idempotentHint` are meaningful
+**only** when `readOnlyHint == false`. It's easy to implement incorrectly, so it's checked by
+a test.
 
-**Граница гарантии.** Формулировка «fail-safe by construction» неверна и заменена на более
-узкую: молчание манифеста может сделать рецепт только **опаснее** — незаданные поля берут
-пессимистичные дефолты. Но явный `readOnlyHint: true` тир **понижает**, а спека требует
-считать аннотации недоверенными. Значит вторая линия обороны — песочница и lock, а не вывод
-тира. Расхождение с lock в тир **не отображается**: это отдельное состояние `LockStatus`,
-дающее жёсткий стоп на стадии `lock_check`, а не обычный high-risk апрув.
+**Boundary of the guarantee.** The phrase "fail-safe by construction" is inaccurate and has
+been replaced with a narrower one: manifest silence can only make a recipe **more dangerous**
+— unset fields take pessimistic defaults. But an explicit `readOnlyHint: true` **lowers** the
+tier, and the spec requires treating annotations as untrusted. So the second line of defense
+is the sandbox and the lock, not the tier derivation. A lock mismatch does **not** show up in
+the tier: it's a separate `LockStatus` state that forces a hard stop at the `lock_check`
+stage, not an ordinary high-risk approval.
 
-## Lock-файл — `mcpproxy.lock`
+## Lock File — `mcpproxy.lock`
 
 ```json
 {
@@ -203,68 +219,71 @@ tools:
 }
 ```
 
-Дайджест — 64 строчных hex-символа **без префикса `sha256:`**. Четыре замороженные формулы:
+The digest is 64 lowercase hex characters **with no `sha256:` prefix**. Four frozen formulas:
 
 ```
 recipeHash   = sha256(utf8(canonicalizeJcs(normalized.own)))
 manifestHash = sha256(utf8(canonicalizeJcs(normalizeManifest(manifest))))
 argsHash     = sha256(utf8(canonicalizeJcs({ recipeName, params })))
-chain.self   = sha256(utf8(canonicalizeJcs({ prev, event })))     // event — без поля chain
+chain.self   = sha256(utf8(canonicalizeJcs({ prev, event })))     // event — without the chain field
 ```
 
-`chain.self` — четвёртая и самая дорогая: она стоит в списке именно потому, что правило
-бампа выше ссылается на этот блок, а лог аудита append-only и перегенерировать его нельзя.
+`chain.self` is the fourth and most expensive: it's on the list precisely because the bump
+rule above refers to this block, and the audit log is append-only and cannot be regenerated.
 
-Канонизация ограничена глубиной `JCS_MAX_DEPTH` (128). Это не вкус: без потолка рекурсия
-выпускала движковый `RangeError` вместо отказа модуля, и 3 930 байт произвольного JSON в
-`IpcRequest.params` роняли `argsHash` — то есть путь подтверждения.
+Canonicalization is bounded to a depth of `JCS_MAX_DEPTH` (128). This isn't a matter of taste:
+without a ceiling, recursion produced an engine-level `RangeError` instead of a module-level
+rejection, and 3,930 bytes of arbitrary JSON in `IpcRequest.params` would crash `argsHash` —
+that is, the approval path.
 
-Нормализованное представление рецепта хранит **две стороны**. `own` — собственный блок
-(`exec`, `cwd`, схемы параметров **в объявленном порядке**, аннотации с применёнными
-дефолтами, `description`, собственные `sandbox`/`timeout`/`env`/`output`); именно он и
-хэшируется. `effective` — `defaults`, слитый с блоком рецепта; он лежит в снапшоте **ради
-диффа и не хэшируется**. Иначе расширение `defaults.env.allow` разъехало бы `recipeHash`
-всех рецептов разом и дало бы `drifted` на каждом.
+The normalized recipe representation holds **two sides**. `own` is the recipe's own block
+(`exec`, `cwd`, parameter schemas **in declared order**, annotations with defaults applied,
+`description`, its own `sandbox`/`timeout`/`env`/`output`); this is exactly what gets hashed.
+`effective` is `defaults` merged with the recipe's block; it lives in the snapshot **for the
+diff, and is not hashed**. Otherwise widening `defaults.env.allow` would shift `recipeHash`
+for every recipe at once and mark all of them `drifted`.
 
-**Версия `2`, а не `1`.** Форма изменилась несовместимо относительно той, что документировалась
-раньше: поле `hash` стало `recipeHash`, появились обязательные `snapshot` и слот `defaults`.
-Оставить номер `1` значило бы, что файл прежней формы честно объявляет себя текущим, — а
-дискриминатор существует ровно затем, чтобы этого не было.
+**Version `2`, not `1`.** The shape changed incompatibly relative to what was documented
+before: the `hash` field became `recipeHash`, and the mandatory `snapshot` and `defaults` slot
+appeared. Keeping the number at `1` would mean a file of the old shape honestly declares
+itself current — and the discriminator exists precisely so that doesn't happen.
 
-Читается lock через `parseLockFile(text)` из `./validate`, а не через `JSON.parse(...) as
-LockFile`. Разница не стилистическая: `diffLock` разыменовывает `entry.snapshot` и
-`lock.defaults` без проверки, поэтому файл прежней формы давал не диагностику, а
-необработанное исключение — **на стадии `lock_check`, то есть на самом пути принятия
-решения**. Не разобрали lock — значит одобрения нет, значит рецепт идёт на повторный апрув:
-fail-closed. Сверку двух копий одобренного рецепта внутри файла (`recipeHash` против
-`snapshot`) делает `verifyLockEntries` из `./audit` — без неё lock с подменённым снапшотом
-давал бы чистый дифф во всех четырёх слотах.
+The lock is read via `parseLockFile(text)` from `./validate`, not via `JSON.parse(...) as
+LockFile`. The difference isn't stylistic: `diffLock` dereferences `entry.snapshot` and
+`lock.defaults` without checking, so a file of the old shape produced not a diagnostic but an
+unhandled exception — **at the `lock_check` stage, i.e. on the decision path itself**. If the
+lock fails to parse, there is no approval, so the recipe goes back for re-approval:
+fail-closed. Cross-checking the two copies of an approved recipe within the file
+(`recipeHash` against `snapshot`) is done by `verifyLockEntries` from `./audit` — without it,
+a lock with a swapped-out snapshot would produce a clean diff across all four slots.
 
-Порядок **параметров** входит в форму — из него собирается argv. Порядок **рецептов** не
-входит: они везде адресуются по имени, и заморозив его, мы получили бы жёсткий стоп на
-перестановке двух ключей `tools:` с пустым диффом в модалке.
+Parameter **order** is part of the shape — argv is assembled from it. Recipe **order** is not:
+recipes are addressed by name everywhere, and freezing their order would have given us a hard
+stop on reordering two `tools:` keys, with an empty diff in the modal.
 
-`manifestHash` нужен потому, что `defaults.env.allow: [..., "AWS_SECRET_ACCESS_KEY"]` или
-опустошённый `defaults.sandbox.read.deny` не меняют ни одного объекта рецепта: все
-пер-рецептные хэши совпадают, `lock_check` зелёный, и подмена проходит молча.
+`manifestHash` is needed because `defaults.env.allow: [..., "AWS_SECRET_ACCESS_KEY"]` or an
+emptied-out `defaults.sandbox.read.deny` change none of the recipe objects: all per-recipe
+hashes match, `lock_check` stays green, and the substitution goes through silently.
 
-`snapshot` обязателен: SHA-256 необратим, и без него сторону «было» для диффа построить не
-из чего. Дифф (`diffLock`) возвращает четыре слота — `defaults`, `added`, `removed`,
-`changed`, — и изменение `defaults` попадает в свой слот, а не размножается по всем рецептам.
+`snapshot` is mandatory: SHA-256 is irreversible, and without it there's nothing to build the
+"before" side of the diff from. The diff (`diffLock`) returns four slots — `defaults`,
+`added`, `removed`, `changed` — and a change to `defaults` lands in its own slot rather than
+being duplicated across every recipe.
 
-Расхождение → жёсткий стоп на стадии `lock_check` (`verdict: denied`) + модалка с диффом
-«было / стало». Без этого одобрение рецепта не переживает изменение файла (CVE-2025-54136).
+A mismatch → hard stop at the `lock_check` stage (`verdict: denied`) + a modal with a
+"before / after" diff. Without this, a recipe's approval would not survive a change to the
+file (CVE-2025-54136).
 
-## Схема события аудита
+## Audit Event Schema
 
-**Источник истины — тип `AuditEvent` в `packages/contracts/src/event.ts`.** Здесь описано,
-чем он является и почему; поля перечислены там, и дублировать их списком значит завести
-вторую копию, которая разойдётся с первой.
+**The source of truth is the `AuditEvent` type in `packages/contracts/src/event.ts`.** This
+section describes what it is and why; the fields are enumerated there, and duplicating them
+as a list here would create a second copy that drifts from the first.
 
-Шейп **вложенный**, время — ISO-8601, enum'ы — строки. Это наш внутренний формат, а не
-нативный OTel: статус всего `gen_ai.*` — Development, конвенции MCP уже переезжали между
-репозиториями, и привязывать замороженный контракт к дрейфующей схеме нельзя. В OTLP событие
-отображает чистая функция `toOtlp`.
+The shape is **nested**, times are ISO-8601, enums are strings. This is our internal format,
+not native OTel: the status of all of `gen_ai.*` is Development, MCP conventions have already
+migrated between repositories, and a frozen contract cannot be pinned to a drifting schema.
+A pure function, `toOtlp`, maps the event to OTLP.
 
 ```jsonc
 {
@@ -273,8 +292,8 @@ fail-closed. Сверку двух копий одобренного рецеп�
   "sessionId": "…", "traceId": "…", "spanId": "…", "parentSpanId": null,
   "startTime": "2026-08-27T10:00:00.000000Z",
   "endTime":   "2026-08-27T10:00:12.412500Z",
-  "durationUs": 9120,                   // монотонная длительность СТАДИИ
-  "stage": "spawn",                     // см. таблицу стадий ниже
+  "durationUs": 9120,                   // monotonic duration of the STAGE
+  "stage": "spawn",                     // see the stage table below
   "verdict": "allowed",                 // allowed | denied | pending_approval | error
   "recipe": { "name": "run_tests", "hash": "a1b2…" },
   "argv": ["/opt/homebrew/bin/pnpm", "test", "--testPathPattern", "auth"],
@@ -287,238 +306,250 @@ fail-closed. Сверку двух копий одобренного рецеп�
   "exit": { "code": 0, "signal": null },
   "output": { "bytes": 4211, "truncated": false },
   "redactions": [{ "rule": "aws-access-key-id", "count": 1, "stream": "stdout" }],
-  "duration": { "overheadMs": 14 }      // только на complete
+  "duration": { "overheadMs": 14 }      // only on complete
 }
 ```
 
-**Обязательное ядро** — то, что существует на любой стадии, включая `received`: `operation`,
+**Mandatory core** — what exists at every stage, including `received`: `operation`,
 `toolName`, `sessionId`, `traceId`, `spanId`, `parentSpanId`, `startTime`, `endTime`,
-`durationUs`, `stage`, `verdict`, `recipe.name`. `sessionId` в ядре не случайно: без него
-append-only лог многосессионного демона не может сказать, какая IPC-сессия сделала вызов, —
-а это единственный криминалистический артефакт при украденном токене.
+`durationUs`, `stage`, `verdict`, `recipe.name`. `sessionId` being in the core is not
+incidental: without it, the append-only log of a multi-session daemon cannot say which IPC
+session made the call — and that is the only forensic artifact available when a token is
+stolen.
 
-**Всё остальное необязательно и появляется на своей стадии.** Необязательное поле
-**отсутствует как ключ**, а не приезжает со значением `null`. `null` означает ровно
-«известно и пусто» (`exit.signal`, `denyReason` при `verdict: allowed`). Различие не
-стилистическое: JCS различает отсутствующий ключ и `null` побайтово, и оба варианта попадают
-внутрь хэша цепочки. Вызов, остановленный на `lock_check`, обязан уметь **не иметь `argv`
-вовсе** — иначе он понесёт выдуманный `argv: []`, и UI отрисует его как настоящую пустую
-команду.
+**Everything else is optional and appears at its own stage.** An optional field is
+**absent as a key**, not present with a `null` value. `null` means exactly "known and empty"
+(`exit.signal`, `denyReason` when `verdict: allowed`). The distinction is not stylistic: JCS
+distinguishes an absent key from `null` byte-for-byte, and both variants flow into the chain
+hash. A call stopped at `lock_check` must be able to **have no `argv` at all** — otherwise it
+would carry a fabricated `argv: []`, and the UI would render it as a genuine empty command.
 
-**`argvFromParams`** — позиции в `argv`, занятые значениями из параметров вызова, то есть тем,
-чем управляла модель. Появляется на `build_argv` рядом с самим `argv`. Без него UI показывает
-собранную команду и не может сказать, какая её часть пришла снаружи, а S2 обещает «видно не
-что разрешено, а почему».
+**`argvFromParams`** — the positions in `argv` occupied by values taken from the call's
+parameters, i.e. by what the model controlled. It appears at `build_argv`, alongside `argv`
+itself. Without it the UI shows the assembled command and cannot say which part of it came
+from outside — while S2 promises "you see not what was allowed, but why".
 
-Самих параметров в событии нет и не будет. Они известны на `received`, то есть **до**
-`validate`, а `canonicalizeJcs` бросает на одиночном суррогате и на превышении глубины —
-одна подстроенная моделью строка сделала бы событие нехэшируемым, и в append-only логе
-появилась бы дыра, выбранная атакующим. Вдобавок `Redaction.stream` не имеет для параметров
-члена, то есть вырезать из них секрет было бы нечем.
+The parameters themselves are not in the event and will not be. They are known at `received`,
+i.e. **before** `validate`, and `canonicalizeJcs` throws on a lone surrogate and on exceeding
+the depth cap — a single crafted string from the model would make the event unhashable, and
+the append-only log would gain a hole chosen by the attacker. On top of that `Redaction.stream`
+has no member for parameters, so there would be nothing to cut a secret out of them with.
 
-Инвариант поля: неотрицательные целые, строго меньше длины `argv` **этого же события**, без
-повторов; ключ присутствует только когда присутствует `argv`. Уточнение про «это же событие»
-несущее — в событие приземляется безопасная копия `argv` после редакции, и индексы обязаны
-указывать в неё.
+The field's invariant: non-negative integers, strictly less than the length of `argv` **of the
+same event**, no duplicates; the key is present only when `argv` is present. The "same event"
+qualifier is load-bearing — what lands in the event is a safe copy of `argv` taken **after**
+redaction, and the indices must point into that copy, not into the original command. A
+non-finite number and a hole in the array both fail canonicalisation; both checks live in
+`jcs.ts` and are covered by tests, rather than being assumed.
 
-`durationUs` — монотонная длительность стадии из `process.hrtime.bigint()`, целым числом.
-Она рядом с ISO-временем, а не вместо: метки, квантованные до миллисекунды, дают ошибку
-порядка самого измерения, а часы стены ещё и прыгают по NTP. Оверхед прокси считается по
-**непересекающемуся** множеству стадий:
+`durationUs` is the stage's monotonic duration from `process.hrtime.bigint()`, as an integer.
+It sits alongside the ISO timestamp, not in place of it: timestamps quantized to the
+millisecond carry an error on the order of the measurement itself, and wall clocks also jump
+around under NTP. Proxy overhead is computed over a **disjoint** set of stages:
 
 ```
-overheadMs = round(Σ durationUs по стадиям ∉ {spawn, violation, approval, complete} / 1000)
+overheadMs = round(Σ durationUs over stages ∉ {spawn, violation, approval, complete} / 1000)
 ```
 
-`spawn` — время дочернего процесса; `violation` возникает внутри окна `spawn` и прибавлял бы
-уже посчитанное; `approval` — это человек, смотрящий на модалку; `complete` — событие, на
-котором значение и вычисляется, так что его собственный `durationUs` ещё не известен.
+`spawn` is child-process time; `violation` occurs within the `spawn` window and would double
+count something already counted; `approval` is a human looking at the modal; `complete` is
+the event on which the value itself is computed, so its own `durationUs` is not yet known.
 
-### Экспорт в OTLP
+### OTLP Export
 
-`toOtlp(event)` даёт валидный OTLP/JSON-спан. Имена полей — **lowerCamelCase**, и это
-требование спеки OTLP, а не стиль: приёмник обязан **молча игнорировать** поля с неизвестными
-именами, поэтому `trace_id` не даёт ошибки — он теряется. Отсюда тест, запрещающий любой ключ
-с подчёркиванием в выводе.
+`toOtlp(event)` produces a valid OTLP/JSON span. Field names are **lowerCamelCase**, and this
+is an OTLP spec requirement, not a style choice: a receiver is required to **silently ignore**
+fields with unrecognized names, so `trace_id` doesn't error — it's simply dropped. Hence the
+test that forbids any underscored key in the output.
 
-Атрибуты — только те имена, которые действительно существуют в реестре конвенций:
+Attributes are limited to names that actually exist in the conventions registry:
 
-| Атрибут | Значение |
+| Attribute | Value |
 |---|---|
-| `gen_ai.operation.name` | `operation` события |
-| `gen_ai.tool.name` | имя рецепта |
-| `network.transport` | константа `"pipe"` |
+| `gen_ai.operation.name` | the event's `operation` |
+| `gen_ai.tool.name` | recipe name |
+| `network.transport` | constant `"pipe"` |
 | `mcp.session.id` | `sessionId` |
-| `mcp.method.name` | константа `"tools/call"` |
-| `mcp.protocol.version` | `protocolVersion` события — ревизия, **согласованная в сессии**, а не константа сборки |
+| `mcp.method.name` | constant `"tools/call"` |
+| `mcp.protocol.version` | the event's `protocolVersion` — the revision **negotiated in the session**, not a build-time constant |
 
-`mcp.tool.name`, `mcp.request.id` и `mcp.transport` **не существуют** — их нет и не будет.
-`jsonrpc.request.id` не эмитится сознательно: id живёт между клиентом и шимом и через
-`IpcRequest` не едет; корреляция идёт по `traceId`. `mcp.resource.uri` не эмитится — ресурсов
-у нас нет. Собственные поля уезжают в namespace `mcpproxy.*`.
+`mcp.tool.name`, `mcp.request.id`, and `mcp.transport` **do not exist** — they aren't there
+and won't be. `jsonrpc.request.id` is deliberately not emitted: the id lives between the
+client and the shim and does not travel through `IpcRequest`; correlation goes through
+`traceId`. `mcp.resource.uri` is not emitted — we have no resources. Our own fields go into
+the `mcpproxy.*` namespace.
 
-### Стадии вызова
+### Call Stages
 
-Каждая — отдельное событие. Именно эта пошаговость делает таймлайн наглядным:
-видно, на каком шаге вызов остановился.
+Each is a separate event. It's exactly this step-by-step structure that makes the timeline
+legible: you can see at which step a call stopped.
 
-| `mcpproxy.stage` | Что происходит |
+| `mcpproxy.stage` | What happens |
 |---|---|
-| `received` | Пришёл вызов от клиента |
-| `lock_check` | Сверка рецепта с lock-файлом |
-| `validate` | Валидация параметров по схеме |
+| `received` | A call arrived from the client |
+| `lock_check` | The recipe is checked against the lock file |
+| `validate` | Parameters are validated against the schema |
 | `resolve_paths` | realpath + confinement |
-| `build_argv` | Сборка argv из слотов |
-| `classify_risk` | Определение тира по аннотациям |
-| `approval` | Ожидание и результат подтверждения |
-| `build_env` | Сборка окружения по allowlist |
-| `build_profile` | Генерация профиля песочницы |
-| `spawn` | Запуск процесса |
-| `violation` | Нарушение песочницы (может быть много) |
-| `redact` | Редакция вывода |
-| `complete` | Завершение, запись в цепочку |
+| `build_argv` | argv is assembled from the slots |
+| `classify_risk` | The tier is determined from annotations |
+| `approval` | Waiting for, and the result of, approval |
+| `build_env` | The environment is assembled from the allowlist |
+| `build_profile` | The sandbox profile is generated |
+| `spawn` | The process is launched |
+| `violation` | A sandbox violation (there can be several) |
+| `redact` | Output redaction |
+| `complete` | Completion, chain entry written |
 
-**Правило:** событие пишется на каждой стадии, включая отказ. Отказ без записи в аудит —
-баг, а не оптимизация.
+**Rule:** an event is written at every stage, including a denial. A denial with no audit
+entry is a bug, not an optimization.
 
-**Граница правила.** Оно относится к стадиям **вызова** — тем тринадцати, что в таблице.
-Отказ загрузки манифеста в эту форму не укладывается и укладываться не должен: `operation`
-одночленный, стадии `manifest_load` нет, а `sessionId`/`traceId`/`recipe` на момент загрузки
-не существуют — манифест читается на старте демона или по изменению файла, вне сессии.
-Диагностики загрузки пишет структурный лог демона (E1), ключ поиска — `pointer` диагностики;
-в цепочку аудита они не попадают. Расширять ради них `Stage` и `operation` дороже, чем
-записать эту границу: по обоим юнионам потребители строят исчерпывающие `Record<Union, …>`.
+**Boundary of the rule.** It applies to **call** stages — the thirteen in the table above. A
+manifest-load failure does not fit this shape and shouldn't be made to: `operation` is
+single-valued, there's no `manifest_load` stage, and `sessionId`/`traceId`/`recipe` don't
+exist yet at load time — the manifest is read at daemon startup or on file change, outside any
+session. Load diagnostics are written by the daemon's structured log (E1), with the
+diagnostic's `pointer` as the lookup key; they don't enter the audit chain. Extending `Stage`
+and `operation` to accommodate them would cost more than stating this boundary: consumers
+build exhaustive `Record<Union, …>` over both unions.
 
-**Что несёт сама запись.** `schema: "mcpproxy.audit/1"` — версия формы, и она обязательна:
-`chain.self` хэширует событие целиком, поэтому добавить дискриминатор потом значит получить
-новый дайджест у всех последующих записей. Читатель обязан быть tolerant: неизвестное значение —
-читаемая запись с пометкой «форма новее меня», а не исключение. Одна запись из будущего не имеет
-права делать нечитаемым весь лог до неё.
+**What the record itself carries.** `schema: "mcpproxy.audit/1"` is the shape version, and it
+is mandatory: `chain.self` hashes the event as a whole, so adding a discriminator later would
+mean a new digest for every subsequent record. The reader must be tolerant: an unrecognized
+value is a readable record flagged "shape newer than me," not an exception. A single record
+from the future has no right to make the entire log before it unreadable.
 
-### Правила эволюции формы записи
+### Record Shape Evolution Rules
 
-Лог append-only: перегенерировать его нельзя, поэтому правила ниже — не стиль, а условие того,
-что уже записанное останется проверяемым. Каждое проверено замером на реализации E6.
+The log is append-only: it cannot be regenerated, so the rules below are not a matter of
+style but a condition for what's already recorded to remain verifiable. Each has been checked
+against a measurement on the E6 implementation.
 
-1. **В `AuditEvent` добавляются только необязательные поля.** Старые записи их не имеют, их
-   дайджесты не меняются, файл остаётся верифицируемым целиком. Замерено: файл, где запись без
-   поля `X` идёт перед записью с полем `X`, проходит `verifyChain` — старые и новые записи в
-   одной цепочке **смешиваются свободно**. Формулировка «старые и новые записи не смешиваются»,
-   стоявшая здесь раньше, вводила в заблуждение в пессимистичную сторону: прочитав её буквально,
-   следующий эпик заплатил бы ротацией файла, которая рвёт цепочку между файлами.
-2. **Уже лежащая запись не переписывается и не пересериализуется никогда.** Экспорт копирует
-   байты (`copyFileSync`), а не перегоняет разобранные записи через `JSON.stringify`: порядок
-   ключей мог бы поехать, а вместе с ним — дайджесты, которые получатель считает сам.
-3. **Канонизация и формула дайджеста не меняются без смены версии формы.** Такая правка
-   обесценивает все исторические логи разом, а не только новые записи. Формулу сторожит золотой
-   вектор в `packages/contracts/src/audit/chain.test.ts` — именно это он и охраняет.
+1. **Only optional fields are added to `AuditEvent`.** Old records don't have them, their
+   digests don't change, and the file remains verifiable in full. Measured: a file where a
+   record without field `X` precedes a record with field `X` passes `verifyChain` — old and
+   new records within one chain **mix freely**. The phrasing "old and new records don't mix,"
+   which stood here before, was misleading in the pessimistic direction: taken literally, the
+   next epic would have paid for it with file rotation, which breaks the chain across files.
+2. **A record already on disk is never rewritten or re-serialized.** Export copies bytes
+   (`copyFileSync`) rather than piping parsed records back through `JSON.stringify`: key order
+   could shift, and with it the digests that the recipient computes independently.
+3. **Canonicalization and the digest formula don't change without a shape-version bump.** Such
+   a change would invalidate all historical logs at once, not just new records. The formula is
+   guarded by a golden vector in `packages/contracts/src/audit/chain.test.ts` — that's exactly
+   what it guards.
 
-Удаление поля из ядра или смена его типа — несовместимое изменение: оно ломает читателя на
-записях, которые уже лежат на диске, и лечится только новой версией формы.
+Removing a core field or changing its type is an incompatible change: it breaks the reader on
+records already on disk, and can only be remedied by a new shape version.
 
-**Экспорт в OTLP — сводка, а не полная запись.** Спан несёт длины (`mcpproxy.redactions.count`,
-`mcpproxy.sandbox.violations.count`), а не сами массивы, и не несёт вовсе `sandbox.profile`,
-`risk.annotations` и `chain`. Полная запись живёт в JSONL. Статус спана ставится только на
-`verdict: "error"`: отказ политики — штатный исход решения, и, пометив его ошибкой, мы
-нарисовали бы работающую политику как отказавший сервис.
+**The OTLP export is a summary, not the full record.** The span carries lengths
+(`mcpproxy.redactions.count`, `mcpproxy.sandbox.violations.count`), not the arrays themselves,
+and carries no `sandbox.profile`, `risk.annotations`, or `chain` at all. The full record lives
+in the JSONL file. Span status is set only for `verdict: "error"`: a policy denial is a
+normal decision outcome, and flagging it as an error would paint a working policy as a failed
+service.
 
-### Диагностика загрузки
+### Load Diagnostics
 
-`parseManifest` возвращает размеченный результат, а не бросает. Диагностика несёт `pointer`
-(точечный путь внутрь документа), `line`, `column`, `message` — и `code`, по которому
-потребитель обязан ветвиться. Текст `message` для человека и **не заморожен**; ветвление по
-нему тихо ломается на первой же правке формулировки.
+`parseManifest` returns a tagged result rather than throwing. A diagnostic carries `pointer`
+(a dotted path into the document), `line`, `column`, `message` — and `code`, which is what
+the consumer is required to branch on. The `message` text is for humans and **is not frozen**;
+branching on it breaks silently on the first wording change.
 
-| `code` | Что означает |
+| `code` | What it means |
 |---|---|
-| `size-limit` | Файл больше потолка, отказ до разбора |
-| `yaml` | Синтаксис, неизвестный тег, дубль ключа, алиас-бомба, директива, второй документ |
-| `schema` | Документ разобран, но не соответствует схеме |
-| `invariant` | Проверка, которую схема выразить не может: confinement, слоты, форма `exec[0]`, потолок `env`, пол `output`, исполнимость длительности, хэшируемость манифеста |
-| `pattern` | `pattern` не принят движком RE2 |
-| `lock` | Разбор `mcpproxy.lock`, а не манифеста. Отдельный член, потому что реакция другая: сломанный или устаревший lock ведёт на повторный апрув, сломанный манифест — на отказ старта |
+| `size-limit` | File exceeds the ceiling, rejected before parsing |
+| `yaml` | Syntax, unknown tag, duplicate key, alias bomb, directive, second document |
+| `schema` | Document parsed, but doesn't match the schema |
+| `invariant` | A check the schema itself can't express: confinement, slots, the shape of `exec[0]`, the `env` ceiling, the `output` floor, satisfiability of bounds, manifest hashability |
+| `pattern` | `pattern` was rejected by the RE2 engine |
+| `lock` | Parsing `mcpproxy.lock`, not the manifest. A separate member because the response differs: a broken or stale lock leads to re-approval, a broken manifest leads to startup failure |
 
-Одного `pointer` для этого мало: у «RE2 отверг паттерн» и у «`pattern` не прошёл `SafeText`
-схемы» он один и тот же — `tools.X.params.Y.pattern`, — а последствия разные.
+`pointer` alone isn't enough here: "RE2 rejected the pattern" and "`pattern` failed the
+schema's `SafeText`" share the same one — `tools.X.params.Y.pattern` — yet the consequences
+differ.
 
-**Манифест, прошедший загрузку, обязан быть хэшируемым.** Это симметрично `parseLockFile`
-и по той же причине: `diffLock(lock, manifest)` берёт два аргумента, и страховать надо оба.
-Одиночный суррогат в любой строке роняет канонизацию, то есть `manifestHash` и `diffLock`, —
-исключением на стадии `lock_check`, до записи стадийного события. Отказ без следа в аудите
-правило выше называет багом, поэтому такой манифест не грузится вовсе.
+**A manifest that passes loading must be hashable.** This is symmetric with `parseLockFile`,
+and for the same reason: `diffLock(lock, manifest)` takes two arguments, and both need
+safeguarding. A single lone surrogate in any string crashes canonicalization — that is,
+`manifestHash` and `diffLock` — as an exception at the `lock_check` stage, before the stage
+event is written. The rule above calls a denial with no audit trace a bug, so such a manifest
+doesn't load at all.
 
-**Длительность ограничена по значению, а форма только санитарна.** Выше максимума таймера
-платформы (`2^31 − 1` мс) Node молча клампит таймаут к 1 мс: манифест, просящий «почти никогда
-не прерывать», получил бы прерывание немедленно. Арбитр здесь один — значение; предел цифр в
-схеме отсекает лишь строки абсурдной длины и совпадает с пределом в парсере, иначе «связка»
-существовала бы только на словах. Пока предел стоял на девяти цифрах, между ним и константой
-лежала полоса в 1.1 млрд мс: `2147483647ms` — ровно эта константа — отвергался как «десять
-цифр», и человек получал диагностику про паттерн вместо объяснения про таймер.
+**Duration is bounded by value; the shape check is only sanitary.** Above the platform timer
+maximum (`2^31 − 1` ms), Node silently clamps the timeout to 1 ms: a manifest asking to
+"almost never time out" would get interrupted immediately. There is a single arbiter here —
+the value; the digit limit in the schema only cuts off absurdly long strings and matches the
+limit in the parser, otherwise the "link" between them would exist only in words. While the
+limit stood at nine digits, a 1.1-billion-ms gap separated it from the constant:
+`2147483647ms` — that exact constant — was rejected as "ten digits," and a human got a
+pattern diagnostic instead of an explanation about the timer.
 
-`message` и `pointer` безопасны для отрисовки, и санитизация стоит **в конструкторах диагностики**, а не
-у производителей сообщения: их пять — ajv, `yaml`, `refine`, компилятор паттернов и парсер
-lock, — и поставленную у одного из них гарантию следующий просто не заметит. Замерено, что
-дословный фрагмент недоверенного файла вклеивают минимум трое: сообщение RE2 эхоит паттерн,
-`yaml@2.9.0` вклеивает исходную строку вместе с кареткой, `JSON.parse` в V8 — фрагмент
-lock-файла.
+`message` and `pointer` are safe to render, and sanitization sits **in the diagnostic
+constructors**, not with the message producers: there are five of those — ajv, `yaml`,
+`refine`, the pattern compiler, and the lock parser — and a guarantee placed on one of them
+would simply go unnoticed by the next. Measured: at least three of them splice in a verbatim
+fragment of the untrusted file: RE2's message echoes the pattern, `yaml@2.9.0` splices in the
+source line along with a caret, and V8's `JSON.parse` splices in a fragment of the lock file.
 
-`pointer` санитизируется наравне с `message`, и довод «схема ограничивает имена
-`propertyNames`, значит указатель чист» неверен: при `allErrors: true` ajv продолжает
-валидировать значение **под отвергнутым ключом**, поэтому ключ доезжает до указателя вместе
-с собственной диагностикой о себе. А `pointer` — это ключ, которым ищут в логе.
+`pointer` is sanitized on equal footing with `message`, and the argument "the schema
+constrains names via `propertyNames`, so the pointer is clean" doesn't hold: with
+`allErrors: true`, ajv keeps validating the value **under the rejected key**, so the key
+rides along to the pointer together with its own diagnostic about itself. And `pointer` is
+the key used to search the log.
 
-Побочный эффект санитизации полезен: сообщение становится однострочным.
+A useful side effect of sanitization: the message becomes single-line.
 
-**Указатель лоссовый и потому не уникален.** Санитизация вырезает невидимые символы, поэтому
-`tools.a<U+200B>b` и законный `tools.ab` дают один и тот же `pointer`, а `<U+200B>` схлопывается
-в пустую строку — неотличимую от сентинела «указателя внутрь документа нет». Отсюда два
-правила для потребителя: подставлять `pointer` обратно в навигацию по документу нельзя, а для
-тождества записи брать `pointer` **вместе с** `line` и `column` — они остаются точными.
-Пустой `pointer` при `line: 1, column: 1` означает отказ уровня документа: размер, синтаксис,
-нехэшируемость.
+**The pointer is lossy and therefore not unique.** Sanitization strips invisible characters,
+so `tools.a<U+200B>b` and the legitimate `tools.ab` produce the same `pointer`, with
+`<U+200B>` collapsing to an empty string — indistinguishable from the sentinel "no pointer
+into the document." Hence two rules for the consumer: `pointer` must not be fed back into
+document navigation, and record identity should be taken as `pointer` **together with**
+`line` and `column` — those remain exact. An empty `pointer` with `line: 1, column: 1` means
+a document-level failure: size, syntax, unhashability.
 
-## Контракт подтверждений
+## Approval Contract
 
-Формы объявлены в E0 целиком, потому что после заморозки поле сюда не добавить, а без них
-не реализуемы ни сценарий S8, ни атака A14, ни ASI09.
+The shapes are declared in E0 in full, because a field can't be added here after the freeze,
+and without them neither scenario S8, nor attack A14, nor ASI09 is implementable.
 
-| Тип | Значения / поля |
+| Type | Values / fields |
 |---|---|
 | `ApprovalChannel` | `electron` \| `elicitation` |
-| `ApprovalDecision` | `approved` \| `denied` — третьего члена нет: истечение и отмена это **отсутствие** вердикта |
+| `ApprovalDecision` | `approved` \| `denied` — there is no third member: expiry and cancellation are the **absence** of a verdict |
 | `ApprovalScope` | `once` \| `until` \| `recipe_and_args` |
 | `ApprovalRequest` | `requestId`, `sessionId`, `recipeName`, `argsHash`, `tier`, `argv`, `argvFromParams?`, `cwd`, `profile` |
 | `ApprovalVerdict` | `requestId`, `sessionId`, `channel`, `decision`, `scope`, `expiresAt` |
-| `ApprovalRecord` (в событии) | `channel`, `decision`, `scope`, `expiresAt`, `argsHash`, `sessionId` |
+| `ApprovalRecord` (in the event) | `channel`, `decision`, `scope`, `expiresAt`, `argsHash`, `sessionId` |
 
-`argvFromParams` — то же поле, что у `AuditEvent`, и с тем же инвариантом: индексы тех
-элементов `argv`, которые подставлены из параметров вызова. Здесь оно несёт вторую
-обязанность — правило выбора опасного токена (`R41`) обязано быть **вычислимым из того, что
-окно получило**, а не угаданным по эвристике. Заполняет его E5, перенося индексы со стадии
-`build_argv`, а не пересчитывая по значениям: пересчёт разъедется там, где редакция вырезала
-секрет. Расписка — в `WORK.md`.
+`argvFromParams` is the same field as on `AuditEvent`, with the same invariant: the indices of
+the `argv` elements that were substituted from the call's parameters. Here it carries a second
+duty — the rule for picking the dangerous token (`R41`) must be **computable from what the
+window received**, not guessed by a heuristic. E5 fills it by **carrying over** the indices
+from the `build_argv` stage rather than recomputing them from values: a recomputation drifts
+exactly where redaction cut a secret out. The receipt is in `WORK.md`.
 
-`expiresAt` — **абсолютное** ISO-время, а не относительный TTL: append-only запись читают
-через месяцы, и «10 минут» в ней уже ничего не означают. `requestId` непрозрачный и
-брендированный — без него вердикт из рендерера может быть отнесён к другому ожидающему
-вызову. `sessionId` присутствует и в запросе, и в вердикте, и в записи события: иначе
-подтверждение со скоупом `until` оказывается неявно действительным во всех сессиях.
+`expiresAt` is an **absolute** ISO timestamp, not a relative TTL: an append-only record gets
+read months later, and "10 minutes" in it would no longer mean anything by then. `requestId`
+is opaque and branded — without it, a verdict from the renderer could get attributed to a
+different pending call. `sessionId` is present in the request, the verdict, and the event
+record: otherwise an approval with `until` scope would end up implicitly valid across every
+session.
 
-## Контракт IPC
+## IPC Contract
 
-Единственная форма запроса от shim к демону:
+The single request shape from the shim to the daemon:
 
 ```jsonc
 { "recipeName": "run_tests", "params": { "pattern": "auth" }, "sessionId": "…" }
 ```
 
-Оба идентификатора брендированы в контракте (`RecipeName`, `SessionId`), поэтому
-перестановка аргументов на этой границе — ошибка компиляции, а не принятый запрос от чужой
-сессии. Лишнее поле в этой форме тоже не компилируется: `argv` сюда не приписать.
+Both identifiers are branded in the contract (`RecipeName`, `SessionId`), so swapping
+arguments at this boundary is a compile error, not an accepted request from someone else's
+session. An extra field in this shape also fails to compile: `argv` cannot be tacked on here.
 
-**Никогда** argv, путь к бинарю, cwd или настройки песочницы. Это структурная защита
-от атаки «stdio Transport Security in Proxy Scenarios» из спеки MCP: даже полный
-контроль над сокетом не даёт произвольного исполнения.
+**Never** argv, a path to a binary, cwd, or sandbox settings. This is structural protection
+against the "stdio Transport Security in Proxy Scenarios" attack from the MCP spec: even full
+control over the socket doesn't grant arbitrary execution.
 
-Транспорт: unix domain socket, права `0600`, проверка peer credentials (uid) на соединении,
-per-session токен.
+Transport: unix domain socket, `0600` permissions, peer credential (uid) verification on
+connect, a per-session token.

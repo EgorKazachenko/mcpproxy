@@ -122,6 +122,8 @@ export interface AuditEvent {
     readonly mode: SandboxMode;
     readonly profile?: SandboxProfile;
     readonly violations?: readonly SandboxViolation[];
+    /** Только на `complete`, и только у вызова, дошедшего до `spawn`. См. `SandboxEvidence`. */
+    readonly evidence?: SandboxEvidence;
   };
   readonly risk?: { readonly tier: RiskTier; readonly annotations: ToolAnnotations };
   readonly approval?: ApprovalRecord;
@@ -141,6 +143,32 @@ export interface AuditEvent {
 export type ChainedEvent = AuditEvent & {
   readonly chain: { readonly prev: string | null; readonly self: string };
 };
+
+/**
+ * Счётчики качества самой записи о нарушениях, а не поведения процесса.
+ *
+ * Поле добавлено в E4 и **необязательно**: событие без него канонизируется ровно так же, как
+ * канонизировалось до добавления, поэтому уже записанные цепочки остаются верифицируемыми, а
+ * `CONTRACTS_VERSION` не двигается.
+ *
+ * Заведено потому, что альтернативой было выронить их навсегда. `ExecOutcome` объявляет эти
+ * величины доказательствами: `violationsLost` больше нуля означает, что бейдж «нарушений нет»
+ * в UI неотличим от «нарушения были, но не доехали», а `policyHash` — единственное, что
+ * связывает запись с политикой, которая на самом деле применялась. Журнал append-only:
+ * запись, сделанная без них, не дополняется задним числом.
+ */
+export interface SandboxEvidence {
+  /** Хэш применённой политики: `policyHash` из `@mcpproxy/core`, посчитанный на `build_profile`. */
+  readonly policyHash: string;
+  readonly violationsLost: number;
+  readonly attributionMissing: number;
+  readonly attributionForeign: number;
+  readonly unrecognizedLines: number;
+  readonly suppressedLines: number;
+  readonly consumerFailures: number;
+  readonly bodyCountFailures: number;
+  readonly lateUnattributed: number;
+}
 
 export interface SandboxViolation {
   readonly type: ViolationType;

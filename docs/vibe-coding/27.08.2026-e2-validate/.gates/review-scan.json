@@ -1,0 +1,11 @@
+{
+  "gate": "review-scan",
+  "status": "waived",
+  "waived_by": "agent-recorded",
+  "reason": "решение владельца — слияние: 48 файлов E1/E6 отревьюены на своих ветках",
+  "codeTree": "4a3a33d56d3e6b2dca2161df9efbf520295b1cf8",
+  "codeDirty": false,
+  "headSha": "5303f584b4df3de8eb3731c2f65c72358e522824",
+  "startedAt": "2026-08-28T05:17:20.550Z",
+  "artifacts": []
+}

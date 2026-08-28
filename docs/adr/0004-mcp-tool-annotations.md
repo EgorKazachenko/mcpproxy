@@ -1,43 +1,43 @@
-# ADR-0004 — Риск-тиры на стандартных MCP tool annotations
+# ADR-0004 — Risk tiers on standard MCP tool annotations
 
-**Статус:** принято · 2026-08-27 · **Блокирует E0**
+**Status:** accepted · 2026-08-27 · **Blocks E0**
 
-## Контекст
+## Context
 
-Нужна классификация рисков для решения «авто / подтверждение».
-Исходно планировалось своё поле `risk: low | medium | high`.
+A risk classification is needed for the "auto / confirm" decision.
+The original plan was our own `risk: low | medium | high` field.
 
-## Решение
+## Decision
 
-Не изобретаем. Используем четыре стандартные аннотации из спеки MCP:
+Don't invent one. Use the four standard annotations from the MCP spec:
 `readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`.
-Манифест их объявляет, `tools/list` их эмитит, тир выводится внутри.
+The manifest declares them, `tools/list` emits them, and the tier is derived internally.
 
-| Условие | Тир |
+| Condition | Tier |
 |---|---|
 | `readOnlyHint: true` | low |
-| не readOnly, не destructive, не openWorld | medium |
-| `readOnlyHint: false` и (`destructiveHint: true` **или** `openWorldHint: true`) | high |
-| **аннотации не заданы** | **high** |
+| not readOnly, not destructive, not openWorld | medium |
+| `readOnlyHint: false` and (`destructiveHint: true` **or** `openWorldHint: true`) | high |
+| **annotations not set** | **high** |
 
-Оговорка спеки: `destructiveHint` и `idempotentHint` значимы **только** при
-`readOnlyHint == false`. Рецепт с `readOnlyHint: true` и `destructiveHint: true` — это low.
+Spec caveat: `destructiveHint` and `idempotentHint` are meaningful **only** when
+`readOnlyHint == false`. A recipe with `readOnlyHint: true` and `destructiveHint: true` is still low.
 
-## Ключевая деталь
+## Key detail
 
-**Дефолты в спеке пессимистичные:** `destructiveHint` по умолчанию `true`,
-`openWorldHint` по умолчанию `true`. Инструмент без аннотаций считается разрушительным
-и открытым во внешний мир: забыл объявить — получил максимальный тир, а не минимальный.
+**The spec's defaults are pessimistic:** `destructiveHint` defaults to `true`,
+`openWorldHint` defaults to `true`. A tool with no annotations is treated as destructive
+and open to the outside world: forgetting to declare it gets you the maximum tier, not the minimum.
 
-**Но «fail-safe by construction» — неверная формулировка, и она заменена.** Гарантия уже:
-молчание манифеста может сделать рецепт только **опаснее**; явный `readOnlyHint: true` тир
-**понижает**, а спека прямо требует считать аннотации недоверенными. Значит вторая линия
-обороны — песочница и lock, а не вывод тира.
+**But "fail-safe by construction" is the wrong phrasing, and it has been replaced.** The actual
+guarantee is: manifest silence can only make a recipe **more** dangerous; an explicit
+`readOnlyHint: true` **lowers** the tier, and the spec explicitly requires treating annotations as
+untrusted. So the second line of defense is the sandbox and the lock, not tier inference.
 
-## Последствия
+## Consequences
 
-- ✅ Совместимость с любым MCP-клиентом, не только Claude Code
-- ✅ Не плодим свой словарь рисков там, где индустрия уже сошлась
-- ✅ Бейджи в UI читаются любым, кто знает MCP
-- ⚠️ Аннотации — это hints, а не гарантии. Мы используем их как **вход** для решения,
-  но enforcement делает песочница, а не аннотация
+- ✅ Compatible with any MCP client, not just Claude Code
+- ✅ We don't invent our own risk vocabulary where the industry has already converged
+- ✅ UI badges are readable by anyone who knows MCP
+- ⚠️ Annotations are hints, not guarantees. We use them as **input** to the decision,
+  but enforcement is done by the sandbox, not the annotation

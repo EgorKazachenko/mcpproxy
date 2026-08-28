@@ -1,0 +1,10 @@
+{
+  "feature": "docs/vibe-coding/27.08.2026-e2-validate",
+  "branch": "v2/e2-validate",
+  "baseSha": "e40b7defb42add5ade60cc85192e63ad42aa7b4a",
+  "mode": "attended",
+  "track": "full",
+  "agentConsent": true,
+  "createdAt": "2026-08-27T20:43:57.177Z",
+  "killReviewDue": "2026-10-26"
+}

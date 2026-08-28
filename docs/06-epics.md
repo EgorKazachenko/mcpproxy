@@ -1,89 +1,89 @@
-# 06 — Эпики, зависимости, параллелизация
+# 06 — Epics, Dependencies, Parallelization
 
-## Режим работы
+## Mode of work
 
-Соло-разработка с параллельными агентами в git worktree.
-Объём — вертикальный срез + red-team (не полный продукт).
+Solo development with parallel agents in git worktrees.
+Scope — a vertical slice + red-team (not a full product).
 
-## Таблица эпиков
+## Epic table
 
-| # | Эпик | Зависит от | Параллелится |
+| # | Epic | Depends on | Parallelizable |
 |---|---|---|---|
-| **E0** | Скелет монорепо + **контракты**: JSON Schema манифеста, схема событий (OTel-совместимая), MCP tool annotations, TS-типы | — | ❌ шов, только последовательно |
-| **E1** | Policy engine: загрузка и валидация манифеста, `mcpproxy.lock`, diff-approve при изменении, санитизация `description` | E0 | ✅ |
-| **E2** | Валидатор параметров + argv-builder, path resolver (realpath + confinement), гарантия no-shell | E0 | ✅ |
-| **E3** | Executor + песочница: обёртка над `@anthropic-ai/sandbox-runtime`, доменный allowlist сети, rlimits, таймауты, cap на вывод, проброс violations | E0 | ✅ |
-| **E4** | MCP-поверхность: `tools/list` из манифеста с аннотациями, `tools/call`, shim + IPC-хардненинг (peer-cred, 0600) | E1, E2 (на стабах) | ⚠️ частично |
-| **E5** | Approvals: риск-тиры из аннотаций, брокер, TTL/scope, двухканальность (elicitation + Electron), headless = deny | E4, E7 | ❌ поздний |
-| **E6** | Секреты и аудит: env-allowlist, двусторонняя редакция (правила из Secrets-Patterns-DB + энтропия), hash-chain JSONL, экспорт | E0 | ✅ |
-| **E7** | Electron UI: таймлайн, детали вызова, панель sandbox violations, policy viewer с бейджами аннотаций, инбокс апрувов | E0 (на моках событий) | ✅ |
-| **E8** | Bench / red-team: корпус легитимных задач и корпус атак, метрики ASR + Utility under Attack, замер оверхеда | E4 e2e | ❌ поздний |
-| **E9** | Хардненинг (включая Electron-чеклист), упаковка, демо-репо и сценарий | всё | ❌ |
+| **E0** | Monorepo skeleton + **contracts**: manifest JSON Schema, event schema (OTel-compatible), MCP tool annotations, TS types | — | ❌ seam, sequential only |
+| **E1** | Policy engine: manifest loading and validation, `mcpproxy.lock`, diff-approve on change, `description` sanitization | E0 | ✅ |
+| **E2** | Parameter validator + argv-builder, path resolver (realpath + confinement), no-shell guarantee | E0 | ✅ |
+| **E3** | Executor + sandbox: wrapper over `@anthropic-ai/sandbox-runtime`, domain network allowlist, timeouts and SIGKILL by process group, output cap, violation forwarding | E0 | ✅ |
+| **E4** | MCP surface: `tools/list` from manifest with annotations, `tools/call`, shim + IPC hardening (0700 directory, 0600 socket, token) | E1, E2 (on stubs) | ✅ except approvals (E5) |
+| **E5** | Approvals: risk tiers from annotations, broker, TTL/scope, dual-channel (elicitation + Electron), headless = deny | E4, E7 | ❌ late |
+| **E6** | Secrets and audit: env allowlist, bidirectional redaction (rules from Secrets-Patterns-DB + entropy), hash-chain JSONL, export | E0 | ✅ |
+| **E7** | Electron UI: timeline, call details, sandbox violations panel, policy viewer with annotation badges, approvals inbox | E0 (on mocked events) | ✅ |
+| **E8** | Bench / red-team: legitimate-task corpus and attack corpus, ASR + Utility under Attack metrics, overhead measurement | E4 e2e | ❌ late |
+| **E9** | Hardening (including Electron checklist), packaging, demo repo and scenario | everything | ❌ |
 
-## Критический путь
+## Critical path
 
 ```
 E0 → E2 → E4 → E5 → E9
 ```
 
-Всё остальное вешается сбоку.
+Everything else hangs off to the side.
 
-## Волны
+## Waves
 
 ```mermaid
 gantt
     dateFormat X
     axisFormat %s
-    section Шов
-    E0 контракты          :done, e0, 0, 1
-    section Волна 1 (параллельно)
-    E1 policy             :e1, 1, 3
-    E2 валидатор          :e2, 1, 3
-    E3 песочница          :e3, 1, 3
-    E6 секреты и аудит    :e6, 1, 3
-    E7 UI на моках        :e7, 1, 4
-    section Волна 2
-    E4 MCP + IPC          :e4, 3, 5
-    section Волна 3
-    E5 апрувы             :e5, 5, 6
-    E8 red-team           :e8, 5, 7
-    section Финал
-    E9 хардненинг и демо  :e9, 7, 8
+    section Seam
+    E0 contracts           :done, e0, 0, 1
+    section Wave 1 (parallel)
+    E1 policy              :e1, 1, 3
+    E2 validator            :e2, 1, 3
+    E3 sandbox              :e3, 1, 3
+    E6 secrets and audit    :e6, 1, 3
+    E7 UI on mocks           :e7, 1, 4
+    section Wave 2
+    E4 MCP + IPC            :e4, 3, 5
+    section Wave 3
+    E5 approvals             :e5, 5, 6
+    E8 red-team              :e8, 5, 7
+    section Final
+    E9 hardening and demo    :e9, 7, 8
 ```
 
-**Волна 1 — пять независимых веток**, это основной выигрыш от параллелизации.
-E7 пилится на моках потока событий, поэтому UI будет готов раньше ядра — и это
-правильно, потому что на демо UI важнее ядра.
+**Wave 1 — five independent branches**, this is the main payoff from parallelization.
+E7 is built on mocked event streams, so the UI will be ready before the core — and
+that's the right order, since the UI matters more than the core for the demo.
 
-## Правила параллельной работы
+## Rules for parallel work
 
-1. `packages/contracts` заморожен после E0. Изменение — только по явному согласованию,
-   потому что от него зависят семь эпиков.
-2. Один worktree на эпик, ветка `epic/E<N>-<slug>`.
-3. Каждый тикет получает явный контракт: что на входе, что на выходе, какой модуль трогает.
-4. Пересечения по файлам между эпиками волны 1 запрещены — если возникло, значит
-   контракт в E0 недоделан.
+1. `packages/contracts` is frozen after E0. Changes only by explicit agreement,
+   because seven epics depend on it.
+2. One worktree per epic, branch `epic/E<N>-<slug>`.
+3. Every ticket gets an explicit contract: inputs, outputs, which module it touches.
+4. File overlaps between wave-1 epics are forbidden — if one occurs, it means
+   the E0 contract is incomplete.
 
-## Дельты, внесённые по итогам разведки
+## Deltas introduced from the research findings
 
-| Эпик | Дельта | Причина |
+| Epic | Delta | Reason |
 |---|---|---|
-| **E0** | ➕ схема событий = OTel GenAI-совместимая; ➕ манифест эмитит MCP tool annotations | ADR-0003, ADR-0004 |
-| **E1** | ⬆️ lock-файл повышен до обязательного; ➕ diff-approve; ➕ санитизация `description` | CVE-2025-54136, tool poisoning |
-| **E2** | без изменений | здесь мы и так по индустрии |
-| **E3** | ⬇️⬇️ **втрое дешевле** — обёртка над `srt` вместо своих SBPL; ➕ доменный allowlist сети; ➕ violations в шину | ADR-0002, ADR-0007 |
-| **E4** | ➕ хардненинг IPC-сокета (peer-cred check) | атака из спеки MCP |
-| **E5** | ➕ двухканальность: elicitation + authoritative Electron | ADR-0005, OWASP ASI09 |
-| **E6** | ⬇️ правила из Secrets-Patterns-DB; ➕ двусторонний скан | Docker MCP Gateway, gitleaks |
-| **E7** | ➕ панель sandbox violations; ➕ бейджи аннотаций | srt violation store |
-| **E8** | ⬆️ **вырос** — корпус +6 классов атак, метрики парой | AgentDojo, спека MCP, CVE |
-| **E9** | ➕ Electron-хардненинг отдельным чеклистом | Electron security |
+| **E0** | ➕ event schema = OTel GenAI-compatible; ➕ manifest emits MCP tool annotations | ADR-0003, ADR-0004 |
+| **E1** | ⬆️ lock file promoted to mandatory; ➕ diff-approve; ➕ `description` sanitization | CVE-2025-54136, tool poisoning |
+| **E2** | no changes | already aligned with the industry here |
+| **E3** | ⬇️⬇️ **three times cheaper** — wrapper over `srt` instead of our own SBPL; ➕ domain network allowlist; ➕ violations into the event bus | ADR-0002, ADR-0007 |
+| **E4** | ➕ IPC socket hardening (0700 directory + token; peer-cred not reachable in Node) | attack from the MCP spec |
+| **E5** | ➕ dual-channel: elicitation + authoritative Electron | ADR-0005, OWASP ASI09 |
+| **E6** | ⬇️ rules from Secrets-Patterns-DB; ➕ bidirectional scanning | Docker MCP Gateway, gitleaks |
+| **E7** | ➕ sandbox violations panel; ➕ annotation badges | srt violation store |
+| **E8** | ⬆️ **grew** — corpus +6 attack classes, paired metrics | AgentDojo, MCP spec, CVE |
+| **E9** | ➕ Electron hardening as a separate checklist | Electron security |
 
-Итог по времени примерно нейтральный: E3 сильно подешевел, E8 подорожал.
-Но качество другое: половина red-team корпуса основана на реальных CVE и разделах
-спецификации, а не на фантазии.
+Net effect on timeline is roughly neutral: E3 got significantly cheaper, E8 got more expensive.
+But the quality is different: half the red-team corpus is now grounded in real CVEs and
+spec sections, not speculation.
 
-## Решение, которое нельзя откладывать
+## A decision that can't be deferred
 
-**OTel-совместимая схема событий и стандартные MCP-аннотации должны попасть в контракт
-в E0.** Переделать это потом — значит переписать все семь зависимых эпиков.
+**The OTel-compatible event schema and standard MCP annotations must land in the contract
+at E0.** Reworking this later would mean rewriting all seven dependent epics.

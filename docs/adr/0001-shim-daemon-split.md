@@ -1,32 +1,33 @@
-# ADR-0001 — Разделение shim / daemon / UI
+# ADR-0001 — Shim / daemon / UI split
 
-**Статус:** принято · 2026-08-27
+**Status:** accepted · 2026-08-27
 
-## Контекст
+## Context
 
-MCP-клиент спавнит сервер как subprocess по stdio. Требуется Electron-контур наблюдения.
+The MCP client spawns the server as a subprocess over stdio. An Electron observability loop is required.
 
-## Варианты
+## Options
 
-1. Electron — хост MCP-сервера. Спавн Electron на каждую сессию: множественные окна,
-   тяжёлый старт, нет единого аудита.
-2. Единый headless-демон + Electron как отдельный вьювер, подключающийся к демону.
-3. Тонкий stdio-shim → демон → UI. **Выбран.**
+1. Electron as the MCP server host. Spawning Electron per session: multiple windows,
+   heavy startup, no unified audit trail.
+2. A single headless daemon + Electron as a separate viewer connecting to the daemon.
+3. A thin stdio shim → daemon → UI. **Chosen.**
 
-## Решение
+## Decision
 
-Три части: `mcpproxy-shim` (stdio-мост), `mcpproxyd` (ядро), Electron (наблюдение и апрувы).
-`packages/core` — вся логика демона как библиотека **без импорта Electron**.
+Three parts: `mcpproxy-shim` (stdio bridge), `mcpproxyd` (core), Electron (observation and approvals).
+`packages/core` — all daemon logic as a library **with no Electron import**.
 
-Демон встраивает `core`; если приложение не запущено, shim его поднимает.
-Флаг `--require-ui` включает строгий fail-closed режим («нет UI → нет аудита → нет исполнения»).
+The daemon embeds `core`; if the app isn't running, the shim launches it.
+The `--require-ui` flag enables strict fail-closed mode ("no UI → no audit → no execution").
 
-## Последствия
+## Consequences
 
-- ✅ Один аудит и одна политика на все сессии клиента
-- ✅ `core` тестируется в CI без дисплея
-- ✅ Апрувы возможны вне контекста модели
-- ⚠️ Появляется IPC-граница, которая сама становится вектором атаки — см. ADR и инвариант И6,
-  а также раздел спеки MCP «stdio Transport Security in Proxy Scenarios».
-  Митигация: сокет 0600, peer-cred check, per-session токен и главное —
-  демон принимает только `{recipe, params}`, никогда argv.
+- ✅ One audit trail and one policy across all client sessions
+- ✅ `core` is testable in CI without a display
+- ✅ Approvals are possible outside the model's context
+- ⚠️ An IPC boundary appears, and it becomes an attack vector in its own right — see the ADR and
+  invariant И6, and the MCP spec section "stdio Transport Security in Proxy Scenarios."
+  Mitigation: 0600 socket permissions, 0700 directory (peer-cred is not reachable from Node —
+  П11), a handshake token, and most importantly —
+  the daemon only accepts `{recipeName, params, sessionId}`, never argv.

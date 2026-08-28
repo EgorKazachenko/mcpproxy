@@ -1,0 +1,10 @@
+{
+  "feature": "docs/vibe-coding/27.08.2026-e1-policy",
+  "branch": "v2/e1-policy",
+  "baseSha": "e40b7defb42add5ade60cc85192e63ad42aa7b4a",
+  "mode": "attended",
+  "track": "full",
+  "agentConsent": true,
+  "createdAt": "2026-08-27T20:45:33.382Z",
+  "killReviewDue": "2026-10-26"
+}
