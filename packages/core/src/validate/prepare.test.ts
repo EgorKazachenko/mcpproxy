@@ -226,3 +226,41 @@ const _noRawSchema: StringBranch = {
   schema: { type: 'string', pattern: '^x$' },
 };
 void _noRawSchema;
+
+describe('prepareRecipe — confinement cwd под каталог манифеста (R34 E4)', () => {
+  it('cwd вверх от каталога манифеста отвергается на подготовке', () => {
+    const result = prepareRecipe(NAME, recipeOf({ cwd: '../../..' }), new Map(), DIR);
+    expect(result.ok).toBe(false);
+  });
+
+  it('сосед с общим префиксом тоже отвергается — граница не строковая', () => {
+    const result = prepareRecipe(NAME, recipeOf({ cwd: '../proj-evil' }), new Map(), DIR);
+    expect(result.ok).toBe(false);
+  });
+
+  it('абсолютный cwd вне каталога манифеста отвергается', () => {
+    const result = prepareRecipe(NAME, recipeOf({ cwd: '/etc' }), new Map(), DIR);
+    expect(result.ok).toBe(false);
+  });
+
+  it('подкаталог проходит и доезжает до формы', () => {
+    const result = prepareRecipe(NAME, recipeOf({ cwd: './packages/app' }), new Map(), DIR);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.prepared.cwd).toBe('/home/u/proj/packages/app');
+  });
+
+  it('cwd, равный каталогу манифеста, проходит — root-itself не outside', () => {
+    const result = prepareRecipe(NAME, recipeOf({ cwd: '.' }), new Map(), DIR);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.prepared.cwd).toBe(DIR);
+  });
+
+  it('отсутствующий cwd остаётся каталогом манифеста', () => {
+    const result = prepareRecipe(NAME, recipeOf({}), new Map(), DIR);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.prepared.cwd).toBe(DIR);
+  });
+});

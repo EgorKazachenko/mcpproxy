@@ -52,7 +52,7 @@ export { isWeakened } from './netpolicy.js';
  * E8 — разбор корпуса атак: отличить «команду резали» от «команда отработала» (R41).
  *
  * Тем, кому нужна только эта половина, лучше брать её из `@mcpproxy/core/exec-pure`: корневой
- * вход тянет за собой вендорский SDK, а `./policy` — нет.
+ * вход тянет за собой вендорский SDK, а `./exec-pure` — нет.
  */
 export { classify, parseAndClassify, parseLine, typeForOperation } from './violation.js';
 export type { ClassifyPolicy, ParsedLine, RawViolationRecord } from './violation.js';
