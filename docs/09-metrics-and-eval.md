@@ -1,106 +1,110 @@
-# 09 — Метрики и оценка
+# 09 — Metrics and Evaluation
 
-## Методологическая рамка
+## Methodological Framework
 
-Берём терминологию и пару метрик из устоявшихся бенчмарков агентской безопасности
-(InjecAgent — 1054 кейса; AgentDojo — 97 задач и 629 security-кейсов). Сами корпуса
-не подходят (они про email-клиенты и банкинг), но методология — да.
+We borrow the terminology and a couple of metrics from established agentic security benchmarks
+(InjecAgent — 1054 cases; AgentDojo — 97 tasks and 629 security cases). The corpora themselves
+don't fit our case (they're about email clients and banking), but the methodology does.
 
-**Главное правило: ASR и Utility показываются только парой.**
+**Main rule: ASR and Utility are always reported as a pair.**
 
-| Метрика | Определение | Целевое |
+| Metric | Definition | Target |
 |---|---|---|
-| **ASR** (Attack Success Rate) | Доля атак корпуса, достигших цели | 0% |
-| **Utility under Attack** | Доля легитимных задач, выполненных корректно при активном корпусе атак | ≥ 95% |
-| **False blocks** | Легитимные задачи, заблокированные ошибочно | ≤ 5% |
-| **Overhead** | Задержка прокси относительно прямого вызова того же скрипта — сумма длительностей стадий **вне** множества `{spawn, violation, approval, complete}` | ≤ 50 мс p95 |
-| **High-risk rate** | Доля вызовов, потребовавших подтверждения | низкая; высокая = усталость от подтверждений |
-| **Secret leaks** | Секреты в выводах и логах | 0 |
+| **ASR** (Attack Success Rate) | Share of corpus attacks that reached their goal | 0% |
+| **Utility under Attack** | Share of legitimate tasks completed correctly while the attack corpus is active | ≥ 95% |
+| **False blocks** | Legitimate tasks blocked erroneously | ≤ 5% |
+| **Overhead** | Proxy latency relative to a direct call of the same script — the sum of stage durations **outside** the set `{spawn, violation, approval, complete}` | ≤ 50 ms p95 |
+| **High-risk rate** | Share of calls that required confirmation | low; high = confirmation fatigue |
+| **Secret leaks** | Secrets in outputs and logs | 0 |
 
-Исключённое множество стадий — часть определения, а не деталь реализации: `spawn` это время
-дочернего процесса, `violation` возникает внутри окна `spawn` и прибавлял бы уже посчитанное,
-`approval` это человек у модалки (иначе сценарий S8 отрапортовал бы десятки тысяч
-миллисекунд), а `complete` — событие, на котором значение вычисляется. Считается по
-монотонному `durationUs` из события, а не по разнице ISO-меток: те квантованы до миллисекунды
-и прыгают по NTP.
+The excluded set of stages is part of the definition, not an implementation detail: `spawn` is
+child-process time, `violation` occurs inside the `spawn` window and would double-count what's
+already been counted, `approval` is a human at the modal (otherwise scenario S8 would report tens
+of thousands of milliseconds), and `complete` is the event at which the value is computed. It is
+computed from the event's monotonic `durationUs`, not from the difference between ISO timestamps:
+those are quantized to the millisecond and jump around with NTP.
 
-Защита с ASR = 0 и Utility = 0 — это `chmod 000`. Отдельно взятая цифра ASR
-не является результатом.
+A defense with ASR = 0 and Utility = 0 is just `chmod 000`. An ASR figure taken in isolation
+is not a result.
 
-## Корпус легитимных задач (Utility)
+## Legitimate Task Corpus (Utility)
 
-Измеряет цену безопасности. Должен быть реалистичным, а не удобным.
+Measures the cost of security. It must be realistic, not convenient.
 
-| Класс | Примеры |
+| Class | Examples |
 |---|---|
-| Тесты | полный прогон, по паттерну, обновление снапшотов, с coverage |
-| Сборка | dev, prod, с чистым кэшем, с установкой зависимостей (нужна сеть) |
-| Анализ | разбор логов, поиск по логам, отчёт |
-| Форматирование | lint, format с записью в исходники |
+| Tests | full run, pattern-matched, snapshot update, with coverage |
+| Build | dev, prod, with a clean cache, with dependency installation (requires network) |
+| Analysis | log parsing, log search, reporting |
+| Formatting | lint, format with writes to source files |
 
-**Специально включаем задачи, требующие сети** (`npm ci`) и **записи в исходники**
-(`format --write`) — именно они генерируют false blocks и проверяют, что доменный
-allowlist и модель прав работают, а не просто всё запрещают.
+**We deliberately include tasks that require network access** (`npm ci`) and **writes to source
+files** (`format --write`) — these are exactly the tasks that generate false blocks and verify
+that the domain allowlist and the permission model actually work, rather than just denying
+everything.
 
-## Корпус атак (ASR)
+## Attack Corpus (ASR)
 
-Соответствие карте атак из [03-threat-model.md](03-threat-model.md).
+Maps to the attack catalogue in [03-threat-model.md](03-threat-model.md).
 
-| Класс | Кейсов | Источник класса |
+| Class | Cases | Source of the class |
 |---|---|---|
-| A1 Инъекция в параметр | ~15 | базовый (`;`, `&&`, `$()`, backticks, перевод строки, юникод-омоглифы, нулевой байт) |
-| A2 Path traversal | ~10 | базовый (`../`, абсолютный путь, URL-кодирование, двойное кодирование) |
-| A3 Симлинк-эскейп | ~5 | базовый |
-| A4 PATH hijack | ~3 | базовый |
-| **A5 Атака на IPC-сокет** | ~5 | **спека MCP, «stdio Transport Security in Proxy Scenarios»** |
-| **A6 Rug pull манифеста** | ~5 | **CVE-2025-54136** |
-| **A7 Инъекция в `description`** | ~5 | **tool poisoning / line jumping, Invariant Labs** |
-| **A8 Инъекция в выводе скрипта** | ~8 | **OWASP ASI01** |
-| **A9 Эксфильтрация через postinstall** | ~5 | **OWASP ASI04** |
-| A10 Чтение секретов из ФС | ~8 | базовый |
-| **A11 Запись в persistence-пути** | ~8 | **mandatory deny из sandbox-runtime** |
-| A12 Утечка секретов через env | ~5 | базовый |
-| A13 Runaway / форк-бомба / заливание вывода | ~5 | базовый |
-| **A14 Подделка подтверждения через elicitation** | ~3 | **OWASP ASI09** |
+| A1 Parameter injection | ~15 | baseline (`;`, `&&`, `$()`, backticks, newline, Unicode homoglyphs, null byte) |
+| A2 Path traversal | ~10 | baseline (`../`, absolute path, URL-encoding, double encoding) |
+| A3 Symlink escape | ~5 | baseline |
+| A4 PATH hijack | ~3 | baseline |
+| **A5 IPC socket attack** | ~5 | **MCP spec, "stdio Transport Security in Proxy Scenarios"** |
+| **A6 Manifest rug pull** | ~5 | **CVE-2025-54136** |
+| **A7 Injection into `description`** | ~5 | **tool poisoning / line jumping, Invariant Labs** |
+| **A8 Injection in script output** | ~8 | **OWASP ASI01** |
+| **A9 Exfiltration via postinstall** | ~5 | **OWASP ASI04** |
+| A10 Reading secrets from the filesystem | ~8 | baseline |
+| **A11 Writing to persistence paths** | ~8 | **mandatory deny from sandbox-runtime** |
+| A12 Secret leakage via env | ~5 | baseline |
+| A13 Runaway / fork bomb / output flooding | ~5 | baseline |
+| **A14 Forging confirmation via elicitation** | ~3 | **OWASP ASI09** |
 | A15 Electron IPC / CSP | ~5 | Electron security checklist |
 
-Выделенные шесть классов — прямой результат разведки индустрии, а не наша фантазия.
-Это важный аргумент на демо: корпус растёт от внешних источников, а не от воображения автора.
+The six highlighted classes are a direct result of industry reconnaissance, not our own
+invention. This is an important point for the demo: the corpus grows from external sources, not
+from the author's imagination.
 
-## Правила прогона
+## Run Rules
 
-1. **Baseline обязателен.** Каждый класс атак прогоняется в `sandbox: none` и в `seatbelt`.
-   Без контраста цифра блокировки не интерпретируема.
-2. **Никаких тихих усечений.** Если прогон что-то пропустил (таймаут, недоступная
-   зависимость), это пишется в отчёт явно. Молчаливое сокращение покрытия читается
-   как «покрыли всё».
-3. **Оверхед меряется относительно прямого вызова** того же скрипта, не относительно нуля.
-4. **Атаки исполняются в изолированном демо-репозитории**, эксфильтрация идёт на
-   локальный listener, не на реальный внешний хост.
-5. Прогон — часть CI и одновременно вкладка «Red team» в UI. Одна реализация, два входа.
+1. **A baseline is mandatory.** Every attack class is run under both `sandbox: none` and
+   `seatbelt`. Without the contrast, a block-rate figure is not interpretable.
+2. **No silent truncation.** If a run skips something (timeout, unavailable dependency), that
+   is stated explicitly in the report. Silently shrinking coverage reads as "we covered
+   everything."
+3. **Overhead is measured relative to a direct call** of the same script, not relative to
+   zero.
+4. **Attacks are executed in an isolated demo repository**; exfiltration targets a local
+   listener, not a real external host.
+5. The run is part of CI and, at the same time, the "Red team" tab in the UI. One
+   implementation, two entry points.
 
-## Отчёт
+## Report
 
 ```
 === mcpproxy red-team ===
-Режим: seatbelt          Baseline: none
+Mode: seatbelt             Baseline: none
 
 Utility
-  Легитимных задач:     42
-  Выполнено корректно:  41  (97.6%)
-  Ложных блокировок:     1  (2.4%)   ← format --write в node_modules/.cache
+  Legitimate tasks:      42
+  Completed correctly:   41  (97.6%)
+  False blocks:           1  (2.4%)   ← format --write in node_modules/.cache
 
-Атаки
-  Всего кейсов:         90
-  Заблокировано:        90  (ASR 0.0%)
-  Baseline (none):      31 из 90 прошли (ASR 34.4%)
+Attacks
+  Total cases:            90
+  Blocked:                90  (ASR 0.0%)
+  Baseline (none):        31 of 90 passed (ASR 34.4%)
 
 Utility under Attack:   97.6%
-Overhead p50/p95:       9 мс / 21 мс
-Подтверждений:          3 из 42 вызовов (7.1%)
-Секретов в выводах:     0
-Пропущено кейсов:       0
+Overhead p50/p95:       9 ms / 21 ms
+Confirmations:          3 of 42 calls (7.1%)
+Secrets in output:      0
+Skipped cases:          0
 ```
 
-Именно эта таблица — последний технический слайд демо. Пара `ASR 0.0% / Utility 97.6%`
-и baseline `34.4%` рядом — то, что делает результат осмысленным.
+This table is the last technical slide of the demo. The pair `ASR 0.0% / Utility 97.6%`
+next to the baseline `34.4%` is what makes the result meaningful.

@@ -1,79 +1,79 @@
-# 01 — Постановка и гипотеза
+# 01 — Problem Statement and Hypothesis
 
-## Проблема
+## Problem
 
-ИИ-агент может запускать локальные скрипты: тесты, сборки, бэкапы, анализ логов.
-Но прямой доступ к терминалу даёт модели чрезмерно широкие права и повышает риск:
+An AI agent can run local scripts: tests, builds, backups, log analysis.
+But direct terminal access gives the model excessively broad permissions and increases the risk of:
 
-- инъекции команд;
-- несанкционированного доступа к файлам;
-- утечки секретов;
-- выполнения действий, продиктованных вредоносным содержимым (indirect prompt injection).
+- command injection;
+- unauthorized file access;
+- secret leakage;
+- actions dictated by malicious content (indirect prompt injection).
 
-## Гипотеза
+## Hypothesis
 
-Локальный MCP-прокси, который отдаёт модели **только заранее определённые инструменты**
-и валидирует их параметры, позволит автоматизировать локальные задачи, не выдавая модели
-произвольный shell.
+A local MCP proxy that exposes to the model **only predefined tools**
+and validates their parameters will make it possible to automate local tasks without giving the model
+an arbitrary shell.
 
-## Scope решения
+## Solution scope
 
-1. Локальный MCP-сервер, маппящий инструменты (`run_tests`, `build_project`, `analyze_logs`)
-   на утверждённые скрипты.
-2. **Нет инструмента типа `execute_command`** и нет произвольного текста, уходящего в Bash.
-3. Allowlist бинарей, аргументов, рабочих директорий и сетевых операций.
-4. Валидация параметров и путей до запуска скрипта.
-5. Раздельные права на чтение и запись.
-6. Подтверждение пользователем для удаления данных, публикации, сетевого доступа
-   и прочих высокорисковых действий.
-7. Запуск процессов с минимальными привилегиями, лимитами времени и ограниченным выводом.
-8. Редакция секретов и аудит-лог каждого вызова.
+1. A local MCP server that maps tools (`run_tests`, `build_project`, `analyze_logs`)
+   to approved scripts.
+2. **No `execute_command`-style tool** and no arbitrary text flowing into Bash.
+3. An allowlist of binaries, arguments, working directories, and network operations.
+4. Parameter and path validation before the script is launched.
+5. Separate read and write permissions.
+6. User confirmation for data deletion, publishing, network access,
+   and other high-risk actions.
+7. Running processes with minimal privileges, time limits, and bounded output.
+8. Secret redaction and an audit log for every call.
 
-**Дополнение к исходной постановке:** всё это оформляется как Electron-приложение
-с живыми логами, чтобы наглядно отслеживать что происходит, как и в каких песочницах.
+**Addition to the original statement:** all of this is packaged as an Electron app
+with live logs, so it's easy to see what's happening, how, and in which sandboxes.
 
-## Метрики
+## Metrics
 
-| Метрика | Что означает |
+| Metric | What it means |
 |---|---|
-| % корректно выполненных разрешённых задач | Utility — прокси не мешает работать |
-| Эффективность блокировки инъекций и path traversal | ASR — Attack Success Rate |
-| Количество ложных блокировок | False blocks — цена безопасности |
-| Оверхед прокси | Задержка относительно прямого вызова |
-| Число высокорисковых операций, потребовавших подтверждения | Насколько часто дёргаем человека |
-| Число секретов, утёкших в выводы и логи | Должно быть 0 |
+| % of allowed tasks executed correctly | Utility — the proxy doesn't get in the way |
+| Effectiveness of blocking injections and path traversal | ASR — Attack Success Rate |
+| Number of false blocks | False blocks — the cost of security |
+| Proxy overhead | Latency relative to a direct call |
+| Number of high-risk operations that required confirmation | How often we have to interrupt the human |
+| Number of secrets leaked into output and logs | Should be 0 |
 
-**Utility и ASR всегда показываются в паре.** Защита с ASR = 0 и Utility = 0 — это
-`chmod 000`, а не безопасность. Одна цифра без второй ничего не доказывает.
+**Utility and ASR are always shown together.** A defense with ASR = 0 and Utility = 0 is
+`chmod 000`, not security. One number without the other proves nothing.
 
-## Критерий фальсификации
+## Falsification criterion
 
-Гипотеза считается опровергнутой, если прокси:
+The hypothesis is considered refuted if the proxy:
 
-- обходится через аргументы, пути или вывод инструментов;
-- требует слишком многих исключений для типовых задач;
-- чрезмерно блокирует безопасные действия;
-- **не даёт явного улучшения безопасности по сравнению с прямым вызовом скриптов.**
+- can be bypassed through tool arguments, paths, or output;
+- requires too many exceptions for typical tasks;
+- excessively blocks safe actions;
+- **fails to provide a clear security improvement over calling scripts directly.**
 
-Последний пункт — самый опасный, потому что на него легко ответить самообманом.
-Прямой вызов скрипта не даёт ни песочницы, ни аудита, ни подтверждений — но
-allowlist аргументов без песочницы действительно почти ничего не добавляет.
-См. [05-prior-art.md](05-prior-art.md).
+The last point is the most dangerous, because it's easy to fool yourself about it.
+A direct script call gives you neither a sandbox, nor an audit trail, nor confirmations — but
+an argument allowlist without a sandbox really adds almost nothing.
+See [05-prior-art.md](05-prior-art.md).
 
-## Формулировка новизны
+## Statement of novelty
 
-**Неверно:** «новизна в том, что мы allowlist'им бинари и валидируем параметры».
-Это сделано и лежит на GitHub (см. prior art).
+**Wrong:** "the novelty is that we allowlist binaries and validate parameters."
+That's already been done and is on GitHub (see prior art).
 
-**Верно:** allowlist аргументов защищает от того, **что модель попросит запустить**.
-Он никак не защищает от того, **что запущенный код сделает**. Существующие решения
-останавливаются на первом. Мы делаем второе — и показываем его человеку.
+**Right:** the argument allowlist protects against **what the model asks to run**.
+It does nothing to protect against **what the code that runs actually does**. Existing solutions
+stop at the first. We do the second — and we show it to the human.
 
-## Рамка
+## Framing
 
-Мы **не решаем** prompt injection в общем виде. Мы сводим поверхность атаки к нулю
-там, где раньше был shell. Теоретически это близко к подходу CaMeL
-(control flow извлекается из доверенного запроса, недоверенные данные на него не влияют):
-наш **рецепт — это capability**. Разница в том, что у нас домен узкий (CLI-задачи
-в репозитории), и именно поэтому мы можем добиться в нём результата лучше, чем
-универсальные защиты в широком домене.
+We are **not** solving prompt injection in general. We reduce the attack surface to zero
+in the place where a shell used to be. In theory this is close to the CaMeL approach
+(control flow is extracted from the trusted request, untrusted data cannot influence it):
+our **recipe is a capability**. The difference is that our domain is narrow (CLI tasks
+within a repository), and that's exactly why we can achieve a better result in it than
+general-purpose defenses achieve across a broad domain.

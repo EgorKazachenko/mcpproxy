@@ -1,78 +1,78 @@
-# 05 — Prior art и дифференциация
+# 05 — Prior Art and Differentiation
 
-## Неприятная правда
+## An uncomfortable truth
 
-Первая половина нашего scope уже реализована и лежит на GitHub.
+The first half of our scope has already been implemented and is sitting on GitHub.
 
 ### `tumf/mcp-shell-server`
 
-Самоописание: *«Secure MCP server for whitelisted shell command execution with stdin,
-argv pipelines, timeouts, and structured audit logging»*. Уже есть:
+Self-description: *"Secure MCP server for whitelisted shell command execution with stdin,
+argv pipelines, timeouts, and structured audit logging."* Already has:
 
-- argv-исполнение **без** shell-string интерпретации
-- allowlist команд через переменную окружения
-- изолированное окружение дочернего процесса — не наследует родительский env,
-  только минимальные ключи запуска вроде `PATH`
-- server-side таймауты по умолчанию
-- редиректы, ограниченные рабочей директорией
-- структурированный аудит-лог
-- безопасные пайплайны с валидацией каждого argv-сегмента
+- argv execution **without** shell-string interpretation
+- command allowlist via environment variable
+- isolated child-process environment — doesn't inherit the parent env,
+  only minimal launch keys like `PATH`
+- server-side timeouts by default
+- redirects confined to the working directory
+- structured audit logging
+- safe pipelines with validation of every argv segment
 
 ### `cfdude/mac-shell-mcp`
 
-MCP-сервер для macOS/ZSH со встроенным whitelist и механизмом approval.
+An MCP server for macOS/ZSH with a built-in whitelist and an approval mechanism.
 
-### Категория выше: MCP-гейтвеи
+### One category up: MCP gateways
 
-Другой класс решений — корпоративные гейтвеи между агентами и MCP-серверами:
+A different class of solution — enterprise gateways between agents and MCP servers:
 [Docker MCP Gateway](https://www.docker.com/blog/docker-mcp-gateway-secure-infrastructure-for-agentic-ai/),
 [ToolHive](https://github.com/stacklok/toolhive), MCPX (Lunar.dev), Obot, Lasso, mcp-firewall,
 [Invariant Guardrails](https://invariantlabs.ai/blog/introducing-mcp-scan).
-Они решают задачу «много агентов × много MCP-серверов × RBAC/SSO/аудит» — это не наша задача.
-Мы решаем «один разработчик, локальные скрипты, наглядность».
+They solve the "many agents × many MCP servers × RBAC/SSO/audit" problem — that's not our problem.
+We solve "one developer, local scripts, observability."
 
-## Что это значит
+## What this means
 
-**Формулировка «новизна в том, что мы allowlist'им бинари и валидируем параметры»
-больше не проходит.** Это сделано.
+**The claim "our novelty is that we allowlist binaries and validate parameters"
+no longer holds.** That's already been done.
 
-Более того, это честный удар по нашему же критерию фальсификации: allowlist аргументов
-без песочницы даёт мало улучшения относительно прямого вызова скрипта, потому что
-не защищает от того, что запущенный код сделает.
+Moreover, this is a genuine hit against our own falsification criterion: allowlisting
+arguments without a sandbox gives little improvement over calling a script directly,
+because it doesn't protect against what the executed code actually does.
 
-## Где мы реально отличаемся
+## Where we actually differ
 
-| Возможность | mcp-shell-server | MCP-гейтвеи | mcpproxy |
+| Capability | mcp-shell-server | MCP gateways | mcpproxy |
 |---|---|---|---|
-| argv-only, allowlist, таймауты | ✅ | ✅ | ✅ |
-| Изоляция env дочернего процесса | ✅ | ◐ | ✅ |
-| **ОС-песочница (FS + сеть на уровне ядра)** | ❌ | ◐ контейнеры | ✅ seatbelt |
-| **Риск-тиры на стандартных MCP-аннотациях** | ❌ | ◐ | ✅ |
-| **Out-of-band подтверждения вне контекста модели** | ❌ | ❌ | ✅ |
-| **Редакция секретов in + out** | ❌ | ✅ Docker | ✅ |
-| **Tamper-evident аудит (hash-chain)** | обычный лог | обычный лог | ✅ |
-| **Lock-файл манифеста против rug pull** | ❌ | ◐ signature verify | ✅ |
-| **Визуальный контур наблюдения в реальном времени** | ❌ | ◐ дашборды | ✅ Electron |
-| **Собственный red-team корпус и публикуемые метрики** | ❌ | ❌ | ✅ |
-| Ориентация | сервер | инфраструктура/энтерпрайз | локальный разработчик |
+| argv-only, allowlist, timeouts | ✅ | ✅ | ✅ |
+| Child-process env isolation | ✅ | ◐ | ✅ |
+| **OS-level sandbox (FS + network at kernel level)** | ❌ | ◐ containers | ✅ seatbelt |
+| **Risk tiers built on standard MCP annotations** | ❌ | ◐ | ✅ |
+| **Out-of-band confirmations outside the model's context** | ❌ | ❌ | ✅ |
+| **Secret redaction in + out** | ❌ | ✅ Docker | ✅ |
+| **Tamper-evident audit (hash-chain)** | plain log | plain log | ✅ |
+| **Manifest lock file against rug pull** | ❌ | ◐ signature verify | ✅ |
+| **Real-time visual observability surface** | ❌ | ◐ dashboards | ✅ Electron |
+| **Own red-team corpus with published metrics** | ❌ | ❌ | ✅ |
+| Orientation | server | infrastructure/enterprise | local developer |
 
-## Тезис для демо
+## Demo thesis
 
-> Allowlist аргументов защищает от того, **что модель попросит запустить**.
-> Он никак не защищает от того, **что запущенный код сделает**.
-> Существующие решения останавливаются на первом.
-> Мы делаем второе — и показываем его человеку.
+> Argument allowlisting protects against **what the model asks to run**.
+> It does nothing to protect against **what the executed code does**.
+> Existing solutions stop at the first.
+> We do the second — and show it to the human.
 
-## Ответ на критерий фальсификации
+## Answer to the falsification criterion
 
-*«Не даёт явного улучшения по сравнению с прямым вызовом скриптов»* —
-прямой вызов скрипта не даёт:
+*"Does not provide a clear improvement over calling scripts directly"* —
+calling a script directly does not give you:
 
-- ОС-изоляции ФС и сети,
-- проверяемого аудита,
-- подтверждений на высокорисковых операциях,
-- редакции секретов,
-- защиты от подмены самого скрипта между вызовами.
+- OS-level filesystem and network isolation,
+- verifiable audit,
+- confirmations on high-risk operations,
+- secret redaction,
+- protection against the script itself being swapped between calls.
 
-Baseline-режим `sandbox: none` в демо существует именно для того, чтобы это можно было
-не утверждать, а показать.
+The `sandbox: none` baseline mode exists in the demo precisely so that this
+doesn't have to be asserted — it can be shown.

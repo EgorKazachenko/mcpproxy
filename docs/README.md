@@ -1,43 +1,43 @@
-# mcpproxy — документация
+# mcpproxy — documentation
 
-Безопасный локальный MCP-прокси для CLI-скриптов + Electron-контур наблюдения.
+A secure local MCP proxy for CLI scripts + an Electron observation layer.
 
-Модель даёт задачу («прогони тесты»), прокси решает **что именно** запустить, ОС решает
-**что запущенное может сделать**, человек видит и то и другое в реальном времени.
+The model gives a task ("run the tests"), the proxy decides **exactly what** to run, the OS
+decides **what the running process can do**, and a human sees both in real time.
 
-## Карта документов
+## Document map
 
-| № | Документ | О чём |
+| # | Document | About |
 |---|---|---|
-| 01 | [Постановка и гипотеза](01-problem.md) | Проблема, гипотеза, scope, критерий фальсификации |
-| 02 | [Архитектура](02-architecture.md) | Топология, компоненты, инварианты, потоки данных |
-| 03 | [Модель угроз](03-threat-model.md) | Карта атак, что чем ловим, соответствие OWASP ASI |
-| 04 | [Разведка индустрии](04-research-findings.md) | Находки из спек, CVE, исследований, инструментов |
-| 05 | [Prior art](05-prior-art.md) | Существующие решения и наша дифференциация |
-| 06 | [Эпики](06-epics.md) | Нарезка работ, зависимости, параллелизация |
-| 07 | [Контракты](07-contracts.md) | Схема манифеста, схема событий, инварианты API |
-| 08 | [Демо-сценарии](08-demo-scenarios.md) | Что показываем, в каком порядке, что говорим |
-| 09 | [Метрики и оценка](09-metrics-and-eval.md) | Red-team корпус, метрики, методология |
-| 10 | [Честные границы](10-honest-limitations.md) | Что мы **не** защищаем и почему |
+| 01 | [Problem statement and hypothesis](01-problem.md) | Problem, hypothesis, scope, falsification criterion |
+| 02 | [Architecture](02-architecture.md) | Topology, components, invariants, data flows |
+| 03 | [Threat model](03-threat-model.md) | Attack map, what catches what, OWASP ASI mapping |
+| 04 | [Industry research](04-research-findings.md) | Findings from specs, CVEs, research, tools |
+| 05 | [Prior art](05-prior-art.md) | Existing solutions and our differentiation |
+| 06 | [Epics](06-epics.md) | Work breakdown, dependencies, parallelization |
+| 07 | [Contracts](07-contracts.md) | Manifest schema, event schema, API invariants |
+| 08 | [Demo scenarios](08-demo-scenarios.md) | What we show, in what order, what we say |
+| 09 | [Metrics and evaluation](09-metrics-and-eval.md) | Red-team corpus, metrics, methodology |
+| 10 | [Honest limitations](10-honest-limitations.md) | What we **do not** protect against, and why |
 
-## ADR — зафиксированные решения
+## ADR — recorded decisions
 
-| ADR | Решение |
+| ADR | Decision |
 |---|---|
-| [0001](adr/0001-shim-daemon-split.md) | Разделение shim / daemon / UI вместо монолитного Electron |
-| [0002](adr/0002-sandbox-runtime.md) | Seatbelt через `@anthropic-ai/sandbox-runtime`, не свои SBPL |
-| [0003](adr/0003-otel-event-schema.md) | Схема событий совместима с OpenTelemetry GenAI |
-| [0004](adr/0004-mcp-tool-annotations.md) | Риск-тиры на стандартных MCP tool annotations |
-| [0005](adr/0005-dual-channel-approvals.md) | Двухканальные подтверждения: elicitation + out-of-band |
-| [0006](adr/0006-manifest-lockfile.md) | Lock-файл манифеста против rug pull |
-| [0007](adr/0007-network-domain-allowlist.md) | Доменный allowlist сети вместо бинарного deny |
+| [0001](adr/0001-shim-daemon-split.md) | Split shim / daemon / UI instead of a monolithic Electron app |
+| [0002](adr/0002-sandbox-runtime.md) | Seatbelt via `@anthropic-ai/sandbox-runtime`, not our own SBPL |
+| [0003](adr/0003-otel-event-schema.md) | Event schema compatible with OpenTelemetry GenAI |
+| [0004](adr/0004-mcp-tool-annotations.md) | Risk tiers based on standard MCP tool annotations |
+| [0005](adr/0005-dual-channel-approvals.md) | Dual-channel approvals: elicitation + out-of-band |
+| [0006](adr/0006-manifest-lockfile.md) | Manifest lock file against rug pull |
+| [0007](adr/0007-network-domain-allowlist.md) | Network domain allowlist instead of a binary deny |
 
-## Презентации
+## Presentations
 
-Скилл `/mcpproxy-deck` собирает из этих документов слайд-деки:
-архитектуру, разбор любого демо-сценария, таблицы сравнения, карту покрытия,
-честные выводы. Документы — источник истины, деки — производные.
+The `/mcpproxy-deck` skill builds slide decks from these documents:
+architecture, a walkthrough of any demo scenario, comparison tables, a coverage map,
+honest conclusions. The documents are the source of truth, the decks are derived.
 
-## Статус
+## Status
 
-Проектирование завершено, разведка индустрии проведена. Следующий шаг — E0 (контракты).
+Design is complete, industry research has been done. The next step is E0 (contracts).

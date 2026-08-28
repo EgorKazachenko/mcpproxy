@@ -1,46 +1,47 @@
-# ADR-0007 — Доменный allowlist сети вместо бинарного deny
+# ADR-0007 — Network domain allowlist instead of a binary deny
 
-**Статус:** принято · 2026-08-27
+**Status:** accepted · 2026-08-27
 
-## Контекст
+## Context
 
-Исходно планировалось `network: none` — бинарный запрет сети для дочернего процесса.
+The original plan was `network: none` — a binary network ban for the child process.
 
-## Проблема
+## Problem
 
-Половина легитимных задач требует сети: `npm ci` идёт в registry, сборка тянет зависимости.
-Жёсткий deny сгенерирует гору false blocks — а это одна из метрик, по которым нас судят,
-и один из пунктов критерия фальсификации («чрезмерно блокирует безопасные действия»).
+Half of legitimate tasks need network access: `npm ci` hits the registry, builds pull
+dependencies. A hard deny generates a mountain of false blocks — and that's one of the metrics
+we're judged on, and one of the falsification criteria's own points ("blocks safe actions too
+aggressively").
 
-## Что делает индустрия
+## What the industry does
 
-ToolHive поднимает вокруг MCP-сервера egress-прокси + контейнер DNS + ingress-прокси;
-трафик разрешён только к хостам из permission profile. `sandbox-runtime` делает то же
-прокси на хосте: HTTP-прокси для HTTP/HTTPS, SOCKS5 для остального TCP, seatbelt-профиль
-разрешает соединения только на localhost-порты прокси. Паттерн один и тот же.
+ToolHive wraps an MCP server with an egress proxy + container DNS + ingress proxy;
+traffic is allowed only to hosts from the permission profile. `sandbox-runtime` does the same
+proxy on the host: an HTTP proxy for HTTP/HTTPS, SOCKS5 for the rest of TCP, and a seatbelt
+profile that allows connections only to the proxy's localhost ports. It's the same pattern.
 
-## Решение
+## Decision
 
 ```yaml
 sandbox:
   network:
-    allow: ["registry.npmjs.org", "*.github.com"]   # список доменов, не bool
+    allow: ["registry.npmjs.org", "*.github.com"]   # a list of domains, not a bool
 ```
 
-Deny-by-default сохраняется: пустой `allow` = сети нет.
+Deny-by-default is preserved: an empty `allow` means no network.
 
-## Бонус для UI
+## Bonus for the UI
 
-Прокси видит **каждую попытку соединения, включая заблокированные**.
-В таймлайне показываем не «сеть запрещена», а «процесс стучался на `evil.io:443`,
-отказано, 0 байт» — с доменом, временем и объёмом.
+The proxy sees **every connection attempt, including blocked ones**.
+In the timeline we don't show "network denied" — we show "process reached out to
+`evil.io:443`, denied, 0 bytes" — with domain, timestamp, and volume.
 
-## Последствия
+## Consequences
 
-- ✅ Резко меньше false blocks на реальных задачах
-- ✅ Наглядность в UI на порядок выше бинарного запрета
-- ⚠️ Фильтрация по доменам, не по содержимому: разрешил `github.com` → можно запушить
-  данные в свой репозиторий
-- ⚠️ Domain fronting технически обходит
-- ⚠️ Широкий allowlist убивает смысл. В UI помечаем рецепты со слишком широкими
-  правилами (`*` в домене) как ослабленные
+- ✅ Sharply fewer false blocks on real tasks
+- ✅ Far better visibility in the UI than a binary ban
+- ⚠️ Filtering is by domain, not content: allow `github.com` and you can still push
+  data to your own repo
+- ⚠️ Domain fronting technically bypasses it
+- ⚠️ A broad allowlist defeats the purpose. In the UI we flag recipes with overly broad
+  rules (`*` in the domain) as weakened

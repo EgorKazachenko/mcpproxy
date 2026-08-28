@@ -1,53 +1,54 @@
-# ADR-0006 — Lock-файл манифеста
+# ADR-0006 — Manifest lock file
 
-**Статус:** принято · 2026-08-27 · повышен до обязательного
+**Status:** accepted · 2026-08-27 · upgraded to mandatory
 
-## Контекст
+## Context
 
-`mcpproxy.yaml` лежит в репозитории проекта. Исходно считался доверенным.
+`mcpproxy.yaml` lives in the project repository. It was originally considered trusted.
 
-## Почему это неверно
+## Why that's wrong
 
-Репозиторий может быть изменён PR'ом, зависимостью, или **самой моделью через другой
-инструмент**. Одобрил рецепт вчера — сегодня он делает другое.
+The repository can be changed by a PR, a dependency, or **the model itself through another
+tool**. Approve a recipe today — it does something else tomorrow.
 
-Это не гипотеза. Invariant Labs описали класс **rug pull**: сервер меняет описание
-инструмента после одобрения пользователем. По публикациям, **CVE-2025-54136 (CVSS 8.8)**
-подтвердила, что одобрение определения инструмента не переживает изменение на стороне сервера.
-Общая структурная причина класса — клиенты наследуют доверие к серверам без непрерывной
-верификации.
+This isn't hypothetical. Invariant Labs described a class of attack called the **rug pull**:
+a server changes a tool's description after the user has approved it. According to published
+reports, **CVE-2025-54136 (CVSS 8.8)** confirmed that approving a tool definition doesn't survive
+a change on the server side. The general structural cause of this class is that clients inherit
+trust in servers without continuous verification.
 
-## Решение
+## Decision
 
-`mcpproxy.lock` уровня **манифеста целиком**, а не только отдельных рецептов.
+`mcpproxy.lock` at the level of the **whole manifest**, not just individual recipes.
 
-Нормализованное представление рецепта хранит две стороны. `own` — собственный блок
-(`exec`, `cwd`, схемы параметров **в объявленном порядке**, аннотации, `description`,
-собственные `sandbox`/`timeout`/`env`/`output`); по нему и считается `recipeHash`.
-`effective` — `defaults`, слитый с блоком рецепта; он лежит в снапшоте ради диффа и
-**не хэшируется**, иначе расширение `defaults` разъехало бы хэши всех рецептов разом.
-Порядок параметров входит в форму, потому что из него собирается argv; порядок рецептов —
-нет, они адресуются по имени.
+The normalized representation of a recipe holds two sides. `own` is the recipe's own block
+(`exec`, `cwd`, parameter schemas **in declared order**, annotations, `description`, its own
+`sandbox`/`timeout`/`env`/`output`); `recipeHash` is computed over this. `effective` is
+`defaults` merged with the recipe's block; it's kept in the snapshot for diffing and is
+**not hashed** — otherwise extending `defaults` would shift every recipe's hash at once.
+Parameter order is part of the form because argv is built from it; recipe order is not,
+since recipes are addressed by name.
 
-Плюс `manifestHash` и нормализованные `defaults` в самом lock: правка `defaults.env.allow`
-или опустошённый `defaults.sandbox.read.deny` не меняют ни одного объекта рецепта, все
-пер-рецептные хэши совпадают, и без этого подмена прошла бы молча.
+Plus `manifestHash` and normalized `defaults` in the lock itself: editing `defaults.env.allow`
+or emptying `defaults.sandbox.read.deny` changes no recipe object at all, every per-recipe hash
+still matches, and without this the tampering would go through silently.
 
-Плюс **снапшот** нормализованного рецепта в каждой записи: SHA-256 необратим, и без него
-сторону «было» для диффа построить не из чего. Дифф различает добавленный рецепт, удалённый,
-изменённый и изменение `defaults` — четыре отдельных слота, чтобы одна правка `defaults`
-не размножалась по всем рецептам в модалке.
+Plus a **snapshot** of the normalized recipe in every entry: SHA-256 is irreversible, and without
+the snapshot there's nothing to build the "before" side of a diff from. The diff distinguishes an
+added recipe, a removed one, a changed one, and a change to `defaults` — four separate slots, so
+that a single `defaults` edit doesn't fan out across every recipe in the modal.
 
-Расхождение → **жёсткий стоп** на стадии `lock_check` (`verdict: denied`) + модалка с
-**диффом «было / стало»**, показанным целиком.
+A mismatch → a **hard stop** at the `lock_check` stage (`verdict: denied`) plus a modal showing
+the full **before/after diff**.
 
-Зеркальная мера: мы сами генерируем описания инструментов из манифеста, поэтому неуязвимы
-к poisoning от чужого сервера — **зато манифест становится каналом инъекции в нашу же модель**.
-Санитизация `description` при генерации `tools/list` обязательна.
+A mirror-image concern: we generate tool descriptions from the manifest ourselves, so we're
+immune to poisoning from someone else's server — **but that makes the manifest itself an
+injection channel into our own model**. Sanitizing `description` when generating `tools/list`
+is mandatory.
 
-## Последствия
+## Consequences
 
-- ✅ Закрывает реальный класс с подтверждённой CVE
-- ✅ Сильный демо-момент: правим манифест на сцене → следующий вызов встаёт с диффом
-- ⚠️ Защищает от тихой подмены, не от невнимательного нажатия «одобрить»
-- ⚠️ Требует дисциплины: легитимное изменение манифеста тоже требует апрува
+- ✅ Closes a real attack class with a confirmed CVE
+- ✅ A strong demo moment: edit the manifest live → the next call stops with a diff
+- ⚠️ Protects against silent tampering, not against a careless "approve" click
+- ⚠️ Requires discipline: a legitimate manifest change also requires approval
