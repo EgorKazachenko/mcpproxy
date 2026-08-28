@@ -17,7 +17,7 @@ Scope — a vertical slice + red-team (not a full product).
 | **E5** | Approvals: risk tiers from annotations, broker, TTL/scope, dual-channel (elicitation + Electron), headless = deny | E4, E7 | ❌ late |
 | **E6** | Secrets and audit: env allowlist, bidirectional redaction (rules from Secrets-Patterns-DB + entropy), hash-chain JSONL, export | E0 | ✅ |
 | **E7** | Electron UI: timeline, call details, sandbox violations panel, policy viewer with annotation badges, approvals inbox | E0 (on mocked events) | ✅ |
-| **E8** | Bench / red-team: legitimate-task corpus and attack corpus, ASR + Utility under Attack metrics, overhead measurement | E4 e2e | ❌ late |
+| **E8** | Bench / red-team: legitimate-task corpus and attack corpus, ASR + Utility under Attack metrics, overhead measurement | E4 e2e | ✅ done — `packages/bench` |
 | **E9** | Hardening (including Electron checklist), packaging, demo repo and scenario | everything | ❌ |
 
 ## Critical path
