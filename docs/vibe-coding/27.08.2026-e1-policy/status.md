@@ -4,7 +4,7 @@
 - branch: `v2/e1-policy`
 - mode: attended
 - track: full
-- codeTree: `5cb79aae92b2`
+- codeTree: `373e57650ab9`
 - kill-review due: 2026-10-26
 - handoff: prompt recorded, no carrier spawned (attended) — SessionStart re-injects it after /clear
 
