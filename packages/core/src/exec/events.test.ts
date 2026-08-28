@@ -163,6 +163,38 @@ describe('изоляция вендора в графе деклараций (R1
     expect(bare.filter((one) => one.includes('sandbox-runtime'))).toEqual([]);
   });
 
+  /**
+   * Второй вход пакета — чистая половина E3 (`@mcpproxy/core/exec-pure`).
+   *
+   * Помодульная чистота, которую обещают `netpolicy.ts` и `violation.ts`, на КОРНЕВОМ входе
+   * неверна: он тянет `createSandbox`, тот — режимы, режимы — вендорский SDK. Значит E7,
+   * импортирующий `isWeakened` ради бейджа, грузил бы `@anthropic-ai/sandbox-runtime` на
+   * любой платформе. Граница держится входом, как у `./audit` и `./pure` соседних эпиков.
+   */
+  it('вход ./exec-pure не тянет вендора в граф деклараций', () => {
+    const pureEntry = resolve(packageRoot, 'dist', 'exec', 'pure.d.ts');
+    expect(existsSync(pureEntry)).toBe(true);
+
+    const seen = new Set<string>();
+    const bare = new Set<string>();
+    const queue = [pureEntry];
+    while (queue.length > 0) {
+      const file = queue.pop();
+      if (file === undefined || seen.has(file) || !existsSync(file)) continue;
+      seen.add(file);
+      for (const specifier of specifiersOf(readFileSync(file, 'utf8'))) {
+        if (!specifier.startsWith('.')) {
+          bare.add(specifier);
+          continue;
+        }
+        queue.push(resolve(dirname(file), specifier.replace(/\.js$/, '.d.ts')));
+      }
+    }
+
+    expect(seen.size).toBeGreaterThan(3);
+    expect([...bare].filter((one) => one.includes('sandbox-runtime'))).toEqual([]);
+  });
+
   it('а вот в модулях режимов вендор ЕСТЬ — иначе проверка выше ничего не значила бы', () => {
     // Граница проходит по достижимости из входа, а не по отсутствию вендора в пакете. Если
     // бы его не было нигде, отрицание выше держалось бы ни на чём.

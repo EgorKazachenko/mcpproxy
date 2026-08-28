@@ -1,0 +1,11 @@
+{
+  "gate": "review-internal",
+  "status": "waived",
+  "waived_by": "agent-recorded",
+  "reason": "Три файла вне ревью, все без продакшн-логики: audit/index.ts (баррель по находке B2 этого же ревью) и redact/{secret-samples,repo-clean.test}.ts — сборщик фикстур и страж, добавленные после красного GitGuardian. Продакшн-код (log/engine/output/build/export) не менялся, находки ревью на него по-прежнему распространяются. Решение владельца 28.08.2026.",
+  "codeTree": "48826c26b24c52a0005dd05a99f81a84dfeaa839",
+  "codeDirty": false,
+  "headSha": "98eaa85f3fa45e13d5b2ec6550afb6a9e32a1987",
+  "startedAt": "2026-08-27T22:47:08.248Z",
+  "artifacts": []
+}

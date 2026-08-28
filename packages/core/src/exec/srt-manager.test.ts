@@ -106,7 +106,12 @@ describe('redactUrlForTarget', () => {
   it('роняет userinfo вместе с origin', () => {
     // `URL.origin` не содержит `user:pass@`, поэтому пара учётных данных в самом URL тоже
     // не доезжает — это то же свойство, на которое опирается вендор.
-    expect(redactUrlForTarget('https://user:пароль@api.example.com/x')).toBe('https://api.example.com/x');
+    //
+    // Фикстура собрана из частей, а не литералом: строка этой формы поднимает сканеры
+    // секретов, включая наш собственный (`redact/repo-clean.test.ts`). Идиома — из корпуса
+    // E6 (`redact/secret-samples.ts`): такой строки на диске просто не существует.
+    const withUserinfo = ['https://user', ':', 'пароль', '@', 'api.example.com/x'].join('');
+    expect(redactUrlForTarget(withUserinfo)).toBe('https://api.example.com/x');
   });
 
   it('на неразбираемом URL режет всё после вопросительного знака, а не рискует', () => {

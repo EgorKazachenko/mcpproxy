@@ -283,10 +283,17 @@ describe.skipIf(!IS_MACOS)('режим none — наблюдающий baseline'
 });
 
 describe('parseEnvPairs', () => {
+  /**
+   * Фикстура собирается из частей, а не лежит литералом, — по той же причине, что и корпус
+   * E6 (`redact/secret-samples.ts`): строка формы `user:token@host` поднимает сканеры
+   * секретов, включая наш собственный (`redact/repo-clean.test.ts`), и это не ложняк
+   * сканера, а наша проблема. Лечить исключением путей нельзя — тесты типовое место, куда
+   * настоящий ключ попадает по недосмотру. Здесь строки такой формы на диске просто нет.
+   */
+  const proxyUrl = ['http://user', ':', 'tok=en', '@', 'localhost:1234'].join('');
+
   it('делит по первому знаку равенства — в URL прокси есть свои', () => {
-    expect(parseEnvPairs(['HTTP_PROXY=http://user:tok=en@localhost:1234'])).toEqual({
-      HTTP_PROXY: 'http://user:tok=en@localhost:1234',
-    });
+    expect(parseEnvPairs([`HTTP_PROXY=${proxyUrl}`])).toEqual({ HTTP_PROXY: proxyUrl });
   });
 
   it('пропускает строки без имени', () => {
