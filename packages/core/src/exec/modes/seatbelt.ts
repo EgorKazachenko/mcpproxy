@@ -3,13 +3,13 @@ import type { FilesystemConfig, SandboxRuntimeConfig } from '@anthropic-ai/sandb
 import type { NormalizedDefaults, SandboxMode, SandboxViolation } from '@mcpproxy/contracts';
 import { buildEnv } from '../env.js';
 import type { ExecEvent, EventSink } from '../events.js';
-import { measure, measureAsync } from '../events.js';
+import { measure } from '../events.js';
 import { DEFAULT_GRACE_MS, runProcess, toStreamOutcome } from '../limits.js';
 import type { ProcessLimits } from '../limits.js';
 import { assertDomainPatterns } from '../netpolicy.js';
-import { buildProfile, mandatoryDenyGlobs, policyHash, resolveProfilePath, toSandboxProfile } from '../profile.js';
+import { buildProfile, policyHash, toSandboxProfile } from '../profile.js';
 import type { ResolvedSandboxPolicy } from '../profile.js';
-import { srt } from '../srt-manager.js';
+import { DISPOSED_MESSAGE, srt } from '../srt-manager.js';
 import type { NetworkPolicy } from '../srt-manager.js';
 import type { ExecOutcome, ExecRequest, Sandbox } from '../sandbox.js';
 import type { ClassifyPolicy } from '../violation.js';
@@ -139,8 +139,7 @@ export async function runInMode(
 
   // Стадия 2 — профиль. `sandbox.profile` — **сырой** `SandboxProfile` манифеста (R36), а
   // `mode` обязателен всегда, когда присутствует `sandbox` (R33).
-  const writeRoots = effective.sandbox.write.allow;
-  const profile = measure(() => buildProfile(effective.sandbox, writeRoots, request.recipeCwd));
+  const profile = measure(() => buildProfile(effective.sandbox, request.recipeCwd));
   emit({
     stage: 'build_profile',
     durationUs: profile.durationUs,
@@ -152,7 +151,11 @@ export async function runInMode(
   assertDomainPatterns(effective.sandbox.network.allow, effective.sandbox.network.deny);
 
   const classify: ClassifyPolicy = {
-    mandatoryPaths: mandatoryDenyGlobs(writeRoots.map((one) => resolveProfilePath(one, request.recipeCwd))),
+    // ТА ЖЕ величина, что уехала в `write.deny` профиля, а не посчитанная второй раз по
+    // независимо собранному входу: два счёта разошлись бы молча, и бейдж S6 перестал бы
+    // соответствовать реальной политике — а тест классификации строит `mandatoryPaths`
+    // руками и такого расхождения не увидел бы.
+    mandatoryPaths: profile.value.mandatory,
     // `realpathSync.native` инжектируется здесь, а не зовётся из `violation.ts`: иначе
     // модуль грамматики был бы нечист, а его тест требовал бы настоящих путей на диске.
     resolvePath: (path) => realpathSync.native(path),
@@ -177,12 +180,41 @@ export async function runInMode(
       });
     },
     body: async () => {
-      const argv = await behaviour.toArgv(request, profile.value);
-      const spawned = await measureAsync(() =>
-        runProcess(argv, limitsFor(effective, env.value, request.recipeCwd)),
-      );
-      emit({ stage: 'spawn', durationUs: spawned.durationUs, sandbox: { mode: behaviour.mode } });
-      return { value: spawned.value, groupDrained: spawned.value.groupDrained };
+      // Событие стадии `spawn` отправляется, как только ребёнок запущен, а НЕ после того,
+      // как он отработал. Причин две, и обе жёсткие.
+      //
+      // Порядок: нарушения стримятся, пока процесс жив (R29), а замороженный `stageOrder`
+      // (`domain.ts:26-40`) кладёт `spawn` перед `violation`. Событие после выхода дало бы
+      // потребителю `violation` раньше `spawn` — S5 отрисовал бы нарушение процесса, о
+      // запуске которого лог ещё не сказал.
+      //
+      // Полнота: если `toArgv` или сам `spawn` бросили (нет `exec[0]` на диске, нет
+      // оболочки), стадия обязана оставить событие всё равно — «событие на каждой стадии,
+      // включая отказ» (R32).
+      const started = process.hrtime.bigint();
+      const emitSpawn = (): void => {
+        emit({
+          stage: 'spawn',
+          durationUs: Number((process.hrtime.bigint() - started) / 1_000n),
+          sandbox: { mode: behaviour.mode },
+        });
+      };
+
+      let spawnEmitted = false;
+      try {
+        const argv = await behaviour.toArgv(request, profile.value);
+        const raw = await runProcess(argv, {
+          ...limitsFor(effective, env.value, request.recipeCwd),
+          onSpawn: () => {
+            spawnEmitted = true;
+            emitSpawn();
+          },
+        });
+        return { value: raw, groupDrained: raw.groupDrained };
+      } catch (error) {
+        if (!spawnEmitted) emitSpawn();
+        throw error;
+      }
     },
   });
 
@@ -194,13 +226,16 @@ export async function runInMode(
     stderr: toStreamOutcome(raw.stderr),
     violations: result.violations,
     violationsLost: result.violationsLost,
-    attributionMismatches: result.attributionMismatches,
+    attributionMissing: result.attributionMissing,
+    attributionForeign: result.attributionForeign,
+    unrecognizedLines: result.unrecognizedLines,
+    suppressedLines: result.suppressedLines,
+    consumerFailures: result.consumerFailures,
     policyHash: policyHash(profile.value, network),
   };
 }
 
 export function createSeatbeltSandbox(): Sandbox {
-  srt.retain();
   const behaviour: ModeBehaviour = {
     mode: MODE,
     // В `seatbelt` прокси-переменные вшиты srt прямо в строку команды (факт Ф7:
@@ -224,23 +259,39 @@ export function createSeatbeltSandbox(): Sandbox {
     },
   };
 
-  return {
-    mode: MODE,
-    run: (request, onViolation, onEvent) => runInMode(behaviour, request, onViolation, onEvent),
-    dispose: onceDispose(),
-  };
+  return makeSandbox(behaviour);
 }
 
 /**
- * Своя ссылка отпускается **один раз**, сколько бы раз ни позвали `dispose()`. Иначе одна
+ * Обвязка жизненного цикла, общая для обоих режимов.
+ *
+ * Флаг «эта песочница мертва» живёт **здесь, в экземпляре**, а не в синглтоне, и различие
+ * несущее (R50). Требование — чтобы `run()` бросал у **освобождённой** песочницы: вызов
+ * после `dispose()` пошёл бы со старым конфигом и `getProxyPort() === undefined`, то есть
+ * сеть оказалась бы тихо открыта в `none` и тихо мертва в `seatbelt`.
+ *
+ * Процессным этот флаг делать нельзя: тогда E5, освободив обе песочницы после демо, не смог
+ * бы переключить режим на слайде S5 — `createSandbox` бросал бы до конца жизни процесса, а
+ * `reset()` у srt чистит `initializationPromise`, и переподъём совершенно безопасен.
+ *
+ * Ссылка отпускается **один раз**, сколько бы раз ни позвали `dispose()`: иначе одна
  * песочница, освобождённая дважды, увела бы счётчик ниже нуля и утащила бы за собой чужой
  * прокси — а прокси один на демон.
  */
-export function onceDispose(): () => Promise<void> {
-  let released = false;
-  return async () => {
-    if (released) return;
-    released = true;
-    await srt.dispose();
+export function makeSandbox(behaviour: ModeBehaviour): Sandbox {
+  srt.retain();
+  let disposed = false;
+
+  return {
+    mode: behaviour.mode,
+    run: async (request, onViolation, onEvent) => {
+      if (disposed) throw new Error(DISPOSED_MESSAGE);
+      return runInMode(behaviour, request, onViolation, onEvent);
+    },
+    dispose: async () => {
+      if (disposed) return;
+      disposed = true;
+      await srt.dispose();
+    },
   };
 }

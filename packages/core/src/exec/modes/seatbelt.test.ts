@@ -219,7 +219,10 @@ describe.skipIf(!IS_MACOS)('seatbelt под настоящей песочниц�
       expect(violations.filter((one) => one.action === 'denied')).toHaveLength(250);
       expect(outcome.violations).toHaveLength(250);
       expect(outcome.violationsLost).toBe(0);
-      expect(outcome.attributionMismatches).toBe(0);
+      expect(outcome.attributionForeign).toBe(0);
+      // Ключ атрибуции у отказов прокси есть всегда — он приезжает из имени пользователя,
+      // а не из чанка `log stream`, поэтому здесь ноль пропусков ожидаем, а не терпим.
+      expect(outcome.attributionMissing).toBe(0);
     });
 
     /**
@@ -332,6 +335,62 @@ describe.skipIf(!IS_MACOS)('seatbelt под настоящей песочниц�
       );
 
       expect(seenWhileAlive).toBe(true);
+    });
+
+    /**
+     * `stageOrder` (`domain.ts:26-40`) кладёт `spawn` ДЕВЯТЫМ, а `violation` десятым.
+     * Событие `spawn`, отправленное после выхода процесса, инвертировало бы этот порядок:
+     * нарушения стримятся, пока процесс жив (R29), поэтому потребитель получил бы
+     * `violation` раньше `spawn` — и S5 отрисовал бы нарушение процесса, о запуске которого
+     * лог ещё не сказал.
+     */
+    it('spawn приезжает РАНЬШЕ первого violation, а не после выхода процесса', async () => {
+      const { events } = await run(readDenied, `cat '${join(fixture, 'secret.txt')}' 2>/dev/null; sleep 1`);
+      const stages = events.map((one) => one.stage);
+
+      expect(stages).toContain('spawn');
+      expect(stages).toContain('violation');
+      expect(stages.indexOf('spawn')).toBeLessThan(stages.indexOf('violation'));
+    });
+
+    /**
+     * Цепочка от строки лога до колбэка потребителя **синхронна**: обработчик `data` на
+     * stdout вендорского `log stream` → `addViolation` → `notifyListeners` → наш слушатель →
+     * колбэк E4. Обработчик `data` у вендора без `try`, а необработанное исключение в
+     * слушателе потока роняет процесс. То есть дефектный колбэк потребителя убивал бы демон
+     * — и вместе с ним остальные нарушения из того же уведомления.
+     */
+    it('бросок колбэка потребителя не роняет демон, а считается (R29)', async () => {
+      const { effective } = normalizeRecipe(readDenied, DEFAULTS);
+      const outcome = await sandbox.run(
+        {
+          recipeName: asRecipeName('probe'),
+          command: ['/bin/sh', '-c', `cat '${join(fixture, 'secret.txt')}' 2>/dev/null; echo жив`],
+          recipeCwd: fixture,
+          effective,
+          commandId: newCommandId(),
+        },
+        () => {
+          throw new Error('дефектный потребитель');
+        },
+      );
+
+      // Вызов дошёл до конца — то есть процесс демона пережил бросок.
+      expect(outcome.stdout.text).toContain('жив');
+      expect(outcome.consumerFailures).toBeGreaterThan(0);
+    });
+
+    /**
+     * Шум есть на каждом вызове — проба П1 поймала два `sysctl-read` на тривиальный `cat`, —
+     * и он обязан быть ПОСЧИТАН, а не просто выброшен: ноль в этом счётчике на живом вызове
+     * означал бы, что список подавления перестал совпадать с тем, что присылает ядро.
+     */
+    it('подавленный шум считается, а не исчезает бесследно (R39)', async () => {
+      const { outcome } = await run(readDenied, `cat '${join(fixture, 'secret.txt')}' 2>/dev/null`);
+      expect(outcome.suppressedLines).toBeGreaterThan(0);
+      // Неразобранных при этом быть не должно: всё, что прислало ядро, мы либо отобразили,
+      // либо назвали шумом. Ненуль здесь — сигнал, что грамматика отстала от системы.
+      expect(outcome.unrecognizedLines).toBe(0);
     });
 
     it('вызов, остановленный отказом, всё равно оставил событие build_profile (R32)', async () => {

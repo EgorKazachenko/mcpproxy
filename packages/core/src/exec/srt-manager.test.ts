@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { encodeSandboxedCommand } from '@anthropic-ai/sandbox-runtime/dist/sandbox/sandbox-utils.js';
 import { newCommandId } from './sandbox.js';
-import { STORE_RING_SIZE, advanceCursor } from './srt-manager.js';
+import { STORE_RING_SIZE, advanceCursor, redactUrlForTarget } from './srt-manager.js';
 
 /**
  * Чистая половина синглтона. Всё, что требует живого прокси и seatbelt, живёт в
@@ -65,5 +65,43 @@ describe('newCommandId (R48)', () => {
     // лежала за границей, здесь две тысячи ключей схлопнулись бы в один.
     const encoded = Array.from({ length: 200 }, () => encodeSandboxedCommand(newCommandId()));
     expect(new Set(encoded).size).toBe(200);
+  });
+});
+
+/**
+ * Сведение URL до того, как он станет `target` нарушения (и уедет в цепочку аудита).
+ *
+ * Вендор режет query на своём пути violation дословно по этой причине
+ * (`sandbox-manager.js:170-190`): query-строки рутинно несут `api_key=`, `access_token=` и
+ * подписанные URL, которых не было в контексте модели. Наш колбэк получает URL целиком —
+ * это цена `tlsTerminate` (D12), — и без сведения секрет лёг бы открытым текстом в
+ * append-only лог, откуда его уже не убрать.
+ */
+describe('redactUrlForTarget', () => {
+  it('оставляет origin и путь, а параметры сводит к маркеру', () => {
+    expect(redactUrlForTarget('https://api.example.com/v1/x?api_key=СЕКРЕТ&b=2')).toBe(
+      'https://api.example.com/v1/x?…',
+    );
+    expect(redactUrlForTarget('https://api.example.com/v1/x')).toBe('https://api.example.com/v1/x');
+  });
+
+  it('роняет userinfo вместе с origin', () => {
+    // `URL.origin` не содержит `user:pass@`, поэтому пара учётных данных в самом URL тоже
+    // не доезжает — это то же свойство, на которое опирается вендор.
+    expect(redactUrlForTarget('https://user:пароль@api.example.com/x')).toBe('https://api.example.com/x');
+  });
+
+  it('на неразбираемом URL режет всё после вопросительного знака, а не рискует', () => {
+    expect(redactUrlForTarget('не-url?api_key=СЕКРЕТ')).toBe('не-url?…');
+    expect(redactUrlForTarget('не-url')).toBe('не-url');
+  });
+
+  it('ни в одном случае не оставляет значения параметра', () => {
+    const CASES = [
+      'https://a.example.com/p?token=СЕКРЕТ',
+      'http://a.example.com/p?x=1&token=СЕКРЕТ',
+      'сломанный?token=СЕКРЕТ',
+    ];
+    for (const url of CASES) expect(redactUrlForTarget(url)).not.toContain('СЕКРЕТ');
   });
 });

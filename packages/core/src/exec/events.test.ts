@@ -71,7 +71,7 @@ describe('бюджет оверхеда стадий E3 (R38)', () => {
 
     const durations = Array.from({ length: 100 }, () => {
       const env = measure(() => buildEnv(effective.env.allow, process.env, {}));
-      const profile = measure(() => buildProfile(effective.sandbox, effective.sandbox.write.allow, '/tmp/recipe'));
+      const profile = measure(() => buildProfile(effective.sandbox, '/tmp/recipe'));
       return env.durationUs + profile.durationUs;
     }).sort((a, b) => a - b);
 

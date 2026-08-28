@@ -31,7 +31,7 @@ describe('resolveProfilePath (R8)', () => {
 
   it('резолвит относительные от каталога РЕЦЕПТА, а не демона', () => {
     expect(resolveProfilePath('./logs', '/recipe/dir')).toBe('/recipe/dir/logs');
-    // Ловушка, ради которой параметр вообще есть: с cwd демона получилось бы совсем другое.
+    // Ловушка, ради которой `recipeCwd` вообще есть: с cwd демона получилось бы совсем другое.
     expect(resolveProfilePath('./logs', '/recipe/dir')).not.toBe(`${process.cwd()}/logs`);
   });
 
@@ -46,7 +46,7 @@ describe('buildProfile — mandatory deny (R9)', () => {
   it('якорится на каждом корне write.allow, а не на cwd рецепта', () => {
     // Каталоги РАЗВЕДЕНЫ намеренно: при совпадении дефект маскируется — это ровно то, что
     // проба П3b показала для вендорской реализации, якорящей на cwd демона.
-    const policy = buildProfile(sandbox, ['/tmp/x'], '/completely/other');
+    const policy = buildProfile(sandbox, '/completely/other');
 
     expect(policy.write.deny).toContain('/tmp/x/**/.git/hooks');
     expect(policy.write.deny).toContain('/tmp/x/**/.git/config');
@@ -56,26 +56,40 @@ describe('buildProfile — mandatory deny (R9)', () => {
   it('даёт глоб на поддерево, а не литерал в корне', () => {
     // Литерал `<корень>/.git/hooks` оставил бы `<корень>/sub/.git/hooks/pre-commit`
     // записываемым — это S6 ровно на уровень глубже.
-    const policy = buildProfile(sandbox, ['/tmp/x'], '/completely/other');
+    const policy = buildProfile(sandbox, '/completely/other');
     expect(policy.write.deny).not.toContain('/tmp/x/.git/hooks');
     expect(policy.write.deny.filter((one) => one.includes('.git/hooks'))).toEqual(['/tmp/x/**/.git/hooks']);
   });
 
-  it('якорит на КАЖДОМ корне, а не только на первом', () => {
-    const two = buildProfile(sandbox, ['/tmp/x', '/tmp/y'], '/other');
+  it('якорит на КАЖДОМ корне write.allow, а не только на первом', () => {
+    const twoRoots = sandboxOf({ ...RECIPE_BASE, sandbox: { write: { allow: ['/tmp/x', '/tmp/y'] } } });
+    const two = buildProfile(twoRoots, '/other');
     expect(two.write.deny).toContain('/tmp/x/**/.git/hooks');
     expect(two.write.deny).toContain('/tmp/y/**/.git/hooks');
   });
 
-  it('резолвит сами корни — иначе `~/work/**/.git/hooks` выглядит защитой и ею не является', () => {
-    const policy = buildProfile(sandbox, ['~/work'], '/other');
+  it('резолвит корни перед якорением — нерезолвнутая тильда выглядит защитой и ею не является', () => {
+    const tilde = sandboxOf({ ...RECIPE_BASE, sandbox: { write: { allow: ['~/work'] } } });
+    const policy = buildProfile(tilde, '/other');
     expect(policy.write.deny).toContain(`${homedir()}/work/**/.git/hooks`);
     expect(policy.write.deny.some((one) => one.startsWith('~'))).toBe(false);
   });
 
+  /**
+   * Одна и та же посчитанная величина, а не две независимые. Считая список дважды — один раз
+   * для принуждения (`write.deny`), другой для классификации (бейдж S6), — мы получили бы
+   * бейдж, расходящийся с реальной политикой молча: тест классификации строит
+   * `mandatoryPaths` руками и такого расхождения не увидел бы.
+   */
+  it('отдаёт обязательные запреты полем, и оно — подмножество write.deny', () => {
+    const policy = buildProfile(sandbox, '/completely/other');
+    expect(policy.mandatory).toEqual(mandatoryDenyGlobs(['/tmp/x']));
+    for (const glob of policy.mandatory) expect(policy.write.deny).toContain(glob);
+  });
+
   it('сохраняет собственный `write.deny` рецепта рядом с обязательными', () => {
     const withDeny = sandboxOf({ ...RECIPE_BASE, sandbox: { write: { allow: ['/tmp/x'], deny: ['/tmp/x/secret'] } } });
-    const policy = buildProfile(withDeny, ['/tmp/x'], '/other');
+    const policy = buildProfile(withDeny, '/other');
     expect(policy.write.deny).toContain('/tmp/x/secret');
     expect(policy.write.deny).toContain('/tmp/x/**/.git/hooks');
   });
@@ -87,7 +101,7 @@ describe('buildProfile — mandatory deny (R9)', () => {
 
 describe('buildProfile — чтение (R7, R8)', () => {
   it('разворачивает тильду в read.deny — иначе `~/.ssh` уезжает в srt дословно', () => {
-    const policy = buildProfile(sandboxOf(RECIPE_BASE), [], '/recipe');
+    const policy = buildProfile(sandboxOf(RECIPE_BASE), '/recipe');
     expect(policy.read.deny).toContain(`${homedir()}/.ssh`);
     expect(policy.read.deny).toContain(`${homedir()}/.aws`);
   });
@@ -102,7 +116,7 @@ describe('buildProfile — чтение (R7, R8)', () => {
    */
   it('read.allow рецепта чтение не сужает, а A10 закрывают только дефолты', () => {
     const analyzeLogs = sandboxOf({ ...RECIPE_BASE, sandbox: { read: { allow: ['./logs'] } } });
-    const policy = buildProfile(analyzeLogs, [], '/recipe/dir');
+    const policy = buildProfile(analyzeLogs, '/recipe/dir');
 
     expect(policy.read.allow).toEqual(['/recipe/dir/logs']);
     expect(policy.read.deny).toContain(`${homedir()}/.ssh`);
@@ -115,9 +129,9 @@ describe('buildProfile — бейдж ослабленности (R14)', () => {
     sandboxOf({ ...RECIPE_BASE, sandbox: { network: { allow } } });
 
   it('голая звёздочка помечает, рабочие правила — нет', () => {
-    expect(buildProfile(withNetwork(['*']), [], '/r').weakened).toBe(true);
-    expect(buildProfile(withNetwork(['*.github.com', '*.npmjs.org']), [], '/r').weakened).toBe(false);
-    expect(buildProfile(withNetwork([]), [], '/r').weakened).toBe(false);
+    expect(buildProfile(withNetwork(['*']), '/r').weakened).toBe(true);
+    expect(buildProfile(withNetwork(['*.github.com', '*.npmjs.org']), '/r').weakened).toBe(false);
+    expect(buildProfile(withNetwork([]), '/r').weakened).toBe(false);
   });
 });
 
@@ -141,7 +155,7 @@ describe('toSandboxProfile (R36)', () => {
 });
 
 describe('policyHash (R47)', () => {
-  const policy = buildProfile(sandboxOf(RECIPE_BASE), ['/tmp/x'], '/r');
+  const policy = buildProfile(sandboxOf(RECIPE_BASE), '/r');
 
   it('различает вызовы, отличающиеся ТОЛЬКО сетью', () => {
     const closed = policyHash(policy, { allowedDomains: [], deniedDomains: [] });
@@ -156,7 +170,7 @@ describe('policyHash (R47)', () => {
   });
 
   it('различает вызовы, отличающиеся файловой частью', () => {
-    const other = buildProfile(sandboxOf(RECIPE_BASE), ['/tmp/y'], '/r');
+    const other = buildProfile(sandboxOf({ ...RECIPE_BASE, sandbox: { write: { allow: ['/tmp/x'] } } }), '/r');
     const net = { allowedDomains: [], deniedDomains: [] };
     expect(policyHash(policy, net)).not.toBe(policyHash(other, net));
   });

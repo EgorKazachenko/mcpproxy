@@ -5,11 +5,13 @@ import type { Server } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { SandboxManager } from '@anthropic-ai/sandbox-runtime';
 import { asRecipeName, normalizeRecipe } from '@mcpproxy/contracts';
 import type { Defaults, Recipe, SandboxViolation } from '@mcpproxy/contracts';
+import type { ExecEvent } from '../events.js';
 import { newCommandId } from '../sandbox.js';
 import type { ExecOutcome, Sandbox } from '../sandbox.js';
-import { createNoneSandbox, parseEnvPairs } from './none.js';
+import { createNoneSandbox, parseEnvPairs, proxyEnvVars } from './none.js';
 
 /**
  * Режим `none` — baseline демо. Он обязан **наблюдать**, а не запрещать: левая половина
@@ -183,20 +185,59 @@ describe.skipIf(!IS_MACOS)('режим none — наблюдающий baseline'
     expect(closed.outcome.policyHash).toBe(open.outcome.policyHash);
   });
   /**
-   * Последний тест набора намеренно: он отпускает **последнюю** ссылку и выставляет
-   * терминальный флаг, после которого любой `run()` бросает (R50).
+   * Аварийный путь, и он проверяется здесь, а не под `seatbelt`, по устройству режимов: в
+   * `seatbelt` команду запускает обёртка `bash -c`, поэтому несуществующий бинарь даёт код
+   * возврата 127, а не отказ `spawn`. В `none` команда идёт как есть — и `spawn` эмитит
+   * `error`, то есть тело вызова реджектится по-настоящему.
    *
-   * `reset()` у srt глобален, чистит `initializationPromise`, но не `config`, а `initialize`
-   * возвращается сразу при выставленном промисе. Значит вызов после освобождения идёт со
-   * старым конфигом и `getProxyPort() === undefined`: прокси-переменные не эмитятся вовсе,
-   * и сеть оказывается тихо ОТКРЫТА в `none` и тихо МЕРТВА в `seatbelt`.
-   *
-   * Ссылки считаются по песочницам, а не по вызовам: `run()` зовёт `ensureInitialized`, и
-   * счётчик по вызовам не дошёл бы до нуля никогда — флаг не выставился бы, а это
-   * утверждение осталось бы зелёным, ничего не проверив. Вторая песочница здесь именно за
-   * тем, чтобы счёт был наблюдаем: пока жива она, флага нет.
+   * До правки снятие политики стояло на успешном пути, и упавший вызов оставлял демону свой
+   * allowlist — в `none` это буквально `['*']`. Форма «на ошибке возвращаем allow»; идловым
+   * состоянием R52 объявляет пустой список, и наступать оно обязано на каждом выходе.
    */
-  it('флаг ставится на ПОСЛЕДНЕЙ ссылке, и после него любой run бросает (R50)', async () => {
+  it('после упавшего вызова allowlist пуст, семафор отпущен, событие spawn есть (R32, R52)', async () => {
+    const { effective } = normalizeRecipe(CLOSED, DEFAULTS);
+    const events: ExecEvent[] = [];
+
+    await expect(
+      sandbox.run(
+        {
+          recipeName: asRecipeName('baseline'),
+          command: [join(fixture, 'нет-такого-бинаря'), 'аргумент'],
+          recipeCwd: fixture,
+          effective,
+          commandId: newCommandId(),
+        },
+        () => undefined,
+        (event) => events.push(event),
+      ),
+    ).rejects.toThrow();
+
+    const idle = SandboxManager.getConfig();
+    expect(idle?.network.allowedDomains).toEqual([]);
+    expect(idle?.network.deniedDomains).toEqual([]);
+
+    // Стадия оставила событие, хотя запуск провалился: «событие на каждой стадии, включая
+    // отказ» (R32). Без него вызов исчезал бы из таймлайна между build_profile и ничем.
+    expect(events.map((one) => one.stage)).toContain('spawn');
+
+    // И семафор освобождён — следующий вызов проходит, а не виснет навсегда.
+    const after = await run(CLOSED, 'echo жив');
+    expect(after.outcome.stdout.text.trim()).toBe('жив');
+  });
+
+  /**
+   * Последний тест набора намеренно: он освобождает обе песочницы.
+   *
+   * R50 требует, чтобы `run()` бросал у **освобождённого экземпляра**: вызов после
+   * `dispose()` пошёл бы со старым конфигом и `getProxyPort() === undefined` — сеть тихо
+   * ОТКРЫТА в `none` и тихо МЕРТВА в `seatbelt`. Флаг поэтому живёт в самой песочнице.
+   *
+   * Процессным его делать нельзя, и это утверждается здесь же: `reset()` у srt чистит
+   * `initializationPromise`, значит переподъём безопасен, — а с процессным флагом E5,
+   * освободив обе песочницы после демо, не смог бы переключить режим на слайде S5, потому
+   * что `createSandbox` бросал бы до конца жизни процесса.
+   */
+  it('после dispose бросает ЭТА песочница, но процесс остаётся способен поднять новую (R50)', async () => {
     const second = createNoneSandbox();
     const request = {
       recipeName: asRecipeName('baseline'),
@@ -206,16 +247,20 @@ describe.skipIf(!IS_MACOS)('режим none — наблюдающий baseline'
       commandId: newCommandId(),
     };
 
-    // Одна из двух ссылок отпущена — песочница ещё жива.
+    // Одна из двух ссылок отпущена — вторая песочница жива и работает.
     await sandbox.dispose();
     await expect(second.run(request, () => undefined)).resolves.toMatchObject({ termination: 'exited' });
 
     await second.dispose();
     await expect(second.run(request, () => undefined)).rejects.toThrow(/dispose/);
-    // Флаг процессный, а не объектный: новая песочница тоже не поднимется.
-    expect(() => createNoneSandbox()).toThrow(/dispose/);
-  });
 
+    // А процесс — нет: свежая песочница поднимается и исполняет.
+    const third = createNoneSandbox();
+    await expect(
+      third.run({ ...request, commandId: newCommandId() }, () => undefined),
+    ).resolves.toMatchObject({ termination: 'exited' });
+    await third.dispose();
+  });
 });
 
 describe('parseEnvPairs', () => {
@@ -227,5 +272,35 @@ describe('parseEnvPairs', () => {
 
   it('пропускает строки без имени', () => {
     expect(parseEnvPairs(['=значение', 'без-равенства', 'A=1'])).toEqual({ A: '1' });
+  });
+});
+
+/**
+ * Обе ветки отказа — отдельным набором, потому что на macOS прокси поднимается всегда, и
+ * через живой синглтон они недостижимы. Код, который нельзя заставить упасть, не проверен.
+ */
+describe('proxyEnvVars — громкий отказ вместо слепого baseline', () => {
+  const READY = { httpPort: 8080, socksPort: 8080, caBundle: '/tmp/ca.pem', token: 'тк' };
+
+  it('без единого порта бросает, а не отдаёт env без прокси', () => {
+    // Вендор при обоих портах `undefined` возвращает ровно `['SANDBOX_RUNTIME=1']` — без
+    // HTTP_PROXY, без NO_PROXY, без токена. Пройди это тихо, `none` стал бы слепым: ноль
+    // violations, сеть открыта, тесты зелёные, S5 показывает ноль эксфильтрации как успех.
+    expect(() => proxyEnvVars({ ...READY, httpPort: undefined, socksPort: undefined }, 'к')).toThrow(/слепым/);
+  });
+
+  it('без трастового бандла CA бросает — иначе HTTPS упал бы как сетевая ошибка', () => {
+    expect(() => proxyEnvVars({ ...READY, caBundle: undefined }, 'к')).toThrow(/сертификат/);
+  });
+
+  it('одного SOCKS-порта достаточно: отказ на отсутствии обоих, а не любого', () => {
+    expect(() => proxyEnvVars({ ...READY, httpPort: undefined }, 'к')).not.toThrow();
+  });
+
+  it('при живом прокси отдаёт обе группы переменных', () => {
+    const env = proxyEnvVars(READY, 'к');
+    expect(env['HTTP_PROXY']).toContain('8080');
+    expect(env['NO_PROXY']).toContain('127.0.0.1');
+    expect(env['NODE_EXTRA_CA_CERTS']).toBe('/tmp/ca.pem');
   });
 });

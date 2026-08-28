@@ -64,18 +64,3 @@ export function collapseOutput(
 ): { readonly bytes: number; readonly truncated: boolean } {
   return { bytes: stdout.bytes + stderr.bytes, truncated: stdout.truncated || stderr.truncated };
 }
-
-/**
- * Порядок появления полей (R33): поле не приезжает раньше своей стадии.
- *
- * `sandbox.mode` — вынужденное исключение, и оно не наше: в замороженном типе `mode`
- * **обязателен всегда, когда присутствует `sandbox`** (`event.ts:92-93`), поэтому событие с
- * `sandbox.profile` обязано нести и `mode`. Таблица в комментарии `event.ts` относит `mode`
- * к `spawn`, но комментарий проигрывает типу, а режим на `build_profile` уже известен — его
- * выбрал вызывающий (R4).
- */
-export const FIELD_FIRST_STAGE: Readonly<Record<'env' | 'profile' | 'violations', ExecStage>> = {
-  env: 'build_env',
-  profile: 'build_profile',
-  violations: 'violation',
-};

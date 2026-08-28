@@ -49,6 +49,17 @@ export interface ProcessLimits {
   readonly redact?: (window: Buffer) => Buffer;
   readonly env: NodeJS.ProcessEnv;
   readonly cwd: string;
+  /**
+   * Зовётся синхронно, как только `spawn()` вернул управление, — то есть когда ребёнок
+   * действительно запущен, а не когда он уже умер.
+   *
+   * Слот есть потому, что событие стадии `spawn` обязано попасть в таймлайн ДО первого
+   * нарушения: нарушения стримятся, пока процесс жив (R29), а `stageOrder` кладёт `spawn`
+   * перед `violation` (`domain.ts:26-40`). Событие, отправленное после выхода процесса,
+   * инвертировало бы замороженный порядок — S5 отрисовал бы нарушение процесса, о запуске
+   * которого лог ещё не сказал.
+   */
+  readonly onSpawn?: (pid: number | undefined) => void;
 }
 
 export interface RawStream {
@@ -177,6 +188,13 @@ const collectInto = (stream: Readable, collector: StreamCollector): void => {
   stream.on('data', (chunk: Buffer) => {
     collector.push(chunk);
   });
+  // Слушатель `error` обязателен, а не гигиеничен: `EIO`/`EPIPE` на pipe — штатное явление,
+  // когда группу убивают SIGKILL посреди записи (то есть на КАЖДОМ таймауте). Поток без
+  // слушателя `error` заставляет Node перебросить ошибку как необработанное исключение, и
+  // демон падает ровно на том пути, ради которого таймаут и заведён.
+  stream.on('error', () => {
+    // Обрыв канала уже наказан: процесс убит, и всё, что он успел сказать, посчитано.
+  });
 };
 
 /** `stdio: ['ignore', 'pipe', 'pipe']` — `stdin` у ребёнка нет, и тип обязан это отражать. */
@@ -209,6 +227,8 @@ export async function runProcess(
     env: limits.env,
     stdio: ['ignore', 'pipe', 'pipe'],
   });
+
+  limits.onSpawn?.(child.pid);
 
   const windowBytes = windowFor(limits);
   const stdout = new StreamCollector(windowBytes);
@@ -243,29 +263,35 @@ export async function runProcess(
   const groupDrained = pid === undefined ? true : await confirmGroupEmpty(pid);
   await drainStreams(child);
 
+  const outStream = stdout.finish(limits);
+  const errStream = stderr.finish(limits);
+
   return {
     // Приоритет задан, а не выведен из порядка проверок (R49): сработали и потолок, и
     // таймаут — побеждает таймаут, он же определяет вердикт. Без правила поле одно, а
     // исходов два.
-    termination: terminationOf(timedOut, stdout, stderr, limits),
+    termination: terminationOf(timedOut, outStream, errStream),
     exit,
-    stdout: stdout.finish(limits),
-    stderr: stderr.finish(limits),
+    stdout: outStream,
+    stderr: errStream,
     groupDrained,
   };
 }
 
-function terminationOf(
-  timedOut: boolean,
-  stdout: StreamCollector,
-  stderr: StreamCollector,
-  limits: ProcessLimits,
-): Termination {
+/**
+ * Исход считается по **тому же свидетельству**, что и `truncated`, а не по числу
+ * произведённых байт.
+ *
+ * Разные основания разошлись бы ровно тогда, когда E6 подключит непустой `redact` в
+ * объявленный слот: вывод в 1010 байт при `maxBytes: 1000` и запасе 256 даёт
+ * `produced > maxBytes`, но редакция, схлопнувшая 40 байт в 8, не отбросила ничего — ни при
+ * чтении (1010 ≤ 1256), ни на потолке (978 ≤ 1000). Исход тогда утверждал бы «оборван по
+ * потолку» на вызове, где не оборвано ничего, а `Termination` — дискриминатор, из которого
+ * E4 по D6 выводит вердикт.
+ */
+function terminationOf(timedOut: boolean, stdout: RawStream, stderr: RawStream): Termination {
   if (timedOut) return 'timeout';
-  if (limits.maxBytes === null) return 'exited';
-  // Граница включительна намеренно: `maxBytes` — «потолок», а не «строго меньше».
-  const over = stdout.produced > limits.maxBytes || stderr.produced > limits.maxBytes;
-  return over ? 'output-cap' : 'exited';
+  return stdout.truncated || stderr.truncated ? 'output-cap' : 'exited';
 }
 
 /**

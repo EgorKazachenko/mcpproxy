@@ -5,7 +5,7 @@ import {
 import type { SandboxMode } from '@mcpproxy/contracts';
 import { srt } from '../srt-manager.js';
 import type { ExecRequest, Sandbox } from '../sandbox.js';
-import { onceDispose, runInMode } from './seatbelt.js';
+import { makeSandbox } from './seatbelt.js';
 import type { ModeBehaviour } from './seatbelt.js';
 
 /**
@@ -37,19 +37,60 @@ const MODE: SandboxMode = 'none';
  * **заменяют** хранилище инструмента, а не дополняют его, и указав их на один наш CA, мы
  * лишили бы ребёнка возможности проверить хоть один настоящий сертификат.
  */
+export interface ProxyHandles {
+  readonly httpPort: number | undefined;
+  readonly socksPort: number | undefined;
+  readonly caBundle: string | undefined;
+  readonly token: string | undefined;
+}
+
+/**
+ * Чистая половина: проверки и сборка. Отделена от чтения синглтона намеренно — иначе обе
+ * ветки отказа были бы недостижимы в тестах на macOS, где прокси поднимается всегда, и
+ * «громко» осталось бы словом. Проверять код, который нельзя заставить упасть, нечем.
+ */
+export function proxyEnvVars(handles: ProxyHandles, encodedCommand: string): NodeJS.ProcessEnv {
+  if (handles.httpPort === undefined && handles.socksPort === undefined) {
+    throw new Error(
+      'прокси srt не поднят: ни HTTP-, ни SOCKS-порт не назначен, и режим none стал бы ' +
+        'слепым — сеть ребёнка открыта, нарушений ноль, демо показывает ноль эксфильтрации ' +
+        'как успех (R31, D2)',
+    );
+  }
+  // Вторая группа обязательна из-за D12: без переменных доверия к CA любой HTTPS падает с
+  // ошибкой сертификата, то есть baseline ломается как СЕТЕВАЯ ошибка, неотличимая в
+  // таймлайне от «песочница заблокировала».
+  if (handles.caBundle === undefined) {
+    throw new Error(
+      'трастовый бандл CA недоступен, а tlsTerminate включён: HTTPS в baseline упал бы с ' +
+        'ошибкой сертификата и выглядел бы в таймлайне как блокировка песочницей (R31, D12)',
+    );
+  }
+
+  return parseEnvPairs(
+    generateProxyEnvVars(
+      handles.httpPort,
+      handles.socksPort,
+      handles.caBundle,
+      handles.token,
+      // `skipTmpdir`: файловой политики в этом режиме нет, значит хостовый TMPDIR уже
+      // записываем, а `/tmp/claude` может не существовать вовсе.
+      true,
+      encodedCommand,
+    ),
+  );
+}
+
 export function proxyEnvFor(request: ExecRequest): NodeJS.ProcessEnv {
-  const vars = generateProxyEnvVars(
-    srt.proxyPort(),
-    srt.socksPort(),
-    srt.caTrustBundlePath(),
-    srt.proxyToken(),
-    // `skipTmpdir`: файловой политики в этом режиме нет, значит хостовый TMPDIR уже
-    // записываем, а `/tmp/claude` может не существовать вовсе.
-    true,
+  return proxyEnvVars(
+    {
+      httpPort: srt.proxyPort(),
+      socksPort: srt.socksPort(),
+      caBundle: srt.caTrustBundlePath(),
+      token: srt.proxyToken(),
+    },
     encodeSandboxedCommand(request.commandId),
   );
-
-  return parseEnvPairs(vars);
 }
 
 /** `NAME=VALUE` → объект. Делим по ПЕРВОМУ `=`: значение прокси-URL содержит свои. */
@@ -64,7 +105,6 @@ export function parseEnvPairs(pairs: readonly string[]): NodeJS.ProcessEnv {
 }
 
 export function createNoneSandbox(): Sandbox {
-  srt.retain();
   const behaviour: ModeBehaviour = {
     mode: MODE,
     injectedEnv: proxyEnvFor,
@@ -83,9 +123,5 @@ export function createNoneSandbox(): Sandbox {
     toArgv: (request) => Promise.resolve(request.command),
   };
 
-  return {
-    mode: MODE,
-    run: (request, onViolation, onEvent) => runInMode(behaviour, request, onViolation, onEvent),
-    dispose: onceDispose(),
-  };
+  return makeSandbox(behaviour);
 }

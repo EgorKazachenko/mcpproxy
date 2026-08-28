@@ -13,6 +13,16 @@ import { isWeakened } from './netpolicy.js';
 export interface ResolvedSandboxPolicy {
   readonly read: { readonly allow: readonly string[]; readonly deny: readonly string[] };
   readonly write: { readonly allow: readonly string[]; readonly deny: readonly string[] };
+  /**
+   * Обязательные запреты этого вызова — **та же самая** посчитанная величина, что уехала в
+   * `write.deny`, а не вторая, собранная независимо.
+   *
+   * Поле есть потому, что список нужен ДВАЖДЫ: в принуждении (`write.deny` профиля) и в
+   * классификации (бейдж `mandatory-deny` из S6). Считая его в двух местах по независимо
+   * собранным входам, мы получили бы бейдж, который расходится с реальной политикой молча —
+   * а тест классификации строит `mandatoryPaths` руками и такого расхождения не увидит.
+   */
+  readonly mandatory: readonly string[];
   /** Рецепт с голой `*` в `network.allow` или с шаблоном, который вендор считает широким (R14). */
   readonly weakened: boolean;
 }
@@ -21,7 +31,8 @@ export interface ResolvedSandboxPolicy {
  * Файлы, запись в которые — исполнение кода при следующем запуске оболочки или git.
  * Копия `DANGEROUS_FILES` из `sandbox-utils.js:10`; наружу пакета список не экспортирован
  * (`index.d.ts`, 19 строк), поэтому копия неизбежна — а копия без детектора дрейфа
- * устаревает молча, и детектор стоит в `srt-manager.test.ts` (R10).
+ * устаревает молча. Детектор — `modes/seatbelt.test.ts`, тест «детектор дрейфа:
+ * вендорский набор обязательных запретов не изменился», рядом с `RECORDED_VENDOR_DENIALS` (R10).
  */
 export const MANDATORY_DENY_FILES: readonly string[] = [
   '.gitconfig',
@@ -111,28 +122,26 @@ const resolveAccess = (access: NormalizedAccess, recipeCwd: string): { allow: st
  * `effective`, никогда `own`, и передача целого рецепта оставила бы это правилом ревью
  * вместо ошибки компиляции.
  *
- * `writeRoots` — отдельный параметр, потому что якорь mandatory-deny шире манифестного
- * `write.allow`: srt при обёртке доливает `getDefaultWritePaths()`, и вызывающий вправе
- * анкерить запреты и на них. Резолвятся они здесь же, тем же резолвером: приняв корни
- * нерезолвнутыми, мы получили бы глоб под нерезолвнутым `~/work` в профиле — строку, которая
- * выглядит защитой и ею не является.
+ * Корни для якоря обязательных запретов выводятся **здесь, из `write.allow`**, а не
+ * приходят параметром. Отдельный параметр обещал бы вызывающему свободу анкерить запреты
+ * шире — свободу, которой не пользуется ни один вызывающий, — и одновременно давал бы
+ * возможность передать корни, не совпадающие с разрешённой записью: профиль тогда получил
+ * бы глобы, якорёные там, где писать всё равно нельзя, то есть защиту, которая ничего не
+ * защищает. R9 говорит «каждый корень `write.allow`», и подпись теперь говорит то же.
  *
  * Сети в результате нет намеренно: её принуждает `updateConfig` под семафором (D11), и
  * поле `network` здесь только соблазняло бы записать её ещё и в `customConfig`, где она
  * не действует вовсе (проба П5).
  */
-export function buildProfile(
-  sandbox: NormalizedSandbox,
-  writeRoots: readonly string[],
-  recipeCwd: string,
-): ResolvedSandboxPolicy {
+export function buildProfile(sandbox: NormalizedSandbox, recipeCwd: string): ResolvedSandboxPolicy {
   const read = resolveAccess(sandbox.read, recipeCwd);
   const write = resolveAccess(sandbox.write, recipeCwd);
-  const roots = resolveAll(writeRoots, recipeCwd);
+  const mandatory = mandatoryDenyGlobs(write.allow);
 
   return {
     read: { allow: read.allow, deny: read.deny },
-    write: { allow: write.allow, deny: [...write.deny, ...mandatoryDenyGlobs(roots)] },
+    write: { allow: write.allow, deny: [...write.deny, ...mandatory] },
+    mandatory,
     weakened: isWeakened(sandbox.network.allow),
   };
 }

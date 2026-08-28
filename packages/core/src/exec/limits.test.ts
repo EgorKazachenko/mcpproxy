@@ -191,15 +191,42 @@ describe('runProcess — hold-back окно и шов с E6 (R20, D13)', () => {
     expect(without.stdout.buffer.toString('utf8')).toContain('SECR');
   });
 
-  it('редакция, укоротившая вывод ниже потолка, не помечает его обрезанным зря', async () => {
-    const raw = await runProcess(sh('printf "0123456789"'), {
+  /**
+   * Исход и `truncated` обязаны опираться на ОДНО свидетельство.
+   *
+   * Фикстура разводит два основания: процесс произвёл 70 байт при потолке 64, то есть
+   * `produced > maxBytes` — по этому основанию исход был бы `output-cap`. Но в окно чтения
+   * (64 + 8) поместилось всё, а редакция схлопнула окно до десяти байт, и на потолке тоже
+   * ничего не отброшено. Отброшенного нет — значит и «оборван по потолку» нет.
+   *
+   * Без пары утверждений здесь `Termination` утверждал бы «отказ, потому что вывод обрезан»
+   * на вызове, где не обрезано ничего, — а из этого дискриминатора E4 по D6 выводит вердикт.
+   */
+  it('исход и truncated считаются по одному свидетельству, а не по разным', async () => {
+    const raw = await runProcess(sh('printf "%070d" 0'), {
       ...LIMITS,
       maxBytes: 64,
       holdBackBytes: 8,
       redact: () => Buffer.from('короче', 'utf8'),
     });
+
+    expect(raw.stdout.producedBytes).toBe(70);
     expect(raw.stdout.truncated).toBe(false);
+    // По старому основанию (`produced > maxBytes`) здесь стояло бы 'output-cap'.
+    expect(raw.termination).toBe('exited');
   });
+
+  it('и наоборот: отброшенное на потолке даёт output-cap при любой редакции', async () => {
+    const raw = await runProcess(sh('printf "%0300d" 0'), {
+      ...LIMITS,
+      maxBytes: 64,
+      holdBackBytes: 8,
+      redact: (window) => window,
+    });
+    expect(raw.stdout.truncated).toBe(true);
+    expect(raw.termination).toBe('output-cap');
+  });
+
 });
 
 describe('truncateToBytes — байты, а не единицы UTF-16 (R19)', () => {

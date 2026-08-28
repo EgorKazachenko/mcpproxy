@@ -12,7 +12,7 @@
 | **E0** | Скелет монорепо + **контракты**: JSON Schema манифеста, схема событий (OTel-совместимая), MCP tool annotations, TS-типы | — | ❌ шов, только последовательно |
 | **E1** | Policy engine: загрузка и валидация манифеста, `mcpproxy.lock`, diff-approve при изменении, санитизация `description` | E0 | ✅ |
 | **E2** | Валидатор параметров + argv-builder, path resolver (realpath + confinement), гарантия no-shell | E0 | ✅ |
-| **E3** | Executor + песочница: обёртка над `@anthropic-ai/sandbox-runtime`, доменный allowlist сети, rlimits, таймауты, cap на вывод, проброс violations | E0 | ✅ |
+| **E3** | Executor + песочница: обёртка над `@anthropic-ai/sandbox-runtime`, доменный allowlist сети, таймауты и SIGKILL по группе процессов, cap на вывод, проброс violations | E0 | ✅ |
 | **E4** | MCP-поверхность: `tools/list` из манифеста с аннотациями, `tools/call`, shim + IPC-хардненинг (peer-cred, 0600) | E1, E2 (на стабах) | ⚠️ частично |
 | **E5** | Approvals: риск-тиры из аннотаций, брокер, TTL/scope, двухканальность (elicitation + Electron), headless = deny | E4, E7 | ❌ поздний |
 | **E6** | Секреты и аудит: env-allowlist, двусторонняя редакция (правила из Secrets-Patterns-DB + энтропия), hash-chain JSONL, экспорт | E0 | ✅ |

@@ -36,6 +36,17 @@ export const DRAIN_WINDOW_MS = 150;
 export const BODY_SAMPLE_BYTES = 1_048_576;
 
 /**
+ * Потолок **времени** на чтение тела, а не только объёма.
+ *
+ * Прокси не идёт наверх, пока колбэк не вернул решение, поэтому чанкованный запрос, который
+ * тянется под лимитом байт — стриминговая загрузка, длинный POST, — висел бы до таймаута
+ * рецепта, и рабочий запрос отчитался бы как `timeout`. «Бесконечное тело обязано не
+ * подвешивать запрос» (R26) без потолка по времени выполняется только для тел, которые
+ * превысили потолок по байтам.
+ */
+export const BODY_SAMPLE_MS = 250;
+
+/**
  * Идловое состояние allowlist — **пустой список** (R52). Фоновый потомок, переживший вызов,
  * не должен попасть под чужую политику, а в режиме `none` чужая политика — это `*`.
  */
@@ -78,25 +89,44 @@ export function advanceCursor(input: CursorInput): CursorStep {
   return { lost: delta - take, take, lastSeen: input.totalCount };
 }
 
-export interface TelemetryRequest {
-  readonly url: string;
-  readonly method: string;
-  readonly bodyBytes: number;
+/**
+ * Сведение URL к тому, что не несёт секретов, — **до** того, как он станет `target`
+ * нарушения и уедет в цепочку аудита.
+ *
+ * Форма скопирована с вендорской `redactUrlForViolation` (`sandbox-manager.js:170-190`) и по
+ * той же причине, сформулированной там дословно: query-строки рутинно несут учётные данные
+ * (`api_key=`, `access_token=`, подписанные URL), которые ребёнок подставил в рантайме и
+ * которых не было в контексте модели. Наш колбэк получает URL **нередактированным** — это
+ * цена `tlsTerminate` (D12), — и без этого сведения секрет лёг бы открытым текстом в
+ * append-only лог, то есть туда, откуда его уже не убрать.
+ *
+ * Редакция E6 сюда не годится: она объявлена для потоков вывода (R20) и работает над
+ * буфером, а здесь нужен разбор URL. Маркер вместо самой строки сохраняет наблюдаемость
+ * «запрос был с параметрами», не сохраняя параметров.
+ */
+export function redactUrlForTarget(url: string): string {
+  try {
+    const parsed = new URL(url);
+    return `${parsed.origin}${parsed.pathname}${parsed.search === '' ? '' : '?…'}`;
+  } catch {
+    // Не абсолютный URL — режем всё после `?`, вместо того чтобы рискнуть утечкой.
+    const at = url.indexOf('?');
+    return at === -1 ? url : `${url.slice(0, at)}?…`;
+  }
 }
 
 export interface InvocationResult<T> {
   readonly value: T;
   readonly violations: readonly SandboxViolation[];
   readonly violationsLost: number;
-  /**
-   * Сколько нарушений приехало с чужим или отсутствующим `encodedCommand`. Докладывается
-   * громко, но нарушение **не отбрасывает** (R45).
-   */
-  readonly attributionMismatches: number;
+  readonly attributionMissing: number;
+  readonly attributionForeign: number;
+  readonly unrecognizedLines: number;
+  readonly suppressedLines: number;
+  readonly consumerFailures: number;
 }
 
 export interface InvocationContext {
-  /** `{argv, env}` от srt — обёртка уже применена под уже выставленной политикой. */
   readonly commandId: CommandId;
 }
 
@@ -136,25 +166,43 @@ class Semaphore {
 export class SrtManagerError extends Error {}
 
 /**
- * Текст один на все точки отказа: после `dispose()` вызов идёт со старым конфигом и
+ * Текст один на все точки отказа: после `dispose()` вызов пошёл бы со старым конфигом и
  * `getProxyPort() === undefined`, то есть прокси-переменные не эмитятся вовсе — сеть
  * оказывается тихо **открыта** в `none` и тихо **мертва** в `seatbelt` (R50).
  */
-const DISPOSED_MESSAGE =
-  'песочница уже освобождена: любой run() после dispose() запрещён, потому что reset() у srt ' +
-  'чистит initializationPromise, но не config, и повторный initialize — тихий no-op (R50)';
+export const DISPOSED_MESSAGE =
+  'песочница уже освобождена: run() после dispose() запрещён, потому что вызов пошёл бы со ' +
+  'старым конфигом и getProxyPort() === undefined (R50)';
+
+interface ActiveInvocation {
+  readonly encoded: string;
+  readonly classify: ClassifyPolicy;
+  readonly onViolation: (violation: SandboxViolation) => void;
+  readonly collected: SandboxViolation[];
+  lost: number;
+  missing: number;
+  foreign: number;
+  unrecognized: number;
+  suppressed: number;
+  consumerFailures: number;
+}
 
 class SrtSingleton {
   private initPromise: Promise<void> | undefined;
   private baseConfig: SandboxRuntimeConfig | undefined;
   private unsubscribe: (() => void) | undefined;
   private refs = 0;
-  private disposed = false;
+
   /**
    * Поднятый флаг означает, что группа процессов прошлого вызова не подтвердила пустоту
-   * (R52). Семафор после этого не освобождается — но и висеть на нём вечно нельзя: демон
-   * один на все последующие вызовы, поэтому каждый следующий `run()` отказывает СРАЗУ и
-   * громко, вместо того чтобы молча не возвращаться.
+   * (R52). Он **терминальный**: каждый следующий вызов отказывает сразу и громко.
+   *
+   * Держать при этом семафор занятым навсегда — соблазнительное прочтение «отказа
+   * освобождать», и оно хуже: вызов, вставший в очередь ДО отравления, не получил бы ни
+   * ответа, ни ошибки — MCP-запрос повис бы навсегда, без записи в аудит. Поэтому семафор
+   * освобождается, а отказывает флаг: каждый ждущий просыпается, видит отравление,
+   * пропускает очередь дальше и бросает. «Ни один следующий вызов не идёт» исполняется,
+   * «демон повешен» не наступает.
    */
   private poisoned: string | undefined;
 
@@ -162,36 +210,20 @@ class SrtSingleton {
   private lastSeen = 0;
 
   /** Активный сборщик нарушений. Не `undefined` ровно тогда, когда семафор занят. */
-  private active:
-    | {
-        readonly commandId: CommandId;
-        readonly encoded: string;
-        readonly classify: ClassifyPolicy;
-        readonly onViolation: (violation: SandboxViolation) => void;
-        readonly collected: SandboxViolation[];
-        lost: number;
-        mismatches: number;
-      }
-    | undefined;
-
-  /** Телеметрия из `filterRequest`: запросы, которые прокси пропустил (R26). */
-  private readonly telemetry: TelemetryRequest[] = [];
+  private active: ActiveInvocation | undefined;
 
   /**
    * Ссылка берётся при создании песочницы, а не при вызове.
    *
    * Считать вызовы было бы дефектом, а не стилем: `run()` зовёт `ensureInitialized`, поэтому
    * счётчик рос бы на каждом прогоне, `dispose()` уменьшал бы его на единицу и до нуля не
-   * доходил бы никогда — флаг R50 не выставлялся бы, а `SandboxManager.reset()` не звался бы
-   * вовсе. Тесты при этом остались бы зелёными: они просто не увидели бы отказа.
+   * доходил бы никогда — глобальное состояние не сносилось бы вовсе.
    */
   retain(): void {
-    if (this.disposed) throw new SrtManagerError(DISPOSED_MESSAGE);
     this.refs += 1;
   }
 
   async ensureInitialized(baseConfig: SandboxRuntimeConfig): Promise<void> {
-    if (this.disposed) throw new SrtManagerError(DISPOSED_MESSAGE);
     if (this.initPromise !== undefined) return this.initPromise;
 
     this.baseConfig = baseConfig;
@@ -229,21 +261,50 @@ class SrtSingleton {
     active.lost += step.lost;
 
     for (const event of all.slice(all.length - step.take)) {
-      // Атрибуция — **окно семафора**, а не `encodedCommand` (R45): всё, что стор набрал
-      // между захватом и освобождением, принадлежит текущему вызову. Ключ ненадёжен с обеих
-      // сторон — имя пользователя прокси вшито в env ребёнка, то есть им управляет ребёнок,
-      // а со стороны ядра ключ отсутствует, когда строка `CMD64_` не попала в тот же чанк
-      // вывода `log stream`, что и строка отказа.
-      if (event.encodedCommand !== undefined && event.encodedCommand !== active.encoded) {
-        active.mismatches += 1;
+      // Исключение отсюда улетело бы в обработчик `data` вендорского `log stream`
+      // (`macos-sandbox-utils.js`, без `try`), а необработанное исключение в слушателе
+      // потока роняет процесс. То есть дефектный колбэк потребителя убивал бы демон — и
+      // вместе с ним остальные нарушения из того же уведомления.
+      try {
+        this.dispatch(active, event);
+      } catch {
+        active.consumerFailures += 1;
       }
-      const parsed = parseAndClassify(event.line, active.classify);
-      if (parsed.kind !== 'violation') continue;
-      active.collected.push(parsed.violation);
-      // Стримим по мере возникновения (R29): красная строка S5 появляется, пока процесс
-      // ещё жив, а не пакетом после выхода.
-      active.onViolation(parsed.violation);
     }
+  }
+
+  private dispatch(active: ActiveInvocation, event: SandboxViolationEvent): void {
+    // Атрибуция — **окно семафора**, а не `encodedCommand` (R45): всё, что стор набрал
+    // между захватом и освобождением, принадлежит текущему вызову. Ключ ненадёжен с обеих
+    // сторон — имя пользователя прокси вшито в env ребёнка, то есть им управляет ребёнок,
+    // а со стороны ядра ключ отсутствует, когда строка `CMD64_` не попала в тот же чанк
+    // вывода `log stream`, что и строка отказа.
+    //
+    // Отсутствие и расхождение считаются ОТДЕЛЬНО, потому что значат разное. Отсутствие —
+    // обычное дело: вендор ставит ключ, только когда обе строки легли в один чанк, а имя
+    // пользователя прокси вырождается в голое `srt`, когда base64 не влезает в 255 байт
+    // RFC 1929. Чужой ключ — наоборот, сигнал, что кто-то подписался не своим именем. Один
+    // счётчик на оба случая читался бы как тревога на каждом втором вызове и перестал бы
+    // значить что-либо.
+    if (event.encodedCommand === undefined) active.missing += 1;
+    else if (event.encodedCommand !== active.encoded) active.foreign += 1;
+
+    const parsed = parseAndClassify(event.line, active.classify);
+    if (parsed.kind === 'suppressed') {
+      active.suppressed += 1;
+      return;
+    }
+    if (parsed.kind === 'unrecognized') {
+      // Строка ядра, чью операцию мы не знаем, — это отказ, который ПРОИЗОШЁЛ. Выбросив её
+      // без счётчика, мы бы обещали «неразобранное громко видно» и обещания не выполняли:
+      // отказ исчезал бы из `ExecOutcome`, из потока событий и из любого счётчика разом.
+      active.unrecognized += 1;
+      return;
+    }
+    active.collected.push(parsed.violation);
+    // Стримим по мере возникновения (R29): красная строка S5 появляется, пока процесс
+    // ещё жив, а не пакетом после выхода.
+    active.onViolation(parsed.violation);
   }
 
   /**
@@ -255,17 +316,21 @@ class SrtSingleton {
     return async (request: Request): Promise<{ action: 'allow' }> => {
       try {
         const bodyBytes = await countBody(request);
-        this.telemetry.push({ url: request.url, method: request.method, bodyBytes });
         const active = this.active;
         if (active !== undefined) {
           const violation: SandboxViolation = {
             type: 'network',
-            target: request.url,
+            // Сведённый URL, а не сырой: сырой уехал бы с query-строкой в цепочку аудита.
+            target: redactUrlForTarget(request.url),
             action: 'allowed',
             bytes: bodyBytes,
           };
           active.collected.push(violation);
-          active.onViolation(violation);
+          try {
+            active.onViolation(violation);
+          } catch {
+            active.consumerFailures += 1;
+          }
         }
       } catch {
         // Тело в try/catch, и ошибка даёт `allow`, а не `deny` (R26): политика уже
@@ -276,52 +341,51 @@ class SrtSingleton {
     };
   }
 
-  telemetrySnapshot(): readonly TelemetryRequest[] {
-    return [...this.telemetry];
-  }
-
   /**
    * Снятие вызова целиком (R46): **занять семафор → `updateConfig` политикой вызова →
    * обернуть → запустить → дождаться → убить группу и подтвердить её пустоту → drain-окно →
    * `updateConfig` пустым списком → освободить семафор.**
    *
-   * Освобождение **после** drain, а не до: иначе утверждение «под семафором всё, что видит
-   * колбэк, принадлежит текущему вызову» ложно ровно в том окне, ради которого drain и
-   * заведён.
+   * Снятие политики и drain живут в `finally`, а не на успешном пути. Иначе рецепт, чей
+   * `exec[0]` не существует на диске (`spawn` эмитит `error`), оставлял бы **глобальный**
+   * конфиг с allowlist упавшего вызова — в `none` это буквально `['*']`. Это ровно форма
+   * «на ошибке возвращаем allow», и запрещает её R52, объявляя идловым состоянием пустой
+   * список. Drain обязан переехать вместе со снятием: без него нарушения, приехавшие после
+   * падения тела, атрибутировались бы **следующему** вызову.
    */
   async withNetworkPolicy<T>(options: WithPolicyOptions<T>): Promise<InvocationResult<T>> {
-    if (this.disposed) throw new SrtManagerError(DISPOSED_MESSAGE);
     if (this.poisoned !== undefined) throw new SrtManagerError(this.poisoned);
 
     const base = this.baseConfig;
     if (base === undefined) throw new SrtManagerError('srt не инициализирован');
 
     const release = await this.semaphore.acquire();
-    let releaseCalled = false;
-    try {
-      this.active = {
-        commandId: options.commandId,
-        encoded: encodeSandboxedCommand(options.commandId),
-        classify: options.classify,
-        onViolation: options.onViolation,
-        collected: [],
-        lost: 0,
-        mismatches: 0,
-      };
 
+    // Отравление могло случиться, пока этот вызов стоял в очереди. Проверка ДО `acquire`
+    // его не видит, а без проверки здесь ждущий пошёл бы исполняться после того, как демон
+    // уже объявил, что новых вызовов не выдаёт.
+    if (this.poisoned !== undefined) {
+      release();
+      throw new SrtManagerError(this.poisoned);
+    }
+
+    const active: ActiveInvocation = {
+      encoded: encodeSandboxedCommand(options.commandId),
+      classify: options.classify,
+      onViolation: options.onViolation,
+      collected: [],
+      lost: 0,
+      missing: 0,
+      foreign: 0,
+      unrecognized: 0,
+      suppressed: 0,
+      consumerFailures: 0,
+    };
+    this.active = active;
+
+    try {
       applyNetwork(base, options.policy);
       const outcome = await options.body({ commandId: options.commandId });
-
-      await delay(DRAIN_WINDOW_MS);
-      applyNetwork(base, IDLE_NETWORK);
-
-      const active = this.active;
-      const result: InvocationResult<T> = {
-        value: outcome.value,
-        violations: active === undefined ? [] : [...active.collected],
-        violationsLost: active?.lost ?? 0,
-        attributionMismatches: active?.mismatches ?? 0,
-      };
 
       if (!outcome.groupDrained) {
         // Тихий проход здесь возвращает исходный дефект: фоновый потомок остаётся привязан
@@ -332,17 +396,31 @@ class SrtSingleton {
         throw new SrtManagerError(this.poisoned);
       }
 
-      this.active = undefined;
-      releaseCalled = true;
-      release();
-      return result;
+      return {
+        value: outcome.value,
+        violations: [...active.collected],
+        violationsLost: active.lost,
+        attributionMissing: active.missing,
+        attributionForeign: active.foreign,
+        unrecognizedLines: active.unrecognized,
+        suppressedLines: active.suppressed,
+        consumerFailures: active.consumerFailures,
+      };
     } finally {
-      if (!releaseCalled) {
-        this.active = undefined;
-        // Семафор освобождается на аварийном пути тоже — но только если он не отравлен:
-        // отравленный означает живого потомка, и следующий вызов обязан не начаться.
-        if (this.poisoned === undefined) release();
+      // Порядок внутри `finally` тот же, что был на успешном пути, и он несущий:
+      // drain → снять политику → отпустить семафор. Отпустить раньше снятия значит сделать
+      // ложным утверждение «под семафором всё, что видит колбэк, принадлежит текущему
+      // вызову» ровно в том окне, ради которого drain и заведён.
+      await delay(DRAIN_WINDOW_MS);
+      try {
+        applyNetwork(base, IDLE_NETWORK);
+      } catch (error) {
+        this.poisoned =
+          `не удалось вернуть allowlist в пустое состояние: ${String(error)}. ` +
+          'Демон не выдаёт новых вызовов до вмешательства (R52)';
       }
+      this.active = undefined;
+      release();
     }
   }
 
@@ -375,41 +453,29 @@ class SrtSingleton {
   }
 
   /**
-   * Счёт ссылок и флаг, после которого любой `run()` бросает (R50).
+   * Счёт ссылок; на последней — снос глобального состояния.
    *
-   * `reset()` у srt глобален, чистит `initializationPromise`, но **не** `config`, а
-   * `initialize` возвращается сразу, если промис уже стоит. Значит повторный `initialize` —
-   * тихий no-op, а вызов после `reset()` идёт со старым конфигом и
-   * `getProxyPort() === undefined`: прокси-переменные не эмитятся вовсе, и сеть оказывается
-   * тихо **открыта** в `none` и тихо **мертва** в `seatbelt`.
+   * Флаг «эта песочница мертва» живёт **в самой песочнице** (`onceDispose`), а не здесь, и
+   * различие несущее. R50 требует, чтобы `run()` бросал у **освобождённого экземпляра**; он
+   * не требует, чтобы процесс больше никогда не смог поднять песочницу. Сделав флаг
+   * процессным, мы запретили бы переключить режим на слайде S5 после того, как обе прошлые
+   * песочницы освобождены: `createSandbox` бросал бы до конца жизни процесса.
+   *
+   * Переподъём безопасен: `reset()` у srt чистит `initializationPromise`, поэтому следующий
+   * `initialize` проходит целиком и ставит свежий `config`. Опасен ровно тот случай, который
+   * R50 и называет: вызов **после** `reset()` без повторной инициализации.
    */
   async dispose(): Promise<void> {
     this.refs = Math.max(0, this.refs - 1);
     if (this.refs > 0) return;
-    if (this.disposed) return;
+    if (this.initPromise === undefined) return;
 
-    this.disposed = true;
     this.unsubscribe?.();
     this.unsubscribe = undefined;
     this.initPromise = undefined;
     this.baseConfig = undefined;
-    this.telemetry.length = 0;
-    await SandboxManager.reset();
-  }
-
-  /** Только для тестов: снимает флаг освобождения, чтобы следующий набор поднял всё заново. */
-  resetForTests(): void {
-    this.disposed = false;
-    this.poisoned = undefined;
-    this.refs = 0;
-    this.initPromise = undefined;
-    this.baseConfig = undefined;
     this.active = undefined;
-    this.telemetry.length = 0;
-  }
-
-  isPoisoned(): boolean {
-    return this.poisoned !== undefined;
+    await SandboxManager.reset();
   }
 }
 
@@ -418,8 +484,8 @@ class SrtSingleton {
  * пер-вызовный конфиг — это сохранённая база с заменой ровно **двух** доменных списков
  * (R56).
  *
- * Литерал из двух полей проходит проверку типов и при этом молча роняет `strictAllowlist`
- * (R43), `tlsTerminate` (D12) и `credentials`: телеметрия обнуляется, S5 показывает «0 KB»,
+ * Литерал из двух полей проходит проверку типов и молча роняет `strictAllowlist` (R43),
+ * `tlsTerminate` (D12) и `credentials`: телеметрия обнуляется, S5 показывает «0 KB»,
  * тесты зелёные.
  */
 function applyNetwork(base: SandboxRuntimeConfig, policy: NetworkPolicy): void {
@@ -457,12 +523,16 @@ function assertWildcardSurvived(policy: NetworkPolicy): void {
 }
 
 /**
- * Тело читается **не более `BODY_SAMPLE_BYTES`, после чего читатель явно отменяется**.
+ * Тело читается **не более `BODY_SAMPLE_BYTES` и не дольше `BODY_SAMPLE_MS`**, после чего
+ * читатель явно отменяется.
  *
  * Без отмены ветка tee продолжает буферизовать остаток загрузки для брошенного читателя —
  * то есть «прочитали до потолка и перестали» хуже, чем не читать вовсе, и это ровно
- * амплификация A13. Бесконечное тело обязано не подвешивать запрос, поэтому решение
- * возвращается сразу после отмены.
+ * амплификация A13.
+ *
+ * Потолок по времени нужен отдельно от потолка по байтам: прокси не идёт наверх, пока
+ * колбэк не вернул решение, поэтому тело, которое тянется медленно, но под лимитом байт,
+ * держало бы запрос до таймаута рецепта — и рабочий запрос отчитался бы как отказ.
  */
 async function countBody(request: Request): Promise<number> {
   const body = request.body;
@@ -470,13 +540,17 @@ async function countBody(request: Request): Promise<number> {
 
   const reader = body.getReader();
   let bytes = 0;
-  try {
+  const readLoop = async (): Promise<void> => {
     for (;;) {
       const chunk = await reader.read();
       if (chunk.done) break;
       bytes += chunk.value.byteLength;
       if (bytes >= BODY_SAMPLE_BYTES) break;
     }
+  };
+
+  try {
+    await Promise.race([readLoop(), delay(BODY_SAMPLE_MS)]);
   } finally {
     await reader.cancel().catch(() => undefined);
   }
