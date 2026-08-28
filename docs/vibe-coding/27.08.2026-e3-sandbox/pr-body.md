@@ -1,5 +1,4 @@
-**Гейты @ `769da6b0`:** plan-approved ✓ · build-test ✓ · review-internal ✓ · review-scan ✓ · review-bc ✓ · review-tests ✓ · review-errors ✓
-Бандл: `docs/vibe-coding/27.08.2026-e3-sandbox`
+> ⚠️ **Waived:** `review-internal` — дрейф после ревью — это слияние с main, а не новый код E3. Из 55 файлов ~48 привезли E1 и E6, каждый со своими пройденными гейтами на своём PR; мои 10 механичес… (полностью — в status.md); `review-scan` — дрейф после ревью — это слияние с main, а не новый код E3. Из 55 файлов ~48 привезли E1 и E6, каждый со своими пройденными гейтами на своём PR; мои 10 механичес… (полностью — в status.md) (+3 ещё — см. status.md)
 
 **Why:** **Ветка:** `v2/e3-sandbox` · **Трек:** full · **Источник истины:** `docs/06-epics.md:15`,
 
@@ -7,11 +6,9 @@
 
 | измерение | статус |
 |---|---|
-| internal | прошла |
-| scan | прошла |
-| bc | прошла |
-| tests | прошла |
-| errors | прошла |
+| internal | снят: дрейф после ревью — это слияние с main, а не новый код E3. Из 55 файлов ~48 привезли E1 и E6, каждый со своими пройденными гейтами на своём PR; мои 10 механические: переименование exec/policy.ts в exec/pure.ts под занятый E1 каталог src/policy/, сборка двух тестовых фикстур из частей по требованию стража секретов E6, три общих конфига и снятие двух моих тестов как дублей того, что привезли соседи. Логика E3 не менялась ни строкой. build-test перепрогнан на слитом дереве и зелёный (contracts 243, core 535). Решение владельца: веер не перезапуска
 
-**Доказательства:** plan-approved (1 файл(ов))
-**Скриншоты:** `docs/vibe-coding/27.08.2026-e3-sandbox/.review`
+**Гейты @ `eccae28b`:** plan-approved ✓ · build-test ✓ · review-internal ⚠ · review-scan ⚠ · review-bc ⚠ · review-tests ⚠ · review-errors ⚠
+Бандл: `docs/vibe-coding/27.08.2026-e3-sandbox`
+
+_Truncated — see `docs/vibe-coding/27.08.2026-e3-sandbox/status.md` and `docs/vibe-coding/27.08.2026-e3-sandbox/review.md`._
