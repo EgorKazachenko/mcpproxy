@@ -2,10 +2,10 @@
   "gate": "review-scan",
   "status": "pass",
   "exit_code": 0,
-  "codeTree": "cad3c3b200ab35ab59b8fd1a8afd3caf9eca76fb",
+  "codeTree": "850176bebff5fd7d20698e2686a60ffa5d32e60e",
   "codeDirty": false,
-  "headSha": "6524623d56f64385757b700fed691f74e2599108",
-  "startedAt": "2026-08-27T23:24:47.145Z",
+  "headSha": "3a4cc8880fbbd6ebb1edf73387f7dc64b4a97044",
+  "startedAt": "2026-08-28T00:04:10.105Z",
   "command": "node .claude/skills/vibe-code-developing-v2/scripts/review-verify.mjs --kind scan --feature docs/vibe-coding/27.08.2026-e2-validate",
   "evidencePath": null,
   "artifacts": []
