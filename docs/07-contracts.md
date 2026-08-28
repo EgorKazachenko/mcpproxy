@@ -324,6 +324,24 @@ distinguishes an absent key from `null` byte-for-byte, and both variants flow in
 hash. A call stopped at `lock_check` must be able to **have no `argv` at all** — otherwise it
 would carry a fabricated `argv: []`, and the UI would render it as a genuine empty command.
 
+**`argvFromParams`** — the positions in `argv` occupied by values taken from the call's
+parameters, i.e. by what the model controlled. It appears at `build_argv`, alongside `argv`
+itself. Without it the UI shows the assembled command and cannot say which part of it came
+from outside — while S2 promises "you see not what was allowed, but why".
+
+The parameters themselves are not in the event and will not be. They are known at `received`,
+i.e. **before** `validate`, and `canonicalizeJcs` throws on a lone surrogate and on exceeding
+the depth cap — a single crafted string from the model would make the event unhashable, and
+the append-only log would gain a hole chosen by the attacker. On top of that `Redaction.stream`
+has no member for parameters, so there would be nothing to cut a secret out of them with.
+
+The field's invariant: non-negative integers, strictly less than the length of `argv` **of the
+same event**, no duplicates; the key is present only when `argv` is present. The "same event"
+qualifier is load-bearing — what lands in the event is a safe copy of `argv` taken **after**
+redaction, and the indices must point into that copy, not into the original command. A
+non-finite number and a hole in the array both fail canonicalisation; both checks live in
+`jcs.ts` and are covered by tests, rather than being assumed.
+
 `durationUs` is the stage's monotonic duration from `process.hrtime.bigint()`, as an integer.
 It sits alongside the ISO timestamp, not in place of it: timestamps quantized to the
 millisecond carry an error on the order of the measurement itself, and wall clocks also jump
@@ -499,9 +517,16 @@ and without them neither scenario S8, nor attack A14, nor ASI09 is implementable
 | `ApprovalChannel` | `electron` \| `elicitation` |
 | `ApprovalDecision` | `approved` \| `denied` — there is no third member: expiry and cancellation are the **absence** of a verdict |
 | `ApprovalScope` | `once` \| `until` \| `recipe_and_args` |
-| `ApprovalRequest` | `requestId`, `sessionId`, `recipeName`, `argsHash`, `tier`, `argv`, `cwd`, `profile` |
+| `ApprovalRequest` | `requestId`, `sessionId`, `recipeName`, `argsHash`, `tier`, `argv`, `argvFromParams?`, `cwd`, `profile` |
 | `ApprovalVerdict` | `requestId`, `sessionId`, `channel`, `decision`, `scope`, `expiresAt` |
 | `ApprovalRecord` (in the event) | `channel`, `decision`, `scope`, `expiresAt`, `argsHash`, `sessionId` |
+
+`argvFromParams` is the same field as on `AuditEvent`, with the same invariant: the indices of
+the `argv` elements that were substituted from the call's parameters. Here it carries a second
+duty — the rule for picking the dangerous token (`R41`) must be **computable from what the
+window received**, not guessed by a heuristic. E5 fills it by **carrying over** the indices
+from the `build_argv` stage rather than recomputing them from values: a recomputation drifts
+exactly where redaction cut a secret out. The receipt is in `WORK.md`.
 
 `expiresAt` is an **absolute** ISO timestamp, not a relative TTL: an append-only record gets
 read months later, and "10 minutes" in it would no longer mean anything by then. `requestId`

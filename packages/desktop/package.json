@@ -3,22 +3,37 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "default": "./dist/index.js"
-    }
-  },
   "files": [
-    "dist"
+    "out",
+    "fixtures"
   ],
   "scripts": {
-    "build": "tsc -b",
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
     "typecheck": "tsc -b --noEmit false --emitDeclarationOnly",
-    "clean": "rm -rf dist *.tsbuildinfo"
+    "test": "tsc -b && vitest run",
+    "build:smoke": "MCPPROXY_OBSERVE=1 electron-vite build",
+    "test:smoke": "vitest run --config vitest.smoke.config.ts",
+    "clean": "rm -rf dist out *.tsbuildinfo",
+    "fixtures": "node scripts/build-fixtures.mjs"
   },
   "dependencies": {
     "@mcpproxy/contracts": "workspace:*",
-    "@mcpproxy/design": "workspace:*"
-  }
+    "@mcpproxy/design": "workspace:*",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.5",
+    "@vitejs/plugin-react": "^6.1.1",
+    "electron": "^43",
+    "electron-vite": "^5",
+    "es-module-lexer": "^2.3.2",
+    "playwright": "^1.62.1",
+    "typescript": "^5.6.3",
+    "vite": "7.3.6",
+    "vitest": "^3"
+  },
+  "main": "out/main/index.js"
 }

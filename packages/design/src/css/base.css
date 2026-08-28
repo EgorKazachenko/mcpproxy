@@ -106,7 +106,7 @@ pre, .argv {
 
 /* Разрушительное действие — единственная кнопка, которой красный положен. */
 .btn-danger {
-  background: var(--brand-base);
+  background: var(--brand);
   color: var(--text-on-brand);
   padding: var(--space-4) var(--space-7);
   border-radius: var(--radius-md);

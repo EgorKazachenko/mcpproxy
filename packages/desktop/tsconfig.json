@@ -1,18 +1,17 @@
 {
-  "extends": "../../tsconfig.base.json",
-  "compilerOptions": {
-    "rootDir": "src",
-    "outDir": "dist"
-  },
-  "include": [
-    "src/**/*.ts"
-  ],
+  "files": [],
   "references": [
     {
-      "path": "../contracts"
+      "path": "./tsconfig.shared.json"
     },
     {
-      "path": "../design"
+      "path": "./tsconfig.main.json"
+    },
+    {
+      "path": "./tsconfig.renderer.json"
+    },
+    {
+      "path": "./tsconfig.e2e.json"
     }
   ]
 }

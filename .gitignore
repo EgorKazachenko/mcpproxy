@@ -24,3 +24,4 @@ audit/*.jsonl
 # env
 .env
 .env.local
+out/

@@ -1,0 +1,9 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src/shared",
+    "outDir": "dist/types/shared"
+  },
+  "include": ["src/shared/**/*.ts"],
+  "references": [{ "path": "../contracts" }, { "path": "../design" }]
+}

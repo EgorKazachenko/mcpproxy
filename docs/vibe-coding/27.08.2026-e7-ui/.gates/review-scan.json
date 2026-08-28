@@ -1,0 +1,11 @@
+{
+  "gate": "review-scan",
+  "status": "waived",
+  "waived_by": "agent-recorded",
+  "reason": "Решение владельца 2026-08-28. То же, что и у review-internal: измерение отработало на bc3e963, дрейф — четыре файла из починки его же находок (jcs.ts, jcs.test.ts, guard.test.ts, appCss.test.ts). Перезапущены bc, tests и errors как владеющие этой поверхностью; scan завейвлен.",
+  "codeTree": "c86e85bd469ec2b6dad402b020ca02b2dae12a2b",
+  "codeDirty": false,
+  "headSha": "cad08c39318abcc9ffe47cc8e30d785231ecf18d",
+  "startedAt": "2026-08-28T06:54:09.399Z",
+  "artifacts": []
+}

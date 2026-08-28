@@ -189,6 +189,11 @@ First, the model itself tries to obtain approval via `elicitation/create`.
 An Electron window pops up — a separate process, outside the model's context — showing the
 exact argv, cwd, sandbox profile, and the list of domains the script will contact.
 Options: "allow once" / "for 10 minutes" / "always for this recipe and this args hash."
+Next to the selected option the window prints the **absolute** expiry — "Expires 27.08.2026,
+14:32:07" — and that is not decoration: per `R42` and ADR-0005, `ApprovalVerdict.expiresAt`
+stores absolute time, because an append-only record gets read months later, when "ten minutes"
+in it means nothing. The relative label on the control is what a human finds convenient to
+pick; the record is what has to outlive the picking.
 
 **Why it works.** Elicitation travels through the client and the model, meaning the approval
 would live in the very channel we consider compromised. This is OWASP ASI09 (Human-Agent
@@ -205,8 +210,10 @@ why tiers are derived automatically from annotations, and high-risk should be ra
 
 ## S9 — An audit trail that can't be rewritten
 
-**We show.** The audit tab, badge "chain verified." Then we hand-edit one record in the
-JSONL file and refresh.
+**We show.** The audit tab and the integrity badge — which names the mechanism and its
+anchor rather than delivering a verdict: "self-consistent · N records · no external anchor."
+The word "verified" would promise more than the mechanism delivers. Then we hand-edit one
+record in the JSONL file and refresh.
 
 **What the audience sees.** The badge turns red, showing the number of the record where the
 chain diverges. Exporting the log.

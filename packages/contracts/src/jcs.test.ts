@@ -73,6 +73,34 @@ describe('canonicalizeJcs — числа', () => {
     expect(() => canonicalizeJcs(Number.NaN)).toThrow(TypeError);
     expect(() => canonicalizeJcs(Number.POSITIVE_INFINITY)).toThrow(TypeError);
   });
+
+  /**
+   * Дырка в массиве — единственный вход, который раньше давал НЕ-JSON и не падал.
+   *
+   * Положительный контроль в первой строке: плотный массив тех же значений проходит, то есть
+   * зонд ловит именно дырку, а не массивы вообще. Дальше — вторая половина дефекта: то, что
+   * ушло бы на диск (`JSON.stringify`), и то, от чего брался дайджест, — разные тексты. Пока
+   * они разные, перечитанная запись даёт другой хэш, и append-only лог показывает разрыв
+   * цепочки там, где была опечатка производителя, а не подделка.
+   */
+  it('отвергает дырку в массиве: иначе дайджест берётся не от того, что уедет на диск', () => {
+    expect(canonicalizeJcs([1, 3])).toBe('[1,3]');
+
+    const sparse: (number | undefined)[] = [];
+    sparse[1] = 3;
+    expect(() => canonicalizeJcs(sparse)).toThrow(TypeError);
+    expect(() => canonicalizeJcs({ argvFromParams: sparse })).toThrow(TypeError);
+
+    // Ровно то расхождение, ради которого отказ и введён.
+    expect(JSON.stringify(sparse)).toBe('[null,3]');
+    expect(canonicalizeJcs(JSON.parse(JSON.stringify(sparse)))).toBe('[null,3]');
+  });
+
+  it('явный undefined в массиве отвергается так же, как дырка', () => {
+    // Иначе «плотный, но с пустым элементом» проходил бы там, где «дырявый» падает, и правило
+    // зависело бы от того, как массив собрали, а не от того, что в нём лежит.
+    expect(() => canonicalizeJcs([1, undefined, 3])).toThrow(TypeError);
+  });
 });
 
 describe('canonicalizeJcs — строки', () => {
