@@ -5,6 +5,20 @@ __metadata:
   version: 8
   cacheKey: 10
 
+"@anthropic-ai/sandbox-runtime@npm:0.0.74":
+  version: 0.0.74
+  resolution: "@anthropic-ai/sandbox-runtime@npm:0.0.74"
+  dependencies:
+    "@pondwader/socks5-server": "npm:^1.0.10"
+    commander: "npm:^12.1.0"
+    node-forge: "npm:^1.4.0"
+    zod: "npm:^3.24.1"
+  bin:
+    srt: dist/cli.js
+  checksum: 10/719fbf747acfe57815b86d280156fe78743ea40aeafb70d56f116f14b5027eeab6851dabe0d95fcb85eeb4023d3c5a442759e727c61cc9f3e921fcf2fd97a8ee
+  languageName: node
+  linkType: hard
+
 "@apidevtools/json-schema-ref-parser@npm:^11.5.5":
   version: 11.9.3
   resolution: "@apidevtools/json-schema-ref-parser@npm:11.9.3"
@@ -247,6 +261,7 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "@mcpproxy/core@workspace:packages/core"
   dependencies:
+    "@anthropic-ai/sandbox-runtime": "npm:0.0.74"
     "@mcpproxy/contracts": "workspace:*"
     "@types/node": "npm:^22"
     es-module-lexer: "npm:^2.3.2"
@@ -287,6 +302,13 @@ __metadata:
   version: 1.5.1
   resolution: "@napi-rs/lzma-linux-x64-gnu@npm:1.5.1"
   conditions: os=linux & cpu=x64 & libc=glibc
+  languageName: node
+  linkType: hard
+
+"@pondwader/socks5-server@npm:^1.0.10":
+  version: 1.0.10
+  resolution: "@pondwader/socks5-server@npm:1.0.10"
+  checksum: 10/20ba848e83bbc52f0caf578bc3ac83372aef209606cd4f0d6aaf644e58fd306723d68900d3a377bf869d10a996442a6f3bbb22475106d551624b166e0ad12ca2
   languageName: node
   linkType: hard
 
@@ -662,6 +684,13 @@ __metadata:
   languageName: node
   linkType: hard
 
+"commander@npm:^12.1.0":
+  version: 12.1.0
+  resolution: "commander@npm:12.1.0"
+  checksum: 10/cdaeb672d979816853a4eed7f1310a9319e8b976172485c2a6b437ed0db0a389a44cfb222bfbde772781efa9f215bdd1b936f80d6b249485b465c6cb906e1f93
+  languageName: node
+  linkType: hard
+
 "debug@npm:^4.4.1":
   version: 4.4.3
   resolution: "debug@npm:4.4.3"
@@ -1022,6 +1051,13 @@ __metadata:
   bin:
     nanoid: bin/nanoid.cjs
   checksum: 10/1b3b4fdac831b92b56d1dbe8b1e63a372432faf86ea383134e3b53141ef8108a60b7f84343b5cefecac9550bb74edf8164da93ea07d1c4f757039bc75d8a5d9e
+  languageName: node
+  linkType: hard
+
+"node-forge@npm:^1.4.0":
+  version: 1.4.0
+  resolution: "node-forge@npm:1.4.0"
+  checksum: 10/d70fd769768e646eda73343d4d4105ccb6869315d975905a22117431c04ae5b6df6c488e34ed275b1a66b50195a09b84b5c8aeca3b8605c20605fcb8e9f109d9
   languageName: node
   linkType: hard
 
@@ -1522,5 +1558,12 @@ __metadata:
   bin:
     yaml: bin.mjs
   checksum: 10/9a95e8e08651c3d292ab6a5befeb5f57b76801caa097c75bb45c9a70ce19c1b11f57e87a6ef84a579ea070ed2c2c8ac541c88c0ae684d544d5f42c7e77d11b7b
+  languageName: node
+  linkType: hard
+
+"zod@npm:^3.24.1":
+  version: 3.25.76
+  resolution: "zod@npm:3.25.76"
+  checksum: 10/f0c963ec40cd96858451d1690404d603d36507c1fc9682f2dae59ab38b578687d542708a7fdbf645f77926f78c9ed558f57c3d3aa226c285f798df0c4da16995
   languageName: node
   linkType: hard

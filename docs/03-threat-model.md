@@ -60,7 +60,7 @@ pnpm test
 | A10 | Чтение `~/.ssh`, `~/.aws`, keychain | базовая | 2 | `denyRead` в профиле |
 | A11 | **Запись в `.git/hooks`, `.zshrc` → исполнение позже** | mandatory deny из srt | 2 | неснимаемые deny-пути |
 | A12 | Утечка секретов из env в вывод | базовая | 1+2 | env-allowlist на входе, редакция на выходе |
-| A13 | Runaway-процесс, форк-бомба, заливание контекста | базовая | 2 | rlimits, timeout + SIGKILL по группе, cap на stdout |
+| A13 | Runaway-процесс, форк-бомба, заливание контекста | базовая | 2 | timeout + SIGKILL по группе процессов, cap на stdout. **Настоящих `setrlimit` нет** — см. `10-honest-limitations.md` |
 | A14 | **Подтверждение подделано через elicitation** | OWASP ASI09 | 5 | authoritative-апрув только out-of-band в Electron |
 | A15 | XSS/RCE в самом Electron | Electron security | арх. | contextIsolation, sandbox, CSP, валидация IPC |
 
