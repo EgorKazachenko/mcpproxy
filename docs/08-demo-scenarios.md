@@ -3,6 +3,14 @@
 Each scenario is written so it can both be demoed live and turned into a slide.
 The `/mcpproxy-deck` skill builds decks directly from these descriptions.
 
+> **Where the recording diverges from this document.** The trace the desktop app plays is
+> produced by `demo/record.mjs` running these scenarios through the real daemon over
+> `demo/repo`. Where today's code behaves differently from the description below — most
+> importantly S8, which is *refused* rather than *asked*, because the approval broker (E5)
+> does not exist yet — the differences are listed in [`demo/README.md`](../demo/README.md)
+> and asserted in `packages/desktop/src/main/trace.test.ts`. The recording is never adjusted
+> to match this document; this document is what the scenarios are *for*.
+
 ## Scenario Format
 
 Each scenario contains: **what we show → what the audience sees → why it works →
@@ -26,8 +34,10 @@ model executes it. An ordinary terminal, no visibility at all.
 **Caveat.** This doesn't mean the model is "dumb." It means the data channel and the
 instruction channel aren't separated — a structural problem, not a model-quality problem.
 
-**Recording safety.** The attack runs inside the demo repository; the exfiltration endpoint
-is a local listener, not a real external host.
+**Recording safety.** The attack runs inside the demo repository. In the recorded trace the
+exfiltration target is `example.com` — the reserved documentation domain, which has no
+receiving side — and the credentials it reads are fabricated by the recorder, not the
+viewer's own. See [`demo/README.md`](../demo/README.md).
 
 ---
 

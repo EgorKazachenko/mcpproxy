@@ -1,0 +1,120 @@
+# Манифест демо-репозитория. Это НЕ пример из документации: именно этот файл читает демон,
+# когда `demo/record.mjs` пишет трейс, который потом играет десктоп. Разойтись с показом он
+# не может — трейс собран его прогоном.
+#
+# Четыре рецепта, ни одного `execute_command`. Модель не передаёт строку команды: она
+# называет имя рецепта и параметры, argv собирает демон (И1).
+version: 1
+
+defaults:
+  timeout: 60s
+  output:
+    maxBytes: 65536
+    redact: true
+  env:
+    allow: ["PATH", "HOME", "LANG"]
+  sandbox:
+    read:
+      # `./secrets` лежит здесь ради S5: это то, до чего валидный вызов не должен дотянуться,
+      # и то, до чего он дотягивается в baseline-режиме. Содержимое файла поддельное.
+      deny: ["~/.ssh", "~/.aws", "~/.config/gh", "./secrets"]
+      allow: ["."]
+    write:
+      allow: []
+    network:
+      allow: []
+
+tools:
+  run_tests:
+    description: "Прогнать тесты проекта"
+    exec: ["./scripts/run-tests.sh"]
+    cwd: "."
+    params:
+      pattern:
+        type: string
+        required: false
+        pattern: "^[\\w./-]{0,64}$"
+        # ДВА элемента argv, а не склеенная строка: иначе значение и флаг едут одним
+        # аргументом и появляется место, куда что-то дописать (И2).
+        argv: ["--filter", "{}"]
+    annotations:
+      readOnlyHint: false
+      destructiveHint: false
+      idempotentHint: true
+      openWorldHint: false
+    sandbox:
+      write:
+        allow: ["/tmp"]
+      network:
+        allow: []
+    timeout: 60s
+
+  build_project:
+    description: "Собрать проект"
+    exec: ["./scripts/build.sh"]
+    cwd: "."
+    params:
+      target:
+        type: enum
+        required: false
+        values: ["debug", "release"]
+        argv: ["--mode", "{}"]
+    annotations:
+      readOnlyHint: false
+      destructiveHint: false
+      idempotentHint: true
+      openWorldHint: false
+    sandbox:
+      # Корень репозитория в `write.allow` — не щедрость, а условие S6: обязательные запреты
+      # якорятся на КАЖДОМ корне записи, и `.git/hooks` защищён только внутри разрешённого.
+      write:
+        allow: [".", "/tmp"]
+      network:
+        allow: []
+    timeout: 60s
+
+  analyze_logs:
+    description: "Разобрать логи приложения"
+    exec: ["./scripts/analyze-logs.sh"]
+    cwd: "."
+    params:
+      file:
+        type: path
+        root: "./logs"
+        required: true
+        argv: ["{}"]
+    annotations:
+      readOnlyHint: true
+      destructiveHint: false
+      idempotentHint: true
+      openWorldHint: false
+    sandbox:
+      read:
+        allow: ["./logs"]
+      write:
+        allow: []
+      network:
+        allow: []
+    timeout: 30s
+
+  publish_release:
+    description: "Опубликовать релиз"
+    exec: ["./scripts/publish.sh"]
+    cwd: "."
+    params:
+      tag:
+        type: string
+        required: true
+        pattern: "^v\\d+\\.\\d+\\.\\d+$"
+        argv: ["{}"]
+    annotations:
+      readOnlyHint: false
+      destructiveHint: true
+      idempotentHint: false
+      openWorldHint: true
+    sandbox:
+      write:
+        allow: ["/tmp"]
+      network:
+        allow: ["registry.npmjs.org", "api.github.com"]
+    timeout: 60s

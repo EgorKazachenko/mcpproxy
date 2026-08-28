@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { asRecipeName, type PatternMatcher, type Recipe } from '@mcpproxy/contracts';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { ResolvedValues } from './denial.js';
-import { buildArgv } from './argv.js';
+import { buildArgv, buildArgvWithOrigin } from './argv.js';
 import { validateParams } from './params.js';
 import { resolvePaths } from './paths.js';
 import { prepareRecipe, type PreparedRecipe } from './prepare.js';
@@ -153,4 +153,66 @@ describe('buildArgv — подстановка не интерпретирует
     expect(argv.at(-1)).toBe(`--file=${realpathSync(join(root, 'a$`b.log'))}`);
     expect(argv.at(-1)).not.toContain('--file=--file=');
   });
+});
+
+describe('buildArgvWithOrigin — происхождение элементов команды (AuditEvent.argvFromParams)', () => {
+  /** Тот же прогон трёх стадий, но с сохранённым происхождением. */
+  function builtOf(prepared: PreparedRecipe, params: Readonly<Record<string, unknown>>) {
+    const validated = validateParams(prepared, params);
+    if (!validated.ok) throw new Error(`validate: ${validated.denials.map((one) => one.code).join()}`);
+    const resolved = resolvePaths(prepared, validated.values);
+    if (!resolved.ok) throw new Error(`resolve_paths: ${resolved.denials.map((one) => one.code).join()}`);
+    return buildArgvWithOrigin(prepared, resolved.values);
+  }
+
+  const prepared = prepare({
+    description: 'о',
+    exec: ['/usr/bin/true', 'test'],
+    params: {
+      pattern: { type: 'enum', values: ['auth'], argv: ['--filter', '{}'] },
+      update: { type: 'boolean', argv: ['-u'] },
+    },
+  });
+
+  it('индекс указывает на ЗНАЧЕНИЕ, а не на флаг рядом с ним', () => {
+    const built = builtOf(prepared, { pattern: 'auth' });
+    expect(built.argv).toEqual(['/usr/bin/true', 'test', '--filter', 'auth']);
+    // Флаг `--filter` написан автором рецепта и накрыт хэшем lock; снаружи пришло только `auth`.
+    expect(built.fromParams).toEqual([3]);
+  });
+
+  it('булев параметр индексов не даёт: текст его элементов целиком из манифеста', () => {
+    const built = builtOf(prepared, { update: true });
+    expect(built.argv).toEqual(['/usr/bin/true', 'test', '-u']);
+    expect(built.fromParams).toEqual([]);
+  });
+
+  it('вызов без подстановок даёт пустой список, а не отсутствие поля', () => {
+    expect(builtOf(prepared, {}).fromParams).toEqual([]);
+  });
+
+  it('индексы удовлетворяют инварианту контракта на СВОЁМ argv', () => {
+    const built = builtOf(prepared, { pattern: 'auth', update: true });
+    expect(new Set(built.fromParams).size).toBe(built.fromParams.length);
+    for (const index of built.fromParams) {
+      expect(Number.isInteger(index)).toBe(true);
+      expect(index).toBeGreaterThanOrEqual(0);
+      expect(index).toBeLessThan(built.argv.length);
+    }
+  });
+
+  it('buildArgv — та же команда, что и у версии с происхождением', () => {
+    expect(buildArgv(prepared, resolvePathsFor(prepared, { pattern: 'auth' }))).toEqual(
+      builtOf(prepared, { pattern: 'auth' }).argv,
+    );
+  });
+
+  /** Карта резолва для сверки двух входов: считать её дважды в одном тесте незачем. */
+  function resolvePathsFor(one: PreparedRecipe, params: Readonly<Record<string, unknown>>): ResolvedValues {
+    const validated = validateParams(one, params);
+    if (!validated.ok) throw new Error('фикстура не прошла валидацию');
+    const resolved = resolvePaths(one, validated.values);
+    if (!resolved.ok) throw new Error('фикстура не прошла резолв');
+    return resolved.values;
+  }
 });

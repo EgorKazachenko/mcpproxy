@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { stageOrder } from '@mcpproxy/contracts';
 import { verifyChain } from '@mcpproxy/contracts/audit';
 import { describe, expect, it } from 'vitest';
 import { foldCalls } from '../shared/call.js';
@@ -36,6 +37,12 @@ describe('readTrace', () => {
   });
 });
 
+/**
+ * Фикстура — **запись**, а не выдумка: её пишет `demo/record.mjs`, прогоняя сценарии через
+ * настоящий демон над `demo/repo`. Утверждения ниже поэтому проверяют не «мы нарисовали
+ * нужные поля», а «система действительно так себя ведёт»: любая правка, меняющая исход
+ * сценария, приедет сюда следующей перезаписью и покраснеет здесь.
+ */
 describe('закоммиченная фикстура', () => {
   /**
    * Главное утверждение этой задачи.
@@ -56,15 +63,33 @@ describe('закоммиченная фикстура', () => {
   });
 
   /**
-   * Вызов, остановленный на стадии, обязан НЕ ИМЕТЬ ключа `argv` вовсе: выдуманный пустой
-   * массив отрисовался бы настоящей пустой командой.
+   * Вызов, остановленный ДО сборки команды, обязан не иметь ключа `argv` вовсе: выдуманный
+   * пустой массив отрисовался бы настоящей пустой командой.
+   *
+   * Граница — стадия, а не вердикт. Прежняя редакция требовала отсутствия `argv` у КАЖДОГО
+   * отказанного вызова и была верна лишь пока фикстуру рисовали руками: `publish_release`
+   * отказан на `approval`, то есть уже после `build_argv`, и команда у него есть — её и
+   * обязан показать человек, решающий про подтверждение. Условие «нет argv у отказа» вырезало
+   * бы из записи ровно тот вызов, ради которого поле в событии и заведено.
    */
-  it('у остановленного вызова нет ключа argv', async () => {
+  it('у вызова, остановленного до build_argv, нет ключа argv', async () => {
     const calls = foldCalls(unwrap(readTrace(await load('demo.jsonl'))));
-    const denied = calls.filter((c) => c.verdict === 'denied');
-    expect(denied.length).toBeGreaterThan(0);
-    for (const call of denied) {
+    const beforeArgv = stageOrder.indexOf('build_argv');
+    const stoppedEarly = calls.filter(
+      (c) => c.verdict === 'denied' && stageOrder.indexOf(c.stages[c.stages.length - 1]?.stage ?? 'received') < beforeArgv,
+    );
+    expect(stoppedEarly.length).toBeGreaterThan(0);
+    for (const call of stoppedEarly) {
       for (const event of call.stages) expect(Object.hasOwn(event, 'argv')).toBe(false);
+    }
+
+    // И обратная половина: вызов, дошедший до сборки, команду в записи НЕСЁТ.
+    const stoppedLate = calls.filter(
+      (c) => c.verdict === 'denied' && stageOrder.indexOf(c.stages[c.stages.length - 1]?.stage ?? 'received') > beforeArgv,
+    );
+    expect(stoppedLate.length).toBeGreaterThan(0);
+    for (const call of stoppedLate) {
+      expect(call.stages.some((e) => Object.hasOwn(e, 'argv'))).toBe(true);
     }
   });
 
@@ -103,7 +128,7 @@ describe('закоммиченная фикстура', () => {
    * Проверяется исходами, а не именами сценариев: имя в фикстуре — комментарий, а исход —
    * то, что действительно отрисуется. S3 и S4 дают отказ на `validate` и на `resolve_paths`,
    * S5 — пару прогонов с прошедшим и отбитым нарушением, S6 — `mandatory-deny`, S7 — стоп на
-   * `lock_check`, S8 — ожидание подтверждения.
+   * `lock_check`, S8 — стоп на `approval`.
    */
   it('покрывает сценарии, у которых в этом ране есть поверхность', async () => {
     const calls = foldCalls(unwrap(readTrace(await load('demo.jsonl'))));
@@ -117,6 +142,27 @@ describe('закоммиченная фикстура', () => {
     expect(violations.some((v) => v.action === 'allowed')).toBe(true); // S5, прогон без песочницы
     expect(violations.some((v) => v.action === 'denied')).toBe(true); // S5, прогон с песочницей
     expect(violations.some((v) => v.type === 'mandatory-deny')).toBe(true); // S6
-    expect(calls.some((c) => c.verdict === 'pending_approval')).toBe(true); // S8
+    expect(stoppedAt('approval')).toBe(true); // S8
+  });
+
+  /**
+   * S8 останавливается ОТКАЗОМ, а не ожиданием, и это не упрощение фикстуры, а состояние
+   * системы: брокера подтверждений (E5) в дереве нет, и конвейер на `tier: 'high'` отвечает
+   * `approval-unavailable` — fail-closed. Прежняя редакция этого теста ждала здесь
+   * `pending_approval`, потому что фикстура была нарисована руками и могла обещать то, чего
+   * код не делает. Утверждение перевёрнуто НАМЕРЕННО: `pending_approval` в записи означал бы,
+   * что брокер появился, — и тогда красный тест напомнит дописать сюда ожидание.
+   */
+  it('high-risk сегодня отказан, а не поставлен в ожидание — брокера апрувов ещё нет', async () => {
+    const calls = foldCalls(unwrap(readTrace(await load('demo.jsonl'))));
+    const high = calls.filter((c) => c.stages.some((e) => e.risk?.tier === 'high'));
+    expect(high.length).toBeGreaterThan(0);
+
+    for (const call of high) {
+      expect(call.verdict).toBe('denied');
+      expect(call.stages.at(-1)?.stage).toBe('approval');
+      expect(call.stages.at(-1)?.denyReason).toContain('approval-unavailable');
+    }
+    expect(calls.some((c) => c.verdict === 'pending_approval')).toBe(false);
   });
 });
