@@ -10,6 +10,7 @@ const VERIFIED: LockVerdict = {
   diagnostics: [],
   mismatched: [],
   digest: null,
+  denyCode: null,
   denyReason: null,
 };
 
@@ -18,6 +19,7 @@ const ABSENT: LockVerdict = {
   diagnostics: [],
   mismatched: [],
   digest: null,
+  denyCode: 'lock-absent',
   denyReason: 'lock-absent: mcpproxy.lock отсутствует, одобрения нет',
 };
 

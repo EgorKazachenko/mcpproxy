@@ -26,7 +26,10 @@ describe('requestFor', () => {
     const request = requestFor(store.current(), REQUESTED_AT);
 
     expect(request?.kind).toBe('first');
-    expect(request?.kind === 'first' && request.recipes).toEqual(['run_tests']);
+    expect(request?.kind === 'first' && request.recipes.map((one) => one.name)).toEqual(['run_tests']);
+    // Содержимое, а не только имя: без него команда закрепляет отравленный `exec`, ни разу его
+    // не показав, — ровно та последовательность, против которой ветка и заведена.
+    expect(request?.kind === 'first' && request.recipes[0]?.snapshot.own.exec).toEqual(['pnpm', 'test']);
     expect(request?.manifestHash).toBe(store.current().manifest.digest);
   });
 
@@ -40,6 +43,7 @@ describe('requestFor', () => {
     expect(request?.kind).toBe('unusable');
     expect(request?.kind === 'unusable' && request.reason).toBe('unparsed');
     expect(request?.kind === 'unusable' && request.diagnostics.length).toBe(2);
+    expect(request?.kind === 'unusable' && request.recipes[0]?.snapshot.own.exec).toEqual(['pnpm', 'test']);
   });
 
   it('нечитаемый lock отличается от неразобранного и там же', async () => {

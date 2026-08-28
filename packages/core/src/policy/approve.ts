@@ -1,4 +1,5 @@
-import type { ApprovalDecision, Diagnostic, LockDiff } from '@mcpproxy/contracts';
+import { normalizeRecipe } from '@mcpproxy/contracts';
+import type { ApprovalDecision, Diagnostic, LockDiff, NormalizedRecipe } from '@mcpproxy/contracts';
 import type { LoadedManifest } from './lock-check.js';
 import type { LoadedPolicy } from './store.js';
 
@@ -19,11 +20,26 @@ import type { LoadedPolicy } from './store.js';
  * подстановка пустого диффа столкнулась бы с веткой «дрифт есть, показать нечего» — и человек
  * получил бы текст про подделку на ошибке доступа.
  */
+/**
+ * Рецепт, который команда собирается закрепить, — **вместе с содержимым**.
+ *
+ * Одного имени мало, и это не стилистика. R15b заведён против последовательности «удалить lock →
+ * отравить манифест → человек упирается в `denied (absent)` и запускает команду». Показав ему
+ * `- run_tests` — имя, которое стояло там и до атаки, — команда закрепляет отравленные `exec` и
+ * `description`, **ни разу их не показав**: ровно тот исход, который требование объявляет
+ * предотвращённым. Спека говорит «список рецептов», но предыдущим же предложением требует
+ * «показывает **то, что собирается закрепить**», и выиграть обязано второе.
+ */
+export interface PinnedRecipe {
+  readonly name: string;
+  readonly snapshot: NormalizedRecipe;
+}
+
 export type LockApprovalRequest =
   | {
       readonly kind: 'first';
-      /** Рецепты, которые впервые получают одобрение. */
-      readonly recipes: readonly string[];
+      /** Рецепты, которые впервые получают одобрение, с содержимым. */
+      readonly recipes: readonly PinnedRecipe[];
       readonly manifestHash: string;
       readonly requestedAt: string;
     }
@@ -39,6 +55,8 @@ export type LockApprovalRequest =
       readonly kind: 'unusable';
       readonly reason: 'unreadable' | 'unparsed';
       readonly diagnostics: readonly Diagnostic[];
+      /** То же и по той же причине: испорченный lock закрепляется так же вслепую, как удалённый. */
+      readonly recipes: readonly PinnedRecipe[];
       readonly manifestHash: string;
       readonly requestedAt: string;
     };
@@ -74,19 +92,19 @@ export function requestFor(policy: LoadedPolicy, requestedAt: string): LockAppro
     return { kind: 'drift', diff: check.diff, mismatched, digest, manifestHash, requestedAt };
   }
 
-  const first: LockApprovalRequest = {
-    kind: 'first',
-    recipes: Object.keys(policy.manifest.manifest.tools).sort(),
-    manifestHash,
-    requestedAt,
-  };
+  const { manifest } = policy.manifest;
+  const recipes: PinnedRecipe[] = Object.entries(manifest.tools)
+    .map(([name, recipe]) => ({ name, snapshot: normalizeRecipe(recipe, manifest.defaults) }))
+    .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+
+  const first: LockApprovalRequest = { kind: 'first', recipes, manifestHash, requestedAt };
 
   // `absent` при разобранном lock невозможно: `checkLock` производит его только из
   // отсутствующего, нечитаемого или неразобранного файла. Ветка существует ради тотальности
   // и ведёт себя как «файла нет» — то есть спрашивает, а не пишет молча.
   if (policy.lock.present || policy.lock.reason === 'missing') return first;
 
-  return { kind: 'unusable', reason: policy.lock.reason, diagnostics, manifestHash, requestedAt };
+  return { kind: 'unusable', reason: policy.lock.reason, diagnostics, recipes, manifestHash, requestedAt };
 }
 
 /**

@@ -1,5 +1,6 @@
 import type { NormalizedDefaults, NormalizedRecipe } from '@mcpproxy/contracts';
-import type { LockApprovalRequest } from './approve.js';
+import type { LockApprovalRequest, PinnedRecipe } from './approve.js';
+import { isEmptyDiff } from './shapes.js';
 
 /**
  * Рендер того, что показывают человеку перед записью lock.
@@ -24,7 +25,7 @@ import type { LockApprovalRequest } from './approve.js';
 
 const INVISIBLE = /[\p{Cc}\p{Cf}]/gu;
 
-/** `U+202E` в тексте становится семью печатными символами `<U+202E>`. */
+/** `U+202E` в тексте становится восемью печатными символами `<U+202E>`. */
 export function renderVisible(raw: string): string {
   return raw.replace(INVISIBLE, (char) => {
     const code = char.codePointAt(0) ?? 0;
@@ -52,18 +53,35 @@ const show = (value: NormalizedRecipe | NormalizedDefaults): string => JSON.stri
 
 const names = (values: readonly string[]): string => values.map((one) => renderVisible(one)).join(', ');
 
+/** Список рецептов с содержимым — то, что команда собирается закрепить. */
+const renderPinned = (recipes: readonly PinnedRecipe[]): string[] =>
+  recipes.flatMap((one) => ['', `Рецепт ${renderVisible(one.name)}:`, show(one.snapshot)]);
+
 function renderDrift(request: Extract<LockApprovalRequest, { kind: 'drift' }>): string[] {
   const lines: string[] = [];
   const { diff, mismatched, digest } = request;
-  const empty = diff.defaults === null && diff.added.length === 0 && diff.removed.length === 0 && diff.changed.length === 0;
+  const empty = isEmptyDiff(diff);
+
+  // Улика подделки печатается ВСЕГДА, а не только когда дифф пуст. Прежняя редакция читала
+  // `mismatched` лишь внутри ветки пустого диффа, а состояние «запись подделана И дифф непуст»
+  // достижимо и типично: атакующий правит `snapshot.own.exec`, оставляя прежний `recipeHash`, —
+  // тогда `verifyLockEntries` краснеет, `diffLock` кладёт рецепт в `changed`, и человек видит
+  // обычный дифф, чья сторона «было» целиком сочинена атакующим, без единого признака подделки.
+  if (mismatched.length > 0) {
+    lines.push('ВНИМАНИЕ: lock подделан — записи противоречат собственным дайджестам.');
+    lines.push(`Расходятся: ${names(mismatched)}`);
+    lines.push('Сторона «было» у этих записей взята из lock и потому НЕ является доверенной.');
+    lines.push('');
+  }
 
   if (empty) {
     // Показать здесь пустой дифф значило бы сказать человеку «что-то изменилось, показать
     // нечего» на самом враждебном из путей (R19a). Путей два, и текст у них разный.
     if (mismatched.length > 0) {
-      lines.push('lock подделан: записи противоречат собственным дайджестам.');
-      lines.push(`Расходятся: ${names(mismatched)}`);
       lines.push('Снимок в lock совпадает с манифестом, поэтому дифф пуст, — но записанный дайджест ему противоречит.');
+      if (digest !== null) {
+        lines.push(`Дайджест манифеста был ${renderVisible(digest.was)}, стал ${renderVisible(digest.is)}.`);
+      }
     } else if (digest !== null) {
       lines.push('lock пересчитан целиком под изменённый манифест, а дайджест манифеста оставлен прежним.');
       lines.push(`Дайджест манифеста был ${renderVisible(digest.was)}, стал ${renderVisible(digest.is)}.`);
@@ -95,8 +113,8 @@ export function renderRequest(request: LockApprovalRequest): string {
   switch (request.kind) {
     case 'first':
       lines.push('mcpproxy.lock отсутствует: одобрение выдаётся впервые.');
-      lines.push('', 'Одобрение получат рецепты:');
-      for (const name of request.recipes) lines.push(`  - ${renderVisible(name)}`);
+      lines.push('', 'Одобрение получат следующие рецепты — читайте exec, cwd, env и песочницу:');
+      lines.push(...renderPinned(request.recipes));
       break;
 
     case 'unusable':
@@ -110,6 +128,8 @@ export function renderRequest(request: LockApprovalRequest): string {
         const pointer = one.pointer === '' ? '(документ)' : renderVisible(one.pointer);
         lines.push(`  - ${pointer}: ${renderVisible(one.message)}`);
       }
+      lines.push('', 'Будут закреплены следующие рецепты — читайте exec, cwd, env и песочницу:');
+      lines.push(...renderPinned(request.recipes));
       break;
 
     case 'drift':
@@ -118,5 +138,6 @@ export function renderRequest(request: LockApprovalRequest): string {
   }
 
   lines.push('', `Дайджест манифеста: ${renderVisible(request.manifestHash)}`);
+  lines.push(`Запрошено: ${renderVisible(request.requestedAt)}`);
   return lines.join('\n');
 }

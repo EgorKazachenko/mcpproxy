@@ -1,12 +1,18 @@
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import type { LockFile } from '@mcpproxy/contracts';
 import type { LockApprovalRequest, LockApprovalVerdict } from './approve.js';
-import { runLockCommand } from './lock-command.js';
+import { LockWriteError } from './lock-write.js';
+import type { WriteResult } from './lock-write.js';
+import { mainLockCommand, runLockCommand } from './lock-command.js';
 import {
   BROKEN_YAML,
   CHANGED_YAML,
   LOCK_PATH,
   MANIFEST_PATH,
+  MANIFEST_YAML,
   lockTextFor,
   memoryDisk,
   started,
@@ -32,13 +38,15 @@ function human(decision: 'approved' | 'denied', before?: () => void) {
 }
 
 /** Запись в тот же диск в памяти, чтобы «файл создан» было наблюдаемым. */
-function writer(disk: MemoryDisk) {
+function writer(disk: MemoryDisk, fail?: Error) {
   const written: LockFile[] = [];
   return {
     written,
-    write: async (lockPath: string, lock: LockFile): Promise<void> => {
+    write: async (lockPath: string, lock: LockFile): Promise<WriteResult> => {
+      if (fail !== undefined) throw fail;
       written.push(lock);
       disk.write(lockPath, `${JSON.stringify(lock, null, 2)}\n`);
+      return { durable: true };
     },
   };
 }
@@ -123,7 +131,7 @@ describe('runLockCommand: успешный путь', () => {
 
     const outcome = await runLockCommand(store, asker.confirm, null, { lockPath: LOCK_PATH, now: () => NOW, write: sink.write });
 
-    expect(outcome).toEqual({ kind: 'written' });
+    expect(outcome).toEqual({ kind: 'written', durable: true });
     expect(sink.written).toHaveLength(1);
     expect(sink.written[0]?.manifestHash).toBe(store.current().manifest.digest);
   });
@@ -149,7 +157,7 @@ describe('runLockCommand: успешный путь', () => {
     const outcome = await runLockCommand(store, human('approved').confirm, null, { lockPath: LOCK_PATH, now: () => NOW, write: sink.write });
     await store.reloadLock();
 
-    expect(outcome).toEqual({ kind: 'written' });
+    expect(outcome).toEqual({ kind: 'written', durable: true });
     expect(store.current().verdict.check.status).toBe('verified');
   });
 });
@@ -168,7 +176,12 @@ describe('runLockCommand: окно CVE-2025-54136', () => {
 
     const outcome = await runLockCommand(store, asker.confirm, null, { lockPath: LOCK_PATH, now: () => NOW, write: sink.write });
 
-    expect(outcome).toEqual({ kind: 'refused', why: 'stale' });
+    expect(outcome.kind).toBe('refused');
+    expect(outcome.kind === 'refused' && outcome.why).toBe('stale');
+    // Улика, а не тег: оператор должен увидеть, что одобрял и что лежит на диске.
+    expect(outcome.kind === 'refused' && outcome.why === 'stale' && outcome.approved).not.toBe(
+      outcome.kind === 'refused' && outcome.why === 'stale' && outcome.onDisk,
+    );
     expect(sink.written).toEqual([]);
   });
 
@@ -182,7 +195,8 @@ describe('runLockCommand: окно CVE-2025-54136', () => {
 
     const outcome = await runLockCommand(store, asker.confirm, null, { lockPath: LOCK_PATH, now: () => NOW, write: sink.write });
 
-    expect(outcome).toEqual({ kind: 'refused', why: 'reload-failed' });
+    expect(outcome.kind === 'refused' && outcome.why).toBe('reload-failed');
+    expect(outcome.kind === 'refused' && outcome.why === 'reload-failed' && outcome.diagnostics.length).toBeGreaterThan(0);
     expect(sink.written).toEqual([]);
   });
 });
@@ -196,7 +210,8 @@ describe('runLockCommand: expectDigest связывает процессы', () 
 
     const outcome = await runLockCommand(store, asker.confirm, 'f'.repeat(64), { lockPath: LOCK_PATH, now: () => NOW, write: sink.write });
 
-    expect(outcome).toEqual({ kind: 'refused', why: 'expect-mismatch' });
+    expect(outcome.kind === 'refused' && outcome.why).toBe('expect-mismatch');
+    expect(outcome.kind === 'refused' && outcome.why === 'expect-mismatch' && outcome.expected).toBe('f'.repeat(64));
     expect(asker.asked).toEqual([]);
     expect(sink.written).toEqual([]);
   });
@@ -212,7 +227,69 @@ describe('runLockCommand: expectDigest связывает процессы', () 
       write: sink.write,
     });
 
-    expect(outcome).toEqual({ kind: 'written' });
+    expect(outcome).toEqual({ kind: 'written', durable: true });
+  });
+});
+
+describe('runLockCommand: отказ записи — свой исход, а не отказ человека', () => {
+  it('ошибка записи не улетает исключением и не притворяется отказом', async () => {
+    // До правки исключение уходило в top-level await скрипта и давало код 1 — тот же, что и
+    // «человек сказал нет», то есть EACCES и осознанный отказ были неразличимы для CI.
+    const disk = memoryDisk();
+    const store = await started(disk);
+    const sink = writer(disk, new LockWriteError('ERR_LOCK_TOO_LARGE', 'lock занял бы слишком много'));
+
+    const outcome = await runLockCommand(store, human('approved').confirm, null, {
+      lockPath: LOCK_PATH,
+      now: () => NOW,
+      write: sink.write,
+    });
+
+    expect(outcome).toEqual({
+      kind: 'write-failed',
+      code: 'ERR_LOCK_TOO_LARGE',
+      message: 'lock занял бы слишком много',
+    });
+  });
+
+  it('несинхронизированный каталог — предупреждение, а не отказ: файл уже записан', async () => {
+    const disk = memoryDisk();
+    const store = await started(disk);
+
+    const outcome = await runLockCommand(store, human('approved').confirm, null, {
+      lockPath: LOCK_PATH,
+      now: () => NOW,
+      write: async () => ({ durable: false, reason: 'EPERM' }),
+    });
+
+    expect(outcome).toEqual({ kind: 'written', durable: false, reason: 'EPERM' });
+  });
+});
+
+describe('mainLockCommand: контракт кодов выхода', () => {
+  it('сломанный манифест — код 2 и никакого lock', async () => {
+    // Единственная ветка `mainLockCommand`, не требующая stdin, — и она же охраняет R3:
+    // сломанный манифест есть отказ, а не повод записать lock. `return 0`, просочившийся сюда,
+    // уехал бы зелёным без этого утверждения.
+    const dir = mkdtempSync(join(tmpdir(), 'mcpproxy-main-'));
+    try {
+      writeFileSync(join(dir, 'mcpproxy.yaml'), BROKEN_YAML);
+      expect(await mainLockCommand([], dir)).toBe(2);
+      expect(existsSync(join(dir, 'mcpproxy.lock'))).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('битый --expect отказывает ДО загрузки и не пишет ничего', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mcpproxy-main-'));
+    try {
+      writeFileSync(join(dir, 'mcpproxy.yaml'), MANIFEST_YAML);
+      expect(await mainLockCommand(['--expect'], dir)).toBe(2);
+      expect(existsSync(join(dir, 'mcpproxy.lock'))).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 

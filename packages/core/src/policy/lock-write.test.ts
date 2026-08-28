@@ -1,11 +1,13 @@
-import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import type { LockEntry, LockFile } from '@mcpproxy/contracts';
 import { manifestHash } from '@mcpproxy/contracts/audit';
 import { parseLockFile } from '@mcpproxy/contracts/validate';
 import { LOCK_PATH, memoryDisk, started } from './policy.fixture.js';
-import { buildLock, writeLock } from './lock-write.js';
+import { LockWriteError, buildLock, writeLock } from './lock-write.js';
+import { LOCK_MAX_BYTES } from './store.js';
 import type { FileHandleLike, WriteDeps } from './lock-write.js';
 import type { LoadedManifest } from './lock-check.js';
 
@@ -123,6 +125,43 @@ describe('writeLock: атомарность', () => {
     await expect(writeLock(lockPath, buildLock(loaded, APPROVED_AT), failing)).rejects.toThrow('rename упал');
     expect(readdirSync(dir)).toEqual(['mcpproxy.lock']);
   });
+});
+
+describe('writeLock: потолок писателя равен потолку читателя', () => {
+  it('lock сверх предела не пишется вовсе — отказ, а не файл, который читатель отвергнет', async () => {
+    // Инвариант, а не симметрия констант. Без него сборка расходится сама с собой: команда
+    // пишет файл, загрузчик того же процесса объявляет его непригодным, каждый вызов отказан,
+    // и повторный запуск команды пишет те же байты. Отношение манифест→lock не ограничено
+    // ничем (`snapshot.effective` копируется в каждую запись), поэтому достижимо это на
+    // ЗАКОННОМ манифесте — значит отказ обязан быть диагностируемым.
+    const lockPath = join(dir, 'mcpproxy.lock');
+    const padded = oversized();
+
+    // Убеждаемся, что фикстура действительно перешагнула предел, иначе тест был бы вакуумным.
+    expect(Buffer.byteLength(JSON.stringify(padded, null, 2), 'utf8')).toBeGreaterThan(LOCK_MAX_BYTES);
+
+    await expect(writeLock(lockPath, padded, {})).rejects.toThrow(LockWriteError);
+    expect(existsSync(lockPath)).toBe(false);
+    expect(readdirSync(dir)).toEqual([]);
+  });
+
+  it('и код отказа машиночитаем', async () => {
+    await expect(writeLock(join(dir, 'mcpproxy.lock'), oversized(), {})).rejects.toMatchObject({
+      code: 'ERR_LOCK_TOO_LARGE',
+    });
+  });
+
+  /** Lock заведомо сверх предела. Форма честная — та же запись, размноженная по именам. */
+  function oversized(): LockFile {
+    const one = buildLock(loaded, APPROVED_AT);
+    const entry = one.tools.run_tests as LockEntry;
+    return {
+      ...one,
+      tools: Object.fromEntries(
+        Array.from({ length: 3000 }, (_, i) => [`recipe_${String(i).padStart(4, '0')}`, entry]),
+      ),
+    };
+  }
 });
 
 describe('writeLock: настоящая запись', () => {

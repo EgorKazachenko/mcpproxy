@@ -71,6 +71,26 @@ describe('R23: core не тянет Electron ни прямо, ни транзи�
 
 const POLICY_ROOT = 'packages/core/src/policy/**';
 
+describe('вход ./pure свободен от платформенных импортов', () => {
+  it('ни один node:* не достижим из чистого входа', () => {
+    // Корневой баррель Node-only намеренно (`confirm-tty` тянет `node:readline/promises`).
+    // Чистый вход существует, чтобы E5 и E7 могли импортировать рендер диффа, не втаскивая
+    // это в бандл; проверка держит границу, а не обещание в доккомментарии.
+    const entry = join(packageRoot, 'dist', 'policy', 'pure.js');
+    const { files, bare } = walkGraph(entry, workspaceResolver(repoRoot));
+
+    expect(existsSync(entry)).toBe(true);
+    expect(files.length).toBeGreaterThan(1);
+    expect(bare.filter((one) => one.startsWith('node:'))).toEqual([]);
+  });
+
+  it('а корневой вход их тянет — иначе проверка выше ничего не значит', () => {
+    const { bare } = walkGraph(join(packageRoot, 'dist', 'index.js'), workspaceResolver(repoRoot));
+
+    expect(bare.some((one) => one.startsWith('node:'))).toBe(true);
+  });
+});
+
 describe('R1 и R8: два разных правила, а не одно', () => {
   // Правило R1 шире по корню, чем правило R8, и это намеренно: по R24a на эту ветку
   // ребейзятся E2, E3 и E6, которые будут законно парсить JSON у себя в `core/*`.
@@ -154,6 +174,18 @@ describe('R13: расхождение с lock не отображается в �
     // единственным способом сделать проверку зелёной было бы внести её саму в `allow`.
     const rule: ScanRule = { pattern: new RegExp(`derive${'RiskTier'}`), roots: [POLICY_ROOT], allow: [] };
 
+    // Правило сначала КАЛИБРУЕТСЯ на фикстуре. Оба соседних правила в этом файле калиброваны, а
+    // это — нет: сломайся склейка имени, оно перестало бы совпадать с чем угодно, и утверждение
+    // ниже осталось бы вечно зелёным при полностью снятой охране R13.
+    const root = fixtureTree({
+      'packages/core/src/policy/x.ts': `export const t = derive${'RiskTier'}(annotations);\n`,
+    });
+    try {
+      expect(scanSources(root, rule)).toEqual(['packages/core/src/policy/x.ts']);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+
     expect(scanSources(repoRoot, rule)).toEqual([]);
   });
 });
@@ -176,7 +208,17 @@ describe('R24: ни один файл вне списка не меняется'
   /** Репозиторий-фикстура: ветка ушла вперёд, и база тоже. */
   function fixtureRepo(): string {
     const root = fixtureTree({ 'a.txt': 'a\n', 'base-only.txt': 'base\n' });
-    const git = (...args: string[]) => execFileSync('git', args, { cwd: root, encoding: 'utf8' });
+    // Конфиг машины ОТРЕЗАН. Иначе фикстурный репозиторий наследует `commit.gpgsign`,
+    // `core.hooksPath`, `commit.template` — и `git commit` либо падает, либо ждёт пароль; а
+    // `execFileSync` синхронен, поэтому таймаут теста к нему не применяется и виснет весь
+    // воркер, а не краснеет один тест. `timeout` превращает зависание в красное.
+    const git = (...args: string[]) =>
+      execFileSync('git', ['-c', 'commit.gpgsign=false', '-c', 'core.hooksPath=', ...args], {
+        cwd: root,
+        encoding: 'utf8',
+        timeout: 15_000,
+        env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null' },
+      });
 
     git('init', '--initial-branch=main', '--quiet');
     git('config', 'user.email', 'test@example.com');
@@ -186,7 +228,11 @@ describe('R24: ни один файл вне списка не меняется'
 
     git('checkout', '--quiet', '-b', 'feature');
     writeFileSync(join(root, 'a.txt'), 'изменено веткой\n');
-    git('commit', '--quiet', '-a', '-m', 'правка ветки');
+    // Имя не в ASCII и **закоммичено**: половину `git diff` (в отличие от `-z`-статуса) git
+    // отдаёт в кавычках и восьмеричных экранах, если не снять `core.quotePath`.
+    writeFileSync(join(root, 'ветка-добавила.txt'), 'новый\n');
+    git('add', '-A');
+    git('commit', '--quiet', '-m', 'правка ветки');
 
     // База уходит вперёд ПОСЛЕ ответвления: две точки прочитали бы это как наше нарушение.
     git('checkout', '--quiet', 'main');
@@ -211,7 +257,7 @@ describe('R24: ни один файл вне списка не меняется'
   it('вход собирается ОТ ТОЧКИ ВЕТВЛЕНИЯ: правка базы после ответвления — не наша', () => {
     const root = fixtureRepo();
     try {
-      expect(changedPaths(root, 'main')).toEqual(['a.txt']);
+      expect(changedPaths(root, 'main')).toEqual(['a.txt', 'ветка-добавила.txt']);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -222,8 +268,10 @@ describe('R24: ни один файл вне списка не меняется'
     const root = fixtureRepo();
     try {
       writeFileSync(join(root, 'вне-списка.txt'), 'новый\n');
-      expect(changedPaths(root, 'main')).toEqual(['a.txt', 'вне-списка.txt']);
-      expect(pathViolations(changedPaths(root, 'main'), ['a.txt'])).toEqual(['вне-списка.txt']);
+      expect(changedPaths(root, 'main')).toEqual(['a.txt', 'ветка-добавила.txt', 'вне-списка.txt']);
+      expect(pathViolations(changedPaths(root, 'main'), ['a.txt', 'ветка-добавила.txt'])).toEqual([
+        'вне-списка.txt',
+      ]);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -238,10 +286,38 @@ describe('R24: ни один файл вне списка не меняется'
     }
   });
 
-  it('рабочее дерево ветки не выходит за список', () => {
-    const changed = changedPaths(repoRoot, 'origin/main');
+  it('переименование не склеивается в один путь — иначе R24 молчит на подмене', () => {
+    // `git status --porcelain` отдаёт переименование как `R  старый -> новый`, и наивный
+    // `slice(3)` даёт ОДИН путь `старый -> новый`. Он проходит проверку префиксом, если с
+    // разрешённого префикса начинается ЛЕВАЯ половина: `git mv <разрешено>/x packages/…/evil.ts`
+    // давал бы ноль нарушений, положив файл в замороженный пакет.
+    const root = fixtureRepo();
+    try {
+      const git = (...args: string[]) =>
+        execFileSync('git', args, {
+          cwd: root,
+          encoding: 'utf8',
+          timeout: 15_000,
+          env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null' },
+        });
 
-    expect(changed.length).toBeGreaterThan(0);
-    expect(pathViolations(changed, ALLOW_LIST)).toEqual([]);
+      git('mv', 'base-only.txt', 'ушёл-в-запретное.txt');
+      const changed = changedPaths(root, 'main');
+
+      expect(changed).toContain('ушёл-в-запретное.txt');
+      expect(changed).toContain('base-only.txt');
+      expect(changed.some((one) => one.includes(' -> '))).toBe(false);
+      expect(pathViolations(changed, ['base-only.txt', 'a.txt', 'ветка-добавила.txt'])).toEqual([
+        'ушёл-в-запретное.txt',
+      ]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
+
+  // Утверждение о РАБОЧЕМ дереве ветки живёт в `packages/core/bin/mcpproxy-r24.mjs` и
+  // прогоняется гейтом, а не здесь. Причина измерена: `changedPaths` по настоящему
+  // репозиторию делает весь юнит-прогон функцией от незакоммиченных правок разработчика —
+  // один посторонний неотслеживаемый файл красит пакет целиком, — а мелкий клон CI без
+  // `origin/main` роняет его вовсе. Это утверждение о ветке, а не инвариант модуля.
 });

@@ -1,7 +1,9 @@
 import { basename, dirname } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { LOCK_PATH, MANIFEST_PATH, lockTextFor, memoryDisk, settle, started } from './policy.fixture.js';
-import { debounce, dirWatcher, watchPolicy } from './watch.js';
+import { BROKEN_YAML, LOCK_PATH, MANIFEST_PATH, lockTextFor, memoryDisk, settle, started } from './policy.fixture.js';
+import { debounce, dirWatcher, nodeWatchWith, watchPolicy } from './watch.js';
+import type { ReloadSource, WatcherLike } from './watch.js';
+import type { ReloadResult } from './store.js';
 import { manualWatch } from './watch.fixture.js';
 
 const DEBOUNCE_MS = 50;
@@ -103,6 +105,30 @@ describe('dirWatcher: наблюдение ставится на каталог'
   });
 });
 
+describe('nodeWatch: у наблюдателя есть слушатель error', () => {
+  it('ошибка вотчера доезжает наверх и закрывает его, а не убивает процесс', () => {
+    // `FSWatcher` — `EventEmitter`, и документированное событие `error` (каталог удалён или
+    // переименован, EPERM, исчерпан лимит наблюдателей) БЕЗ слушателя бросается наверх и
+    // завершает процесс. Для долгоживущего демона это отказ обслуживания из операции над
+    // каталогом репозитория.
+    let emit: ((error: unknown) => void) | null = null;
+    let closed = 0;
+    const fake: WatcherLike = {
+      on: (_event, listener) => void (emit = listener),
+      close: () => void (closed += 1),
+    };
+
+    const seen: unknown[] = [];
+    nodeWatchWith(() => fake)('/repo', () => {}, (error) => void seen.push(error));
+
+    expect(emit).not.toBeNull();
+    (emit as unknown as (error: unknown) => void)(new Error('EPERM'));
+
+    expect(seen).toHaveLength(1);
+    expect(closed).toBe(1);
+  });
+});
+
 describe('watchPolicy: наблюдаются оба файла', () => {
   it('правка одного только lock расклинивает демон', async () => {
     // Без наблюдения за lock команда `mcpproxy lock` не помогает работающему демону: она
@@ -124,6 +150,57 @@ describe('watchPolicy: наблюдаются оба файла', () => {
     await settle();
 
     expect(store.current().verdict.check.status).toBe('verified');
+    watching.stop();
+  });
+
+  it('исход КАЖДОЙ перезагрузки уезжает наружу — иначе сломанный манифест невидим', async () => {
+    // R2a наизнанку: без этого шва «перечитка не удалась» и «перечитка удалась, ничего не
+    // изменилось» наблюдаемо неразличимы. `current()` по R4 остаётся прежним, `reloadCount()`
+    // растёт только на успехе, диагностики выбрасывались — оператор правил бы манифест с
+    // опечаткой и получал прокси, вечно обслуживающий устаревшую политику, без единой записи.
+    const disk = memoryDisk();
+    const store = await started(disk);
+    const manual = manualWatch();
+    const seen: Array<{ source: ReloadSource; result: ReloadResult }> = [];
+
+    const watching = watchPolicy(store, { manifestPath: MANIFEST_PATH, lockPath: LOCK_PATH }, {
+      debounceMs: DEBOUNCE_MS,
+      make: (filePath, ms) => dirWatcher(filePath, ms, manual.primitive),
+      onReload: (source, result) => void seen.push({ source, result }),
+    });
+
+    disk.write(MANIFEST_PATH, BROKEN_YAML);
+    manual.emit('change', basename(MANIFEST_PATH));
+    vi.advanceTimersByTime(DEBOUNCE_MS);
+    await settle();
+
+    expect(seen).toHaveLength(1);
+    expect(seen[0]?.source).toBe('manifest');
+    expect(seen[0]?.result.outcome).toBe('invalid');
+    expect(seen[0]?.result.outcome === 'invalid' && seen[0]?.result.diagnostics.length).toBeGreaterThan(0);
+    // И снимок при этом не заменён — прежняя политика продолжает действовать (R4).
+    expect(store.current().manifest.digest).toBeTruthy();
+    watching.stop();
+  });
+
+  it('успешная перезагрузка тоже сообщается, иначе отличить её от неудачи нечем', async () => {
+    const disk = memoryDisk();
+    const store = await started(disk);
+    const manual = manualWatch();
+    const seen: Array<{ source: ReloadSource; result: ReloadResult }> = [];
+
+    const watching = watchPolicy(store, { manifestPath: MANIFEST_PATH, lockPath: LOCK_PATH }, {
+      debounceMs: DEBOUNCE_MS,
+      make: (filePath, ms) => dirWatcher(filePath, ms, manual.primitive),
+      onReload: (source, result) => void seen.push({ source, result }),
+    });
+
+    disk.write(LOCK_PATH, lockTextFor(store.current().manifest.manifest));
+    manual.emit('rename', basename(LOCK_PATH));
+    vi.advanceTimersByTime(DEBOUNCE_MS);
+    await settle();
+
+    expect(seen.map((one) => [one.source, one.result.outcome])).toEqual([['lock', 'reloaded']]);
     watching.stop();
   });
 

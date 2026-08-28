@@ -1,3 +1,6 @@
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { MANIFEST_MAX_BYTES } from '@mcpproxy/contracts';
 import {
@@ -10,7 +13,7 @@ import {
   memoryDisk,
   started,
 } from './policy.fixture.js';
-import { LOCK_MAX_BYTES, startStore } from './store.js';
+import { LOCK_MAX_BYTES, readBounded, startStore } from './store.js';
 
 describe('startStore: отказ старта имеет форму', () => {
   it('манифест с диагностиками не даёт store вовсе', async () => {
@@ -48,6 +51,85 @@ describe('startStore: отказ старта имеет форму', () => {
 
     expect(store.current().lock).toMatchObject({ present: false, reason: 'unreadable', code: 'ERR_SIZE_LIMIT' });
     expect(disk.reads).toEqual([MANIFEST_PATH]);
+  });
+
+  it('readBounded отказывает на превышении, а не отдаёт усечённое', async () => {
+    // Наблюдаемое — поведение самого чтения, а не код диагностики: предел внутри `parseYaml`
+    // даёт ровно тот же `size-limit` на уже прочитанной строке, поэтому по диагностике две
+    // реализации неразличимы. Здесь же видно то единственное, что важно: сколько байт вообще
+    // разрешено втянуть в память.
+    const dir = mkdtempSync(join(tmpdir(), 'mcpproxy-bounded-'));
+    try {
+      const file = join(dir, 'big.txt');
+      writeFileSync(file, 'x'.repeat(1000));
+
+      await expect(readBounded(file, 999)).rejects.toMatchObject({ code: 'ERR_SIZE_LIMIT' });
+      await expect(readBounded(file, 1000)).resolves.toHaveLength(1000);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('чтение ограничено сверху НА САМОМ ФАЙЛЕ: солгавший stat не даёт прочитать больше', async () => {
+    // Ровно окно между `statSize` и `readFile`: атакующий держит файл маленьким на момент
+    // проверки и подменяет его большим до чтения. Порядок вызовов этого не закрывает —
+    // закрывает предел, переданный в само чтение. Проверяется на настоящей ФС, потому что
+    // защищаемое поведение принадлежит продакшн-реализации `readFile`, а не фикстуре.
+    const dir = mkdtempSync(join(tmpdir(), 'mcpproxy-toctou-'));
+    try {
+      const manifestPath = join(dir, 'mcpproxy.yaml');
+      writeFileSync(manifestPath, `# ${'ю'.repeat(MANIFEST_MAX_BYTES)}\n${MANIFEST_YAML}`);
+
+      // `statSize` лжёт, будто файл крошечный: предел «до чтения» пропускает его.
+      const result = await startStore(manifestPath, join(dir, 'mcpproxy.lock'), { statSize: async () => 10 });
+
+      expect(result.outcome).toBe('invalid-manifest');
+      expect(result.outcome === 'invalid-manifest' && result.diagnostics[0]?.code).toBe('size-limit');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('отклонение не-объектом не превращается в TypeError изнутри собственного catch', async () => {
+    // `StoreDeps` публичен, поэтому отклониться `null` может реализация из E4. Модуль,
+    // объявивший «никогда не бросает», обязан выдержать и это.
+    const result = await startStore(MANIFEST_PATH, LOCK_PATH, {
+      statSize: async () => {
+        throw null;
+      },
+    });
+
+    expect(result.outcome).toBe('unreadable-manifest');
+    expect(result.outcome === 'unreadable-manifest' && result.code).toBe('UNKNOWN');
+  });
+
+  it('предел lock выведен из замера, а не из красивого множителя', () => {
+    // Прежнее `4 *` лежало ниже честного отношения манифест→lock (замерено 4.5x на минимальных
+    // умолчаниях и 6.9x на реалистичных), и законный манифест давал lock, который эта же сборка
+    // объявляла непригодным. Соотношение под тестом, а не число: `MANIFEST_MAX_BYTES` приходит
+    // из контрактов, то есть из-за границы пакета.
+    expect(LOCK_MAX_BYTES).toBe(16 * MANIFEST_MAX_BYTES);
+    expect(LOCK_MAX_BYTES / MANIFEST_MAX_BYTES).toBeGreaterThan(6.94);
+  });
+
+  it('чтение ограничено сверху, поэтому подмена между stat и read не даёт прочитать больше', async () => {
+    // `statSize` → `readFile` — две операции по пути, который правит в том числе атакующий.
+    // Порядок вызовов этого не закрывает: закрывает предел, переданный в само чтение.
+    const disk = memoryDisk();
+    const store = await started(disk);
+    const limits: number[] = [];
+    const observing = {
+      statSize: disk.deps.statSize,
+      readFile: async (path: string, limit: number) => {
+        limits.push(limit);
+        return disk.deps.readFile(path, limit);
+      },
+    };
+
+    const again = await startStore(MANIFEST_PATH, LOCK_PATH, observing);
+    expect(again.outcome).toBe('started');
+    expect(limits).toEqual([MANIFEST_MAX_BYTES]);
+    expect(store.current().manifest.digest).toBeTruthy();
   });
 });
 

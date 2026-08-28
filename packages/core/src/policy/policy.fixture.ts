@@ -1,6 +1,7 @@
 import { normalizeDefaults, normalizeRecipe } from '@mcpproxy/contracts';
 import type { LockEntry, LockFile, Manifest } from '@mcpproxy/contracts';
 import { manifestHash, recipeHash } from '@mcpproxy/contracts/audit';
+import { SIZE_LIMIT_CODE } from './shapes.js';
 import { startStore } from './store.js';
 import type { StartedStore, StoreDeps } from './store.js';
 
@@ -83,10 +84,13 @@ export function memoryDisk(files: Record<string, string> = { [MANIFEST_PATH]: MA
   const stats: string[] = [];
   const reads: string[] = [];
 
-  const readFile = async (path: string): Promise<string> => {
+  // Предел соблюдается и здесь: продакшн-реализация читает не больше `limit + 1` байт и
+  // отказывает на превышении, и фикстура, игнорирующая это, проверяла бы не тот контракт.
+  const readFile = async (path: string, limit: number): Promise<string> => {
     reads.push(path);
     const text = disk.get(path);
     if (text === undefined) throw errno('ENOENT');
+    if (Buffer.byteLength(text, 'utf8') > limit) throw errno(SIZE_LIMIT_CODE);
     return text;
   };
   const statSize = async (path: string): Promise<number> => {

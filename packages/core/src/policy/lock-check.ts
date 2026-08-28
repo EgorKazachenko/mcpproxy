@@ -1,6 +1,7 @@
-import { diffLock } from '@mcpproxy/contracts';
-import type { Diagnostic, LockCheck, LockDiff, LockFile, Manifest, PatternMatcher } from '@mcpproxy/contracts';
+import { diffLock, sanitizeDescription } from '@mcpproxy/contracts';
+import type { Diagnostic, LockCheck, LockFile, Manifest, PatternMatcher } from '@mcpproxy/contracts';
 import { verifyLockEntries } from '@mcpproxy/contracts/audit';
+import { SIZE_LIMIT_CODE, isEmptyDiff } from './shapes.js';
 
 /**
  * Сверка манифеста с `mcpproxy.lock` — единственная точка, производящая `LockCheck`.
@@ -44,6 +45,21 @@ export type LoadedLock =
   | { readonly present: false; readonly reason: 'unreadable'; readonly code: string; readonly message: string }
   | { readonly present: false; readonly reason: 'unparsed'; readonly diagnostics: readonly Diagnostic[] };
 
+/**
+ * Машиночитаемая причина отказа, низкой кардинальности.
+ *
+ * Отдельно от `denyReason`, потому что тот несёт путь и список имён и как измерение телеметрии
+ * непригоден: атрибут, значение которого содержит путь, нельзя ни сгруппировать, ни посчитать.
+ * Ветвиться потребитель обязан по коду, а `denyReason` читать глазами.
+ */
+export type LockDenyCode =
+  | 'lock-absent'
+  | 'lock-unreadable'
+  | 'lock-too-large'
+  | 'lock-unparsed'
+  | 'lock-tampered'
+  | 'lock-drifted';
+
 export interface LockVerdict {
   readonly check: LockCheck;
   /**
@@ -71,35 +87,49 @@ export interface LockVerdict {
    * `null` — только на `verified`.
    */
   readonly denyReason: string | null;
+  /** `null` — только на `verified`. Ветвиться следует по нему, а не по префиксу `denyReason`. */
+  readonly denyCode: LockDenyCode | null;
 }
 
 /** Координат у синтезированной диагностики нет: она не указывает внутрь файла. */
+// Санитизация в конструкторе, как у всех производителей диагностик контракта: сюда приезжает
+// сообщение ошибки ФС, то есть чужой текст.
 const lockDiagnostic = (pointer: string, message: string): Diagnostic => ({
-  pointer,
+  pointer: sanitizeDescription(pointer).text,
   line: 1,
   column: 1,
   code: 'lock',
-  message,
+  message: sanitizeDescription(message).text,
 });
-
-const isEmptyDiff = (diff: LockDiff): boolean =>
-  diff.defaults === null && diff.added.length === 0 && diff.removed.length === 0 && diff.changed.length === 0;
 
 function absent(lock: Extract<LoadedLock, { present: false }>): LockVerdict {
   const base = { check: { status: 'absent' } as const, mismatched: [], digest: null };
   switch (lock.reason) {
     case 'missing':
-      return { ...base, diagnostics: [], denyReason: 'lock-absent: mcpproxy.lock отсутствует, одобрения нет' };
-    case 'unreadable':
+      return {
+        ...base,
+        diagnostics: [],
+        denyCode: 'lock-absent',
+        denyReason: 'lock-absent: mcpproxy.lock отсутствует, одобрения нет',
+      };
+    case 'unreadable': {
+      // Превышение предела — не отказ доступа: без различия оператор не отличит «lock слишком
+      // большой» от «нет прав», а лечатся они противоположным.
+      const tooLarge = lock.code === SIZE_LIMIT_CODE;
       return {
         ...base,
         diagnostics: [lockDiagnostic('', `lock не читается (${lock.code}): ${lock.message}`)],
-        denyReason: `lock-unreadable: mcpproxy.lock не читается (${lock.code}), одобрения нет`,
+        denyCode: tooLarge ? 'lock-too-large' : 'lock-unreadable',
+        denyReason: tooLarge
+          ? `lock-too-large: mcpproxy.lock больше предела, одобрения нет (${lock.code})`
+          : `lock-unreadable: mcpproxy.lock не читается (${lock.code}), одобрения нет`,
       };
+    }
     case 'unparsed':
       return {
         ...base,
         diagnostics: lock.diagnostics,
+        denyCode: 'lock-unparsed',
         denyReason: 'lock-unparsed: mcpproxy.lock не разобран, одобрения нет',
       };
   }
@@ -120,6 +150,9 @@ export function checkLock(manifest: LoadedManifest, lock: LoadedLock): LockVerdi
   // чистый дифф во всех четырёх слотах — `diffLock` сравнивает `snapshot.own` с текущим
   // рецептом и на `recipeHash` не смотрит вовсе (R10, измерено P1d/P1e).
   const entries = verifyLockEntries(lock.lock);
+  const digest =
+    lock.lock.manifestHash === manifest.digest ? null : { was: lock.lock.manifestHash, is: manifest.digest };
+
   if (!entries.ok) {
     return {
       check: drifted,
@@ -130,7 +163,10 @@ export function checkLock(manifest: LoadedManifest, lock: LoadedLock): LockVerdi
         ),
       ],
       mismatched: entries.mismatched,
-      digest: null,
+      // Дайджест заполняется и здесь, а не гасится в `null`: подделка записи и расхождение
+      // дайджеста могут случиться разом, и второе улику первого не отменяет.
+      digest,
+      denyCode: 'lock-tampered',
       denyReason: `lock-tampered: записи lock противоречат собственным дайджестам (${entries.mismatched.join(', ')})`,
     };
   }
@@ -138,12 +174,13 @@ export function checkLock(manifest: LoadedManifest, lock: LoadedLock): LockVerdi
   // Сверка дайджеста не избыточна ровно на одном сценарии (R11): lock, у которого `defaults`,
   // все `snapshot` и все `recipeHash` пересчитаны под изменённый манифест, а `manifestHash`
   // оставлен прежним. Тогда обе проверки выше довольны, и расходится только он.
-  if (lock.lock.manifestHash !== manifest.digest) {
+  if (digest !== null) {
     return {
       check: drifted,
       diagnostics: [],
       mismatched: [],
-      digest: { was: lock.lock.manifestHash, is: manifest.digest },
+      digest,
+      denyCode: 'lock-drifted',
       denyReason: 'lock-drifted: дайджест манифеста не совпадает с записанным в lock',
     };
   }
@@ -154,9 +191,17 @@ export function checkLock(manifest: LoadedManifest, lock: LoadedLock): LockVerdi
       diagnostics: [],
       mismatched: [],
       digest: null,
+      denyCode: 'lock-drifted',
       denyReason: 'lock-drifted: манифест разошёлся с одобренным lock',
     };
   }
 
-  return { check: { status: 'verified' }, diagnostics: [], mismatched: [], digest: null, denyReason: null };
+  return {
+    check: { status: 'verified' },
+    diagnostics: [],
+    mismatched: [],
+    digest: null,
+    denyCode: null,
+    denyReason: null,
+  };
 }

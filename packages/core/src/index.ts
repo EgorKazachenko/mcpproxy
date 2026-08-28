@@ -11,5 +11,6 @@ export * from './policy/lock-check.js';
 export * from './policy/lock-command.js';
 export * from './policy/lock-write.js';
 export * from './policy/render-diff.js';
+export * from './policy/shapes.js';
 export * from './policy/store.js';
 export * from './policy/watch.js';

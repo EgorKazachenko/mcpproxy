@@ -1,38 +1,60 @@
 import { describe, expect, it } from 'vitest';
-import { confirmTty, decisionOf, parseExpect } from './confirm-tty.js';
+import { answerOrEof, confirmTty, decisionOf, parseExpect } from './confirm-tty.js';
 import type { LockApprovalRequest } from './approve.js';
+
+const DIGEST = 'a'.repeat(64);
 
 const REQUEST: LockApprovalRequest = {
   kind: 'first',
-  recipes: ['run_tests'],
-  manifestHash: 'a'.repeat(64),
+  recipes: [],
+  manifestHash: DIGEST,
   requestedAt: '2026-08-28T00:00:00.000Z',
 };
 
 describe('parseExpect', () => {
   it('берёт значение ПОСЛЕ флага, а не сам флаг', () => {
-    expect(parseExpect(['--expect', 'abc'])).toBe('abc');
+    expect(parseExpect(['--expect', DIGEST])).toEqual({ kind: 'digest', digest: DIGEST });
   });
 
   it('принимает и форму со знаком равенства', () => {
-    expect(parseExpect(['--expect=abc'])).toBe('abc');
+    expect(parseExpect([`--expect=${DIGEST}`])).toEqual({ kind: 'digest', digest: DIGEST });
   });
 
   it('находит флаг не только первым аргументом', () => {
-    expect(parseExpect(['--verbose', '--expect', 'abc'])).toBe('abc');
+    expect(parseExpect(['--verbose', '--expect', DIGEST])).toEqual({ kind: 'digest', digest: DIGEST });
   });
 
-  it('без флага — null, то есть ожидания нет', () => {
-    expect(parseExpect([])).toBeNull();
-    expect(parseExpect(['--verbose'])).toBeNull();
+  it('без флага — absent, то есть ожидания нет', () => {
+    expect(parseExpect([])).toEqual({ kind: 'absent' });
+    expect(parseExpect(['--verbose'])).toEqual({ kind: 'absent' });
   });
 
-  it('флаг без значения не превращается в дайджест', () => {
-    // Пустая строка вместо `null` означала бы «ожидается дайджест, которому ничто не равно»,
-    // то есть команда отказывала бы всегда и молча.
-    expect(parseExpect(['--expect'])).toBeNull();
-    expect(parseExpect(['--expect', '--verbose'])).toBeNull();
-    expect(parseExpect(['--expect='])).toBeNull();
+  it('флаг без значения ОТКАЗЫВАЕТ, а не снимает ограничение', () => {
+    // Это средство защиты, и «значения нет» не имеет права означать «проверять не надо»:
+    // одна незакавыченная пустая переменная в вызове иначе молча снимала бы связывание.
+    expect(parseExpect(['--expect']).kind).toBe('invalid');
+    expect(parseExpect(['--expect', '--verbose']).kind).toBe('invalid');
+    expect(parseExpect(['--expect=']).kind).toBe('invalid');
+  });
+
+  it('значение, не похожее на дайджест, тоже отказ', () => {
+    expect(parseExpect(['--expect', 'abc']).kind).toBe('invalid');
+    expect(parseExpect(['--expect', DIGEST.toUpperCase()]).kind).toBe('invalid');
+  });
+});
+
+describe('answerOrEof', () => {
+  it('конец потока доезжает пустой строкой, а не подвисает навсегда', async () => {
+    // Измерено: `rl.question` на закрытом stdin не резолвится НИКОГДА, и команда выходила с
+    // кодом 13, напечатав весь дифф и не сказав ни слова. Пустая строка — уже отказ.
+    const never = new Promise<string>(() => undefined);
+    await expect(answerOrEof(never, Promise.resolve())).resolves.toBe('');
+    expect(decisionOf(await answerOrEof(never, Promise.resolve()))).toBe('denied');
+  });
+
+  it('ответ человека выигрывает у ещё не наступившего конца потока', async () => {
+    const never = new Promise<unknown>(() => undefined);
+    await expect(answerOrEof(Promise.resolve('y'), never)).resolves.toBe('y');
   });
 });
 

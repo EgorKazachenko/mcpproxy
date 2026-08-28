@@ -4,6 +4,7 @@ import { basename, dirname, join } from 'node:path';
 import { normalizeDefaults, normalizeRecipe } from '@mcpproxy/contracts';
 import type { LockEntry, LockFile } from '@mcpproxy/contracts';
 import { recipeHash } from '@mcpproxy/contracts/audit';
+import { LOCK_MAX_BYTES } from './store.js';
 import type { LoadedManifest } from './lock-check.js';
 
 /**
@@ -35,6 +36,28 @@ export interface FileHandleLike {
   write(text: string): Promise<void>;
   sync(): Promise<void>;
   close(): Promise<void>;
+}
+
+/**
+ * Исход записи. `durable: false` означает «lock записан и виден, но каталог не синхронизирован»
+ * — это НЕ отказ записи, и путать их нельзя: `rename` уже произошёл, файл на месте и корректен.
+ * Прежняя редакция бросала на этом месте, и человек получал стек поверх успешно записанного
+ * lock, после чего разумно одобрял заново.
+ */
+export interface WriteResult {
+  readonly durable: boolean;
+  readonly reason?: string;
+}
+
+/** Отказ записи с машиночитаемым кодом. Отличать его от `durable: false` — работа вызывающего. */
+export class LockWriteError extends Error {
+  constructor(
+    readonly code: string,
+    message: string,
+  ) {
+    super(message);
+    this.name = 'LockWriteError';
+  }
 }
 
 export interface WriteDeps {
@@ -77,30 +100,57 @@ const defaultWriteDeps: WriteDeps = { tempPath: nodeTempPath, open: nodeOpen, re
  * Печать — с отступом: файл читают глазами в ревью гита. Хэши к этому моменту уже посчитаны
  * `buildLock` по канонической форме и от печатных байтов не зависят.
  */
-export async function writeLock(lockPath: string, lock: LockFile, deps: Partial<WriteDeps> = {}): Promise<void> {
+export async function writeLock(
+  lockPath: string,
+  lock: LockFile,
+  deps: Partial<WriteDeps> = {},
+): Promise<WriteResult> {
   const resolved: WriteDeps = { ...defaultWriteDeps, ...deps };
-  const temp = resolved.tempPath(lockPath);
+  const text = `${JSON.stringify(lock, null, 2)}\n`;
 
+  // **Потолок писателя ≡ потолок читателя.** Без этого сборка расходится сама с собой: команда
+  // пишет файл, который загрузчик того же процесса через секунду объявляет непригодным, печатает
+  // «записан», выходит с нулём — и каждый вызов после этого отказан, а повторный запуск команды
+  // пишет те же байты. Замерено: это достижимо на законном манифесте (см. `LOCK_MAX_BYTES`).
+  const size = Buffer.byteLength(text, 'utf8');
+  if (size > LOCK_MAX_BYTES) {
+    throw new LockWriteError(
+      'ERR_LOCK_TOO_LARGE',
+      `lock занял бы ${size} байт при пределе ${LOCK_MAX_BYTES}: уменьшите defaults или число рецептов`,
+    );
+  }
+
+  const temp = resolved.tempPath(lockPath);
   let handle: FileHandleLike | null = null;
+  let created = false;
   try {
     handle = await resolved.open(temp, 'wx');
-    await handle.write(`${JSON.stringify(lock, null, 2)}\n`);
+    created = true;
+    await handle.write(text);
     await handle.sync();
     await handle.close();
     handle = null;
     await resolved.rename(temp, lockPath);
   } catch (error) {
-    // При любой ошибке временный файл удаляется: иначе каждая неудача оставляет мусор рядом
-    // с lock, а уникальное имя гарантирует, что мусор не переиспользуется.
+    // Уборка **только своего** файла. `created` обязателен: на `EEXIST` от флага `wx` путь занят
+    // ЧУЖИМ процессом, и удалить его файл — хуже, чем перезаписать: сосед получил бы ENOENT на
+    // собственном `rename`. Ровно это и запрещает довод, которым выбран `wx`.
     if (handle !== null) await handle.close().catch(() => undefined);
-    await fsUnlink(temp).catch(() => undefined);
+    if (created) await fsUnlink(temp).catch(() => undefined);
     throw error;
   }
 
-  const directory = await resolved.open(dirname(lockPath), 'r');
+  // Долговечность каталога — ПОСЛЕ успешного `rename`, и её отказ уже не отменяет записи: файл
+  // на диске и виден. Поэтому она возвращается флагом, а не броском.
   try {
-    await directory.sync();
-  } finally {
-    await directory.close();
+    const directory = await resolved.open(dirname(lockPath), 'r');
+    try {
+      await directory.sync();
+    } finally {
+      await directory.close();
+    }
+    return { durable: true };
+  } catch (error) {
+    return { durable: false, reason: error instanceof Error ? error.message : String(error) };
   }
 }

@@ -169,16 +169,16 @@ export function pathViolations(changed: readonly string[], allowList: readonly s
  */
 export function changedPaths(repoRoot: string, base: string): readonly string[] {
   // `core.quotePath=false` обязателен: иначе git отдаёт не-ASCII путь в кавычках и восьмеричных
-  // экранах, и `вне-списка.txt` не совпал бы ни с одной записью списка — то есть проверка
-  // потеряла бы ровно те файлы, чьё имя не в ASCII.
-  const git = (args: readonly string[]): string[] =>
+  // экранах, и такой файл не совпал бы ни с одной записью списка — то есть проверка потеряла бы
+  // ровно те файлы, чьё имя не в ASCII.
+  const git = (args: readonly string[]): string =>
     execFileSync('git', ['-c', 'core.quotePath=false', ...args], {
       cwd: repoRoot,
       encoding: 'utf8',
       // stderr перехватывается, а не уезжает в консоль: неразрешимая база — ожидаемая ветка,
       // и её диагностика едет в сообщение исключения, а не в вывод прогона.
       stdio: ['ignore', 'pipe', 'pipe'],
-    }).split('\n');
+    });
 
   try {
     git(['rev-parse', '--verify', base]);
@@ -186,8 +186,40 @@ export function changedPaths(repoRoot: string, base: string): readonly string[] 
     throw new Error(`база сравнения ${base} не разрешается: ${error instanceof Error ? error.message : String(error)}`);
   }
 
-  const committed = git(['diff', '--name-only', `${base}...HEAD`]);
-  const working = git(['status', '--porcelain', '--untracked-files=all']).map((line) => line.slice(3).trim());
+  // `--no-renames` намеренно: с определением переименований git показал бы только новый путь, а
+  // проверке нужны оба — уехавший файл изменился по обоим адресам.
+  const committed = git(['diff', '--name-only', '--no-renames', `${base}...HEAD`]).split('\n');
 
-  return [...new Set([...committed, ...working])].filter((one) => one !== '').sort();
+  return [...new Set([...committed, ...workingTreePaths(git)])].filter((one) => one !== '').sort();
+}
+
+/**
+ * Пути из `git status`, разобранные из **NUL-разделённого** вывода.
+ *
+ * Построчный разбор с `slice(3)` здесь — fail-open, а не косметика: переименование приходит
+ * записью `R  старый -> новый`, срез отдаёт один склеенный путь `старый -> новый`, и он
+ * проходит проверку префиксом, если с разрешённого префикса начинается ЛЕВАЯ половина. То есть
+ * `git mv docs/<разрешено>/x.md packages/contracts/evil.ts` давал бы ноль нарушений, положив
+ * файл в замороженный пакет. В форме `-z` переименование приходит двумя записями подряд —
+ * сначала новый путь, следом исходный, — и кавычек не бывает вовсе.
+ */
+function workingTreePaths(git: (args: readonly string[]) => string): string[] {
+  const entries = git(['status', '--porcelain', '--untracked-files=all', '-z']).split('\0');
+  const paths: string[] = [];
+
+  for (let i = 0; i < entries.length; i += 1) {
+    const entry = entries[i];
+    if (entry === undefined || entry.length < 4) continue;
+
+    paths.push(entry.slice(3));
+    // `R`/`C` в любой из двух колонок статуса: следующая запись — исходный путь, и он тоже
+    // изменён, поэтому проверяется наравне с новым.
+    if (/^[RC]/.test(entry) || /^.[RC]/.test(entry)) {
+      const origin = entries[i + 1];
+      if (origin !== undefined && origin !== '') paths.push(origin);
+      i += 1;
+    }
+  }
+
+  return paths;
 }

@@ -92,11 +92,14 @@ describe('renderRequest: две ветки «дрифт есть, показат
     ...patch,
   });
 
-  it('подделанный lock назван поимённо', () => {
+  it('подделанный lock назван поимённо и объяснён', () => {
     const rendered = renderRequest(emptyDrift({ mismatched: ['run_tests'] }));
 
     expect(rendered).toContain('run_tests');
     expect(rendered).toContain('подделан');
+    // Почему дифф пуст — иначе человек читает «что-то изменилось, показать нечего» на самом
+    // враждебном из путей.
+    expect(rendered).toContain('Снимок в lock совпадает с манифестом');
   });
 
   it('пересчитанный целиком lock объясняется ОБЕИМИ сторонами дайджеста', () => {
@@ -115,16 +118,30 @@ describe('renderRequest: две ветки «дрифт есть, показат
 });
 
 describe('renderRequest: остальные две ветви', () => {
-  it('первый lock показывает рецепты, которые получат одобрение', async () => {
+  it('первый lock показывает СОДЕРЖИМОЕ рецептов, а не только имена', async () => {
+    // Имя стоит в манифесте и до атаки, поэтому список имён не показывает ничего: человек
+    // одобрил бы отравленный `exec`, ни разу его не увидев. Ровно эту последовательность —
+    // «удалить lock → отравить манифест → дождаться оператора» — ветка и обязана закрывать.
     const store = await started(memoryDisk());
     const request = requestFor(store.current(), REQUESTED_AT);
 
     const rendered = renderRequest(request as LockApprovalRequest);
     expect(rendered).toContain('одобрение выдаётся впервые');
-    expect(rendered).toContain('- run_tests');
+    expect(rendered).toContain('Рецепт run_tests:');
+    expect(rendered).toContain('"pnpm"');
+    expect(rendered).toContain('"exec"');
   });
 
-  it('непригодный lock показывает диагностики, а не пустой дифф', async () => {
+  it('отравленный exec виден человеку и на ветке «файла нет»', async () => {
+    const store = await started(memoryDisk({ [MANIFEST_PATH]: POISONED_YAML }));
+    const request = requestFor(store.current(), REQUESTED_AT);
+
+    const rendered = renderRequest(request as LockApprovalRequest);
+    expect(rendered).toContain('test<U+202E>');
+    expect(rendered.split('\n').filter((line) => INVISIBLE.test(line))).toEqual([]);
+  });
+
+  it('непригодный lock показывает диагностики И то, что будет закреплено', async () => {
     const stale = JSON.stringify({ version: 1, manifestHash: 'a'.repeat(64), tools: {} });
     const store = await started(memoryDisk({ [MANIFEST_PATH]: MANIFEST_YAML, [LOCK_PATH]: stale }));
     const request = requestFor(store.current(), REQUESTED_AT);
@@ -132,8 +149,52 @@ describe('renderRequest: остальные две ветви', () => {
     const rendered = renderRequest(request as LockApprovalRequest);
     expect(rendered).toContain('не разобран');
     expect(rendered).toContain('версия lock 1');
+    expect(rendered).toContain('Рецепт run_tests:');
   });
 });
+
+describe('renderRequest: подделка называется всегда, а не только при пустом диффе', () => {
+  it('непустой дифф вместе с подделкой несёт предупреждение и имена записей', async () => {
+    // Состояние «запись подделана И дифф непуст» достижимо и типично: атакующий правит
+    // `snapshot.own.exec`, оставив прежний `recipeHash`. Тогда сторона «было» целиком сочинена
+    // им, и без предупреждения человек читает её как доверенную.
+    const request: LockApprovalRequest = {
+      kind: 'drift',
+      diff: {
+        defaults: null,
+        added: [],
+        removed: [],
+        changed: [
+          {
+            name: 'run_tests',
+            was: (await pinnedOf()).snapshot,
+            is: (await pinnedOf()).snapshot,
+          },
+        ],
+      },
+      mismatched: ['run_tests'],
+      digest: { was: 'a'.repeat(64), is: 'b'.repeat(64) },
+      manifestHash: 'b'.repeat(64),
+      requestedAt: REQUESTED_AT,
+    };
+
+    const rendered = renderRequest(request);
+    expect(rendered).toContain('подделан');
+    expect(rendered).toContain('run_tests');
+    expect(rendered).toContain('НЕ является доверенной');
+    expect(rendered).toContain('Изменён рецепт run_tests.');
+  });
+});
+
+/** Нормализованный рецепт фикстуры — для конструирования диффов в тестах рендера. */
+async function pinnedOf() {
+  const store = await started(memoryDisk());
+  const request = requestFor(store.current(), REQUESTED_AT);
+  if (request === null || request.kind !== 'first' || request.recipes[0] === undefined) {
+    throw new Error('ожидался запрос вида first');
+  }
+  return request.recipes[0];
+}
 
 describe('R18: сырое человеку, чистое модели', () => {
   it('toTool вычищает описание, которое рендер диффа показывает сырым', () => {
