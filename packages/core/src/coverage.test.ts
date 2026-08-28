@@ -28,6 +28,13 @@ const WITHOUT_TEST = new Map<string, string>([
     'redact/secret-samples.ts',
     'сборщик тестовых фикстур: сломанный сборщик красит тесты «правило ловит свою форму», по одному на каждое правило набора',
   ],
+  ['policy/pure.ts', 'баррель входа ./pure: его содержимое утверждает boundary.test.ts — ни один node:* оттуда недостижим'],
+  [
+    'policy/scan.ts',
+    'исполняемые проверки границ: их дом — policy/boundary.test.ts, где каждое правило сначала калибруется на фикстурном дереве, а потом наводится на репозиторий',
+  ],
+  ['policy/policy.fixture.ts', 'оснастка тестов политики: диск в памяти и честный lock, её ломает любой из тринадцати тестов policy/**'],
+  ['policy/watch.fixture.ts', 'ручной триггер вместо fs.watch: его ломает watch.test.ts'],
 ]);
 
 function walk(dir: string): string[] {

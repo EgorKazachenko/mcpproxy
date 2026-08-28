@@ -251,6 +251,8 @@ __metadata:
     es-module-lexer: "npm:^2.3.2"
     re2: "npm:1.26.1"
     vitest: "npm:^3"
+  bin:
+    mcpproxy-lock: ./bin/mcpproxy-lock.mjs
   languageName: unknown
   linkType: soft
 

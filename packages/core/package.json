@@ -11,10 +11,15 @@
     "./audit": {
       "types": "./dist/audit/index.d.ts",
       "default": "./dist/audit/index.js"
+    },
+    "./pure": {
+      "types": "./dist/policy/pure.d.ts",
+      "default": "./dist/policy/pure.js"
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "bin"
   ],
   "scripts": {
     "build": "tsc -b",
@@ -30,5 +35,8 @@
   "devDependencies": {
     "es-module-lexer": "^2.3.2",
     "vitest": "^3"
+  },
+  "bin": {
+    "mcpproxy-lock": "./bin/mcpproxy-lock.mjs"
   }
 }

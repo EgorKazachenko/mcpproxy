@@ -38,3 +38,22 @@ export type {
 // входом пакета — `@mcpproxy/core/audit`, — который НЕ тянет нативный `re2`. Потребителю
 // журнала (E7, проверка чужого экспорта) хватает его; корневой вход остаётся полным.
 export * from './audit/index.js';
+
+// Стадия `lock_check` — E1. Загрузка манифеста и lock, сверка, дифф и запись по команде
+// человека. Единственная точка загрузки политики в ядре: прямой вызов `parseManifest` в обход
+// `policy/store.ts` запрещён исполняемым сканом (`policy/boundary.test.ts`), а не соглашением.
+//
+// Вход тянет `@mcpproxy/contracts/validate` — это и есть работа E1, и потому запрет на
+// валидатор в `deps.test.ts` сужен: он защищает от ВТОРОЙ точки загрузки, не от этой.
+// Кому нужен рендер диффа без платформенных модулей — второй вход, `@mcpproxy/core/pure`.
+export * from './policy/approve.js';
+export * from './policy/confirm-tty.js';
+export * from './policy/diagnostics-log.js';
+export * from './policy/event.js';
+export * from './policy/lock-check.js';
+export * from './policy/lock-command.js';
+export * from './policy/lock-write.js';
+export * from './policy/render-diff.js';
+export * from './policy/shapes.js';
+export * from './policy/store.js';
+export * from './policy/watch.js';
