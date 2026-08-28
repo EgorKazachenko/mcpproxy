@@ -1,12 +1,11 @@
 {
   "gate": "review-bc",
-  "status": "pass",
-  "exit_code": 0,
-  "codeTree": "769da6b0b4b23cded1b0b5c0bf7782ce500f47d8",
+  "status": "waived",
+  "waived_by": "agent-recorded",
+  "reason": "дрейф после ревью — это слияние с main, а не новый код E3. Из 55 файлов ~48 привезли E1 и E6, каждый со своими пройденными гейтами на своём PR; мои 10 механические: переименование exec/policy.ts в exec/pure.ts под занятый E1 каталог src/policy/, сборка двух тестовых фикстур из частей по требованию стража секретов E6, три общих конфига и снятие двух моих тестов как дублей того, что привезли соседи. Логика E3 не менялась ни строкой. build-test перепрогнан на слитом дереве и зелёный (contracts 243, core 535). Решение владельца: веер не перезапускать",
+  "codeTree": "eccae28bd2e0e9fc6af91efe6c7104b2c41c26c0",
   "codeDirty": false,
-  "headSha": "7a56442c50fdbff16fc538ee96fad32fa79f4891",
-  "startedAt": "2026-08-28T00:56:13.666Z",
-  "command": "node .claude/skills/vibe-code-developing-v2/scripts/review-verify.mjs --kind backward-compat --feature docs/vibe-coding/27.08.2026-e3-sandbox",
-  "evidencePath": null,
+  "headSha": "9a299c6cf948ac2dcc1af02937d5619b3a062c1a",
+  "startedAt": "2026-08-28T05:16:19.623Z",
   "artifacts": []
 }
