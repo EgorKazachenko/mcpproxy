@@ -1,4 +1,4 @@
-import { DENIAL_CODES } from '@mcpproxy/core';
+import { APPROVAL_DENY_CODES, DENIAL_CODES } from '@mcpproxy/core';
 import { describe, expect, it } from 'vitest';
 import { ALL_DENY_CODES, E4_DENY_CODES, denyReason, isTerminal, parseDenyReason, verdictOfExecError } from './deny.js';
 
@@ -25,11 +25,11 @@ describe('denyReason — формат, который переживёт гра�
     expect(parseDenyReason('')).toBeNull();
   });
 
-  it('пять словарей не пересекаются', () => {
+  it('шесть словарей не пересекаются', () => {
     // Непересечение — предпосылка формата: два словаря с общим кодом сделали бы разбор
     // неоднозначным именно там, где он нужен.
     expect(new Set(ALL_DENY_CODES).size).toBe(ALL_DENY_CODES.length);
-    expect(ALL_DENY_CODES.length).toBe(6 + DENIAL_CODES.length + 9 + 5 + E4_DENY_CODES.length);
+    expect(ALL_DENY_CODES.length).toBe(6 + DENIAL_CODES.length + 9 + 5 + APPROVAL_DENY_CODES.length + E4_DENY_CODES.length);
   });
 });
 

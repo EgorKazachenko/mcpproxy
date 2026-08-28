@@ -157,7 +157,7 @@ const _failureClosed: [FailureExtraKeys] extends [never] ? true : FailureExtraKe
 void _failureClosed;
 
 type SuccessBranch = Extract<CallResult, { ok: true }>;
-type SuccessExtraKeys = Exclude<keyof SuccessBranch, 'ok' | 'argv' | 'cwd' | 'params' | 'timings'>;
+type SuccessExtraKeys = Exclude<keyof SuccessBranch, 'ok' | 'argv' | 'argvFromParams' | 'cwd' | 'params' | 'timings'>;
 const _successClosed: [SuccessExtraKeys] extends [never] ? true : SuccessExtraKeys = true;
 void _successClosed;
 

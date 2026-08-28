@@ -25,7 +25,7 @@ function argvOf(prepared: PreparedRecipe, params: Readonly<Record<string, unknow
   if (!validated.ok) throw new Error(`validate: ${validated.denials.map((one) => one.code).join()}`);
   const resolved = resolvePaths(prepared, validated.values);
   if (!resolved.ok) throw new Error(`resolve_paths: ${resolved.denials.map((one) => one.code).join()}`);
-  return buildArgv(prepared, resolved.values);
+  return buildArgv(prepared, resolved.values).argv;
 }
 
 describe('buildArgv — значение отдельным элементом (R20)', () => {
@@ -76,7 +76,7 @@ describe('buildArgv — в exec не подставляется ничего (R2
     } as unknown as PreparedRecipe;
     const values = new Map([['s', 'v']]) as unknown as ResolvedValues;
 
-    const argv = buildArgv(hostile, values);
+    const argv = buildArgv(hostile, values).argv;
     expect(argv.slice(0, 3)).toEqual(['sh', '-c', '{}']);
     expect(argv.at(-1)).toBe('--s=v');
   });

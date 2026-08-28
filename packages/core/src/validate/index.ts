@@ -27,6 +27,12 @@ export type CallResult =
        * `{file: '/abs/logs/a.log'}` перестали бы быть одним вызовом.
        */
       params: Readonly<Record<string, ParamValue>>;
+      /**
+       * Индексы элементов `argv`, подставленных из параметров, — ровно то, что посчитала
+       * стадия `build_argv`. E4 **переносит** их в событие и в `ApprovalRequest`, а не
+       * вычисляет заново: расписка `WORK.md` по `AuditEvent.argvFromParams` и `R63`.
+       */
+      argvFromParams: readonly number[];
       timings: readonly StageTiming[];
     }
   | {
@@ -72,9 +78,16 @@ export function validateCall(prepared: PreparedRecipe, params: Readonly<Record<s
   const resolved = timed('resolve_paths', timings, () => resolvePaths(prepared, validated.values));
   if (!resolved.ok) return { ok: false, denials: resolved.denials, cwd: prepared.cwd, timings };
 
-  const argv = timed('build_argv', timings, () => buildArgv(prepared, resolved.values));
+  const built = timed('build_argv', timings, () => buildArgv(prepared, resolved.values));
 
-  return { ok: true, argv, cwd: prepared.cwd, params: Object.fromEntries(resolved.values), timings };
+  return {
+    ok: true,
+    argv: built.argv,
+    argvFromParams: built.fromParams,
+    cwd: prepared.cwd,
+    params: Object.fromEntries(resolved.values),
+    timings,
+  };
 }
 
 // Публичная форма E2. Реэкспорт собран здесь, а не в корневом barrel, чтобы у модуля был
@@ -86,6 +99,7 @@ export type { ValidateParamsResult } from './params.js';
 export { resolvePaths } from './paths.js';
 export type { ResolvePathsResult } from './paths.js';
 export { buildArgv } from './argv.js';
+export type { BuiltArgv } from './argv.js';
 export { DENIAL_CODES, DENIAL_STAGES, DENIALS_MAX, E2_STAGES, VALUE_MAX_CODE_POINTS } from './denial.js';
 export type {
   Denial,
