@@ -1,0 +1,10 @@
+{
+  "feature": "docs/vibe-coding/28.08.2026-e8-redteam",
+  "branch": "v2/e8-redteam",
+  "baseSha": "b052976a6cf8e3040e106efe12dd66f7036494b6",
+  "mode": "attended",
+  "track": "full",
+  "agentConsent": false,
+  "createdAt": "2026-08-28T07:25:13.214Z",
+  "killReviewDue": "2026-10-27"
+}
