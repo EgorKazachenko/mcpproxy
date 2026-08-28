@@ -110,7 +110,7 @@ function absent(lock: Extract<LoadedLock, { present: false }>): LockVerdict {
         ...base,
         diagnostics: [],
         denyCode: 'lock-absent',
-        denyReason: 'lock-absent: mcpproxy.lock отсутствует, одобрения нет',
+        denyReason: 'lock-absent: mcpproxy.lock is missing, so there is no approval',
       };
     case 'unreadable': {
       // Превышение предела — не отказ доступа: без различия оператор не отличит «lock слишком
@@ -118,11 +118,11 @@ function absent(lock: Extract<LoadedLock, { present: false }>): LockVerdict {
       const tooLarge = lock.code === SIZE_LIMIT_CODE;
       return {
         ...base,
-        diagnostics: [lockDiagnostic('', `lock не читается (${lock.code}): ${lock.message}`)],
+        diagnostics: [lockDiagnostic('', `lock is unreadable (${lock.code}): ${lock.message}`)],
         denyCode: tooLarge ? 'lock-too-large' : 'lock-unreadable',
         denyReason: tooLarge
-          ? `lock-too-large: mcpproxy.lock больше предела, одобрения нет (${lock.code})`
-          : `lock-unreadable: mcpproxy.lock не читается (${lock.code}), одобрения нет`,
+          ? `lock-too-large: mcpproxy.lock is over the limit, so there is no approval (${lock.code})`
+          : `lock-unreadable: mcpproxy.lock is unreadable (${lock.code}), so there is no approval`,
       };
     }
     case 'unparsed':
@@ -130,7 +130,7 @@ function absent(lock: Extract<LoadedLock, { present: false }>): LockVerdict {
         ...base,
         diagnostics: lock.diagnostics,
         denyCode: 'lock-unparsed',
-        denyReason: 'lock-unparsed: mcpproxy.lock не разобран, одобрения нет',
+        denyReason: 'lock-unparsed: mcpproxy.lock did not parse, so there is no approval',
       };
   }
 }
@@ -159,7 +159,7 @@ export function checkLock(manifest: LoadedManifest, lock: LoadedLock): LockVerdi
       diagnostics: [
         lockDiagnostic(
           '',
-          `записи lock противоречат собственным дайджестам: ${entries.mismatched.join(', ')}`,
+          `lock entries contradict their own digests: ${entries.mismatched.join(', ')}`,
         ),
       ],
       mismatched: entries.mismatched,
@@ -167,7 +167,7 @@ export function checkLock(manifest: LoadedManifest, lock: LoadedLock): LockVerdi
       // дайджеста могут случиться разом, и второе улику первого не отменяет.
       digest,
       denyCode: 'lock-tampered',
-      denyReason: `lock-tampered: записи lock противоречат собственным дайджестам (${entries.mismatched.join(', ')})`,
+      denyReason: `lock-tampered: lock entries contradict their own digests (${entries.mismatched.join(', ')})`,
     };
   }
 
@@ -181,7 +181,7 @@ export function checkLock(manifest: LoadedManifest, lock: LoadedLock): LockVerdi
       mismatched: [],
       digest,
       denyCode: 'lock-drifted',
-      denyReason: 'lock-drifted: дайджест манифеста не совпадает с записанным в lock',
+      denyReason: 'lock-drifted: the manifest digest does not match the one recorded in the lock',
     };
   }
 
@@ -192,7 +192,7 @@ export function checkLock(manifest: LoadedManifest, lock: LoadedLock): LockVerdi
       mismatched: [],
       digest: null,
       denyCode: 'lock-drifted',
-      denyReason: 'lock-drifted: манифест разошёлся с одобренным lock',
+      denyReason: 'lock-drifted: the manifest has drifted from the approved lock',
     };
   }
 

@@ -150,7 +150,7 @@ describe('сценарий S3 — инъекция останавливаетс�
 
     expect(result.denials.map((one) => one.code)).toEqual(['pattern-mismatch']);
     expect(result.denials[0].stage).toBe('validate');
-    expect(result.denials[0].reason).toContain('паттерн');
+    expect(result.denials[0].reason).toContain('pattern');
     expect(result.denials[0].reason).not.toContain('curl');
     expect('argv' in result).toBe(false);
   });

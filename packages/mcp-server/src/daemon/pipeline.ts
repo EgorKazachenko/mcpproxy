@@ -34,7 +34,7 @@ import {
 } from '@mcpproxy/core';
 import type { AuditLog } from '@mcpproxy/core/audit';
 import type { DaemonConfig } from '../config.js';
-import { denyReason, verdictOfExecError, type DenyCode } from '../deny.js';
+import { denyReason, parseDenyReason, verdictOfExecError, type DenyCode } from '../deny.js';
 import { resolveBinary } from '../binary.js';
 
 /**
@@ -218,7 +218,11 @@ export function createPipeline(deps: PipelineDeps): Pipeline {
       const lockExtra = digest === undefined ? {} : { recipe: { name: toolName, hash: digest } };
       if (policy.verdict.denyCode !== null) {
         // Расхождение с lock в тир НЕ отображается: это жёсткий стоп, а не high-risk апрув.
-        return refuse('lock_check', 'denied', policy.verdict.denyCode, policy.verdict.denyReason ?? 'lock не подтверждён', lockExtra);
+        // WHY: `LockVerdict.denyReason` УЖЕ несёт префикс кода, а `refuse` приклеивает свой.
+        // Прямая передача давала `lock-drifted: lock-drifted: …` — код читался дважды и в
+        // логе, и на экране. Снимаем префикс тем же разбором, которым его читает потребитель.
+        const lockText = policy.verdict.denyReason === null ? 'lock is not confirmed' : (parseDenyReason(policy.verdict.denyReason)?.text ?? policy.verdict.denyReason);
+        return refuse('lock_check', 'denied', policy.verdict.denyCode, lockText, lockExtra);
       }
       emit('lock_check', 'allowed', lockExtra);
 
@@ -227,12 +231,12 @@ export function createPipeline(deps: PipelineDeps): Pipeline {
       if (recipe === undefined) {
         // Отказ ложится на `validate`, а не на `received`: вопрос «есть ли такой рецепт»
         // задаётся к содержимому запроса, и на `received` ещё не с чем было сверять.
-        return refuse('validate', 'denied', 'unknown-recipe', 'рецепт не объявлен в манифесте', lockExtra);
+        return refuse('validate', 'denied', 'unknown-recipe', 'recipe is not declared in the manifest', lockExtra);
       }
 
       const entry = prepared(toolName, recipe, digest ?? '');
       if (entry === null) {
-        return refuse('validate', 'error', 'recipe-unprepared', 'рецепт не проходит подготовку', lockExtra);
+        return refuse('validate', 'error', 'recipe-unprepared', 'recipe does not pass preparation', lockExtra);
       }
 
       const validated = validateCall(entry.prepared, request.params);

@@ -102,8 +102,8 @@ describe('resolvePaths — confinement ловит то, чего не видит
     // Общая формулировка давала «резолвнутый путь X лежит вне root: X» — один и тот же путь
     // по обе стороны от «лежит вне», что читается как дефект проверки, а не как «вы передали
     // каталог вместо файла».
-    expect(result.denials[0].reason).toContain('на сам корень');
-    expect(result.denials[0].reason).not.toContain('лежит вне');
+    expect(result.denials[0].reason).toContain('at the root itself');
+    expect(result.denials[0].reason).not.toContain('lies outside');
   });
 
   it('родительский каталог корня без хвоста не проходит границу', () => {

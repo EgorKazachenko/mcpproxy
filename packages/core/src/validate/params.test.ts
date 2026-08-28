@@ -185,7 +185,7 @@ describe('validateParams — значение не покидает стадию
     if (result.ok) return;
     expect(result.denials.map((one) => one.reason).join()).not.toContain('ZZmark');
     // Причина обязана называть нарушенное ограничение — этого требует сценарий S3.
-    expect(result.denials[0].reason).toContain('паттерн');
+    expect(result.denials[0].reason).toContain('pattern');
   });
 });
 
@@ -257,9 +257,9 @@ describe('validateParams — потолок на список отказов (R3
     // Три числа, а не одно: по общему счёту нельзя отличить «сто тысяч мусорных ключей» от
     // «сто тысяч мусорных плюс один настоящий отказ», а именно это и надо знать по записи.
     const reason = result.denials.at(-1)?.reason ?? '';
-    expect(reason).toContain(`всего ${DENIALS_MAX + 50}`);
-    expect(reason).toContain(`показано ${DENIALS_MAX}`);
-    expect(reason).toContain('не показано ещё 50');
+    expect(reason).toContain(`${DENIALS_MAX + 50} in total`);
+    expect(reason).toContain(`${DENIALS_MAX} shown`);
+    expect(reason).toContain('50 more not shown');
   });
 
   it('потолок держится и когда все отказы — по ОБЪЯВЛЕННЫМ параметрам', () => {
@@ -278,7 +278,7 @@ describe('validateParams — потолок на список отказов (R3
     if (result.ok) return;
     expect(result.denials).toHaveLength(DENIALS_MAX + 1);
     expect(result.denials.at(-1)?.code).toBe('denials-truncated');
-    expect(result.denials.at(-1)?.reason).toContain('не показано ещё 8');
+    expect(result.denials.at(-1)?.reason).toContain('8 more not shown');
   });
 
   it('отказы по ОБЪЯВЛЕННЫМ параметрам не вытесняются неизвестными ключами', () => {

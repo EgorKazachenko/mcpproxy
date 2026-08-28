@@ -192,7 +192,7 @@ describe('scrub — потеря не бывает молчаливой', () => 
       paramName: 'file',
       reason: '/root/a  b\tc.log',
     });
-    expect(distorted.reason).toContain('зачистка изменила текст');
+    expect(distorted.reason).toContain('scrubbing changed the text');
     // Пометка приписывается ВНУТРИ потолка: наивное `clean + MARK` снимало гарантию
     // `<= DESCRIPTION_MAX_LENGTH`, и причина из 2000 символов приезжала длиной 1050.
     const overlong = denial({ stage: 'validate', code: 'wrong-type', paramName: 'p', reason: 'я'.repeat(2000) });
@@ -220,7 +220,7 @@ describe('scrub — потеря не бывает молчаливой', () => 
     // Принцип «потеря не бывает молчаливой» — свойство обоих полей, а не одного: без пометки
     // ключ из 4096 эмодзи и ключ из 32 млн единиц приезжают одинаковыми 1024 точками.
     const long = denial({ stage: 'validate', code: 'unknown-param', paramName: 'k'.repeat(8192), reason: 'ключ не объявлен' });
-    expect(long.paramName).toContain('зачистка изменила текст');
+    expect(long.paramName).toContain('scrubbing changed the text');
     expect(codePointLength(long.paramName ?? '')).toBeLessThanOrEqual(1024);
   });
 
@@ -230,7 +230,7 @@ describe('scrub — потеря не бывает молчаливой', () => 
     const erased = denial({ stage: 'validate', code: 'unknown-param', paramName: ZWSP + ZWSP, reason: 'ключ не объявлен' });
     expect(erased.paramName).not.toBe('');
     expect(erased.paramName).not.toBeNull();
-    expect(erased.paramName).toContain('вырезано');
+    expect(erased.paramName).toContain('erased');
   });
 });
 

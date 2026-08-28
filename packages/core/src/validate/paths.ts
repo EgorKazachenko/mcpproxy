@@ -45,7 +45,7 @@ export function resolvePaths(prepared: PreparedRecipe, values: ValidatedValues):
       // Ветка недостижима после стадии `validate`, но названа, иначе была бы закрыта через
       // `as string`. Замерено: `path.resolve(root, 42)` бросает `ERR_INVALID_ARG_TYPE` (Ф13).
       denials.push(
-        denial({ stage: 'resolve_paths', code: 'path-unusable', paramName: param.name, reason: 'значение параметра не строка' }),
+        denial({ stage: 'resolve_paths', code: 'path-unusable', paramName: param.name, reason: 'parameter value is not a string' }),
       );
       continue;
     }
@@ -73,7 +73,7 @@ export function resolvePaths(prepared: PreparedRecipe, values: ValidatedValues):
           stage: 'resolve_paths',
           code: 'path-unusable',
           paramName: param.name,
-          reason: `корень параметра не резолвится (${code ?? 'без кода'}): ${param.root}`,
+          reason: `parameter root does not resolve (${code ?? 'no code'}): ${param.root}`,
         }),
       );
       continue;
@@ -98,10 +98,10 @@ export function resolvePaths(prepared: PreparedRecipe, values: ValidatedValues):
       const code = errorCode(error);
       const [denialCode, reason] =
         !preOk
-          ? (['path-escapes-root', `значение выходит за границу root: ${realRoot}`] as const)
+          ? (['path-escapes-root', `value crosses the root boundary: ${realRoot}`] as const)
           : code === 'ENOENT'
-            ? (['path-not-found', `файла нет внутри root: ${realRoot}`] as const)
-            : (['path-unusable', `путь непригоден (${code ?? 'без кода'}) внутри root: ${realRoot}`] as const);
+            ? (['path-not-found', `no such file inside root: ${realRoot}`] as const)
+            : (['path-unusable', `path is unusable (${code ?? 'no code'}) inside root: ${realRoot}`] as const);
 
       denials.push(denial({ stage: 'resolve_paths', code: denialCode, paramName: param.name, reason }));
       continue;
@@ -117,8 +117,8 @@ export function resolvePaths(prepared: PreparedRecipe, values: ValidatedValues):
       // дословно, включая bidi-override (Ф13).
       const reason =
         verdict === 'root-itself'
-          ? `значение указывает на сам корень, а не на файл под ним: ${realRoot}`
-          : `резолвнутый путь ${resolved} лежит вне root: ${realRoot}`;
+          ? `value points at the root itself, not at a file under it: ${realRoot}`
+          : `resolved path ${resolved} lies outside root: ${realRoot}`;
       denials.push(denial({ stage: 'resolve_paths', code: 'path-escapes-root', paramName: param.name, reason }));
       continue;
     }
@@ -133,7 +133,7 @@ export function resolvePaths(prepared: PreparedRecipe, values: ValidatedValues):
           stage: 'resolve_paths',
           code: 'not-canonicalizable',
           paramName: param.name,
-          reason: 'резолвнутый путь содержит одиночный суррогат и не переживёт запись события',
+          reason: 'resolved path contains a lone surrogate and would not survive being written to an event',
         }),
       );
       continue;
