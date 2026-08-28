@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { globToRegex } from '@anthropic-ai/sandbox-runtime/dist/sandbox/sandbox-utils.js';
-import { SUPPRESSED_OPERATIONS, classify, parseAndClassify, parseLine } from './violation.js';
+import { SUPPRESSED_OPERATIONS, classify, parseAndClassify, parseLine, typeForOperation } from './violation.js';
 import type { ClassifyPolicy, RawViolationRecord } from './violation.js';
 
 /**
@@ -101,17 +101,35 @@ describe('classify — шум и счёт выживших (R39)', () => {
     });
   });
 
-  it('список подавляемых — константа, и в ней нет ни одной операции с типом нарушения', () => {
-    // Иначе подавление съело бы настоящее нарушение: `file-write-data` в этом списке
-    // выключил бы бейдж S6 целиком, и ни один другой тест этого не заметил бы.
+  /**
+   * Свойство **универсальное**, а не два имени: список подавления обязан не пересекаться с
+   * отображением в `ViolationType` целиком. Перечисление `file-write-data` и
+   * `network-outbound` проверяло ровно эти две строки — замер: добавление
+   * `file-write-create` (настоящее имя из семьи записи, которую `TYPE_BY_PREFIX`
+   * перечисляет явно) оставляло весь файл зелёным, а краснел только интеграционный тест
+   * бейджа S6, то есть **невидимо на Linux-раннере**. Одна строка в константе выключала бы
+   * бейдж молча.
+   */
+  it('ни одна подавляемая операция не отображается в член ViolationType', () => {
+    const overlapping = SUPPRESSED_OPERATIONS.filter((operation) => typeForOperation(operation) !== null);
+    expect(overlapping).toEqual([]);
+  });
+
+  it('и каждая из них действительно подавляется', () => {
     for (const operation of SUPPRESSED_OPERATIONS) {
       expect(classify({ source: 'kernel', operation, target: '/x', line: 'x' }, EMPTY_POLICY)).toEqual({
         kind: 'suppressed',
         operation,
       });
     }
-    expect(SUPPRESSED_OPERATIONS).not.toContain('file-write-data');
-    expect(SUPPRESSED_OPERATIONS).not.toContain('network-outbound');
+  });
+
+  it('а операции с типом — наоборот, доезжают нарушениями', () => {
+    // Положительный контроль к отрицанию выше: без него «пересечения нет» было бы зелено и
+    // на пустом отображении.
+    for (const operation of ['file-write-data', 'file-read-data', 'network-outbound', 'process-exec']) {
+      expect(typeForOperation(operation)).not.toBeNull();
+    }
   });
 });
 

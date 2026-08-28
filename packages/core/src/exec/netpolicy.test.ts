@@ -70,6 +70,43 @@ describe('конформанс с вендорским матчером', () => 
     expect(isValidDomainPattern('*')).toBe(true);
   });
 
+  /**
+   * Свойство, которое докстринг `isValidDomainPattern` объявляет и которое до этой правки
+   * было **ложным**: наш валидатор обязан быть ШИРЕ вендорского, а не строже.
+   *
+   * ASCII-only фильтр меток отвергал `пример.рф` и `münchen.de`, тогда как вендор их
+   * принимает. Схема манифеста доменный синтаксис не проверяет вовсе, значит такой рецепт
+   * грузится, хэшируется и попадает в **одобренный человеком** lock — а умирал бы уже на
+   * перепроверке перед принуждением, то есть после согласия.
+   */
+  it('наш валидатор нигде не строже вендорского — ни на одном шаблоне', () => {
+    const CASES = [
+      'github.com',
+      '*.github.com',
+      'пример.рф',
+      'münchen.de',
+      'xn--e1afmkfd.xn--p1ai',
+      '中国.cn',
+      'api.github.com:8443',
+      'localhost',
+      'a-b.example.com',
+    ];
+    const stricterThanVendor = CASES.filter(
+      (pattern) =>
+        NetworkConfigSchema.safeParse({ allowedDomains: [pattern], deniedDomains: [] }).success &&
+        !isValidDomainPattern(pattern),
+    );
+    expect(stricterThanVendor).toEqual([]);
+  });
+
+  it('и всё же отвергает то, что доменом не является ни при каком чтении', () => {
+    // Положительный контроль к утверждению выше: «шире вендора» не должно вырождаться в
+    // «принимает всё» — иначе перепроверка R13 перестала бы что-либо отбивать.
+    for (const pattern of ['http://example.com', 'exa mple.com', 'user@example.com', 'a/b.com']) {
+      expect({ pattern, valid: isValidDomainPattern(pattern) }).toEqual({ pattern, valid: false });
+    }
+  });
+
   it('наше зеркало вендорского правила совпадает с настоящей схемой на всём наборе', () => {
     // Копия правила живёт у нас (`isVendorAcceptableAllow`), потому что вендор не
     // экспортирует функцию наружу. Копия без сверки устаревает молча — вот сверка.

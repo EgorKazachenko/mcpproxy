@@ -1,7 +1,9 @@
+import { readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { describe, expect, it } from 'vitest';
 import { encodeSandboxedCommand } from '@anthropic-ai/sandbox-runtime/dist/sandbox/sandbox-utils.js';
 import { newCommandId } from './sandbox.js';
-import { STORE_RING_SIZE, advanceCursor, redactUrlForTarget } from './srt-manager.js';
+import { STORE_RING_SIZE, advanceCursor, redactUrlForTarget, telemetryRecord } from './srt-manager.js';
 
 /**
  * Чистая половина синглтона. Всё, что требует живого прокси и seatbelt, живёт в
@@ -40,11 +42,27 @@ describe('advanceCursor (R44, R45)', () => {
     expect(advanceCursor({ totalCount: 10, lastSeen: 10, available: 10 })).toEqual({ lost: 0, take: 0, lastSeen: 10 });
   });
 
-  it('кольцо у вендора — сто записей, и константа это утверждает, а не предполагает', () => {
-    // Значение скопировано из `sandbox-violation-store.js` (`maxSize = 100`). Копия без
-    // сверки устаревает молча — сверку держит первый интеграционный тест на 250 отказах:
-    // при большем кольце он остался бы зелёным, при меньшем — покраснел бы.
-    expect(STORE_RING_SIZE).toBe(100);
+  /**
+   * Сверка с **исходником вендора**, а не с литералом строкой выше.
+   *
+   * `expect(STORE_RING_SIZE).toBe(100)` сравнивало константу с её же значением: продакшен
+   * этой константы не использует вовсе (живой код передаёт `available: all.length`), она
+   * существует только чтобы задать фикстуру ветки потери. Бамп `maxSize` у вендора делал бы
+   * эту фикстуру нерепрезентативной молча — и интеграционный тест на 250 отказах, на
+   * который ссылался прежний комментарий, при БОЛЬШЕМ кольце остался бы зелёным, что тот же
+   * комментарий и признавал.
+   *
+   * Форма — та же, что у детектора порядка deny/allow в `netpolicy.test.ts`: читаем вендора
+   * и краснеем в обе стороны.
+   */
+  it('совпадает с maxSize в исходнике вендорского стора', () => {
+    const require_ = createRequire(import.meta.url);
+    const storePath = require_.resolve('@anthropic-ai/sandbox-runtime/dist/sandbox/sandbox-violation-store.js');
+    const source = readFileSync(storePath, 'utf8');
+    const match = /this\.maxSize\s*=\s*(\d+)/.exec(source);
+
+    expect(match).not.toBeNull();
+    expect(STORE_RING_SIZE).toBe(Number(match?.[1]));
   });
 });
 
@@ -103,5 +121,39 @@ describe('redactUrlForTarget', () => {
       'сломанный?token=СЕКРЕТ',
     ];
     for (const url of CASES) expect(redactUrlForTarget(url)).not.toContain('СЕКРЕТ');
+  });
+});
+
+/**
+ * Инвариант один: сбой счётчика байт уносит **байты**, а не запрос.
+ *
+ * Ветка недостижима чёрным ящиком — чтобы `countBody` бросил, нужно уже прочитанное тело, а
+ * вендор отдаёт свежую ветку tee, — поэтому она вынесена сюда и подаётся литералом. Пока
+ * запись строилась внутри того же `try`, отказ счётчика уносил из аудита сам запрос: в
+ * режиме `none` это ровно тот запрос эксфильтрации, ради показа которого существует S5, и
+ * исчезал он бесследно.
+ */
+describe('telemetryRecord', () => {
+  it('при сбое счётчика запись остаётся, а байты становятся нулём', () => {
+    const { violation, countFailed } = telemetryRecord('https://api.example.com/x?token=СЕКРЕТ', { ok: false });
+    expect(violation).toEqual({
+      type: 'network',
+      target: 'https://api.example.com/x?…',
+      action: 'allowed',
+      bytes: 0,
+    });
+    expect(countFailed).toBe(true);
+  });
+
+  it('при удачном счёте байты доезжают, а сбой не объявляется', () => {
+    const { violation, countFailed } = telemetryRecord('http://a.example.com/p', { ok: true, bytes: 1234 });
+    expect(violation).toMatchObject({ action: 'allowed', bytes: 1234, target: 'http://a.example.com/p' });
+    expect(countFailed).toBe(false);
+  });
+
+  it('и в обоих случаях запись существует — это и есть инвариант', () => {
+    for (const count of [{ ok: true, bytes: 0 } as const, { ok: false } as const]) {
+      expect(telemetryRecord('http://a.example.com/', count).violation.action).toBe('allowed');
+    }
   });
 });

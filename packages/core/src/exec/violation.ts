@@ -221,7 +221,7 @@ export interface ClassifyPolicy {
 export function classify(record: RawViolationRecord, policy: ClassifyPolicy): ParsedLine {
   if (SUPPRESSED.has(record.operation)) return { kind: 'suppressed', operation: record.operation };
 
-  const type = typeOf(record.operation);
+  const type = typeForOperation(record.operation);
   if (type === null) return { kind: 'unrecognized', line: record.line };
 
   const finalType = type === 'file-write' && isMandatory(record.target, policy) ? 'mandatory-deny' : type;
@@ -239,7 +239,15 @@ export function classify(record: RawViolationRecord, policy: ClassifyPolicy): Pa
   };
 }
 
-function typeOf(operation: string): ViolationType | null {
+/**
+ * Операция → член `ViolationType`, или `null`, если такого члена нет.
+ *
+ * Экспортируется ради теста, и это не удобство: список подавления обязан не пересекаться с
+ * отображением, иначе одна строка в константе выключает бейдж S6 целиком. Утверждать это
+ * свойство перечислением двух имён — значит проверять два имени; утверждать его через эту
+ * функцию — значит проверять весь список, включая имена, которых там ещё нет.
+ */
+export function typeForOperation(operation: string): ViolationType | null {
   for (const [prefix, type] of TYPE_BY_PREFIX) {
     if (operation.startsWith(prefix)) return type;
   }

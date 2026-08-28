@@ -4,6 +4,7 @@ import {
 } from '@anthropic-ai/sandbox-runtime/dist/sandbox/sandbox-utils.js';
 import type { SandboxMode } from '@mcpproxy/contracts';
 import { srt } from '../srt-manager.js';
+import { ExecError } from '../errors.js';
 import type { ExecRequest, Sandbox } from '../sandbox.js';
 import { makeSandbox } from './seatbelt.js';
 import type { ModeBehaviour } from './seatbelt.js';
@@ -51,7 +52,8 @@ export interface ProxyHandles {
  */
 export function proxyEnvVars(handles: ProxyHandles, encodedCommand: string): NodeJS.ProcessEnv {
   if (handles.httpPort === undefined && handles.socksPort === undefined) {
-    throw new Error(
+    throw new ExecError(
+      'proxy-down',
       'прокси srt не поднят: ни HTTP-, ни SOCKS-порт не назначен, и режим none стал бы ' +
         'слепым — сеть ребёнка открыта, нарушений ноль, демо показывает ноль эксфильтрации ' +
         'как успех (R31, D2)',
@@ -61,7 +63,8 @@ export function proxyEnvVars(handles: ProxyHandles, encodedCommand: string): Nod
   // ошибкой сертификата, то есть baseline ломается как СЕТЕВАЯ ошибка, неотличимая в
   // таймлайне от «песочница заблокировала».
   if (handles.caBundle === undefined) {
-    throw new Error(
+    throw new ExecError(
+      'proxy-down',
       'трастовый бандл CA недоступен, а tlsTerminate включён: HTTPS в baseline упал бы с ' +
         'ошибкой сертификата и выглядел бы в таймлайне как блокировка песочницей (R31, D12)',
     );

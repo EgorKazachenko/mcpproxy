@@ -1,5 +1,5 @@
 import { existsSync, readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
@@ -18,6 +18,12 @@ import { describe, expect, it } from 'vitest';
  */
 const EXPECTED_SURFACE = [
   'asCommandId',
+  'assertModeSupported',
+  'isModeSupported',
+  'ExecError',
+  'ExecErrorCode',
+  'ExecErrorContext',
+  'typeForOperation',
   'buildProfile',
   'classify',
   'collapseOutput',
@@ -66,5 +72,40 @@ describe('публичная поверхность core', () => {
   it('корневой вход пакета отдаёт ровно эту поверхность и ничего сверх', () => {
     const rootEntry = resolve(packageRoot, 'dist', 'index.d.ts');
     expect(readFileSync(rootEntry, 'utf8')).toContain("export * from './exec/index.js'");
+  });
+
+  /**
+   * Второй вход — чистая половина без вендора (`@mcpproxy/core/policy`).
+   *
+   * Помодульная чистота, которую обещают `netpolicy.ts` и `violation.ts`, на КОРНЕВОМ входе
+   * неверна: он тянет `createSandbox`, тот — режимы, режимы — вендорский SDK. Значит E7,
+   * импортирующий `isWeakened` ради бейджа, грузил бы `@anthropic-ai/sandbox-runtime` на
+   * любой платформе. Граница держится входом, как в `packages/contracts` с его `./validate`
+   * и `./audit`, — и проверяется тем же обходом графа, что и изоляция вендора.
+   */
+  it('вход ./policy не тянет вендора в граф деклараций', () => {
+    const policyEntry = resolve(packageRoot, 'dist', 'exec', 'policy.d.ts');
+    expect(existsSync(policyEntry)).toBe(true);
+
+    const seen = new Set<string>();
+    const bare = new Set<string>();
+    const queue = [policyEntry];
+    while (queue.length > 0) {
+      const file = queue.pop();
+      if (file === undefined || seen.has(file) || !existsSync(file)) continue;
+      seen.add(file);
+      for (const match of readFileSync(file, 'utf8').matchAll(/(?:from|import)\s*\(?\s*['"]([^'"]+)['"]/g)) {
+        const specifier = match[1];
+        if (specifier === undefined) continue;
+        if (!specifier.startsWith('.')) {
+          bare.add(specifier);
+          continue;
+        }
+        queue.push(resolve(dirname(file), specifier.replace(/\.js$/, '.d.ts')));
+      }
+    }
+
+    expect(seen.size).toBeGreaterThan(3);
+    expect([...bare].filter((one) => one.includes('sandbox-runtime'))).toEqual([]);
   });
 });

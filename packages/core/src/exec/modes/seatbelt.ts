@@ -11,6 +11,7 @@ import { buildProfile, policyHash, toSandboxProfile } from '../profile.js';
 import type { ResolvedSandboxPolicy } from '../profile.js';
 import { DISPOSED_MESSAGE, srt } from '../srt-manager.js';
 import type { NetworkPolicy } from '../srt-manager.js';
+import { ExecError } from '../errors.js';
 import type { ExecOutcome, ExecRequest, Sandbox } from '../sandbox.js';
 import type { ClassifyPolicy } from '../violation.js';
 
@@ -226,6 +227,8 @@ export async function runInMode(
     stderr: toStreamOutcome(raw.stderr),
     violations: result.violations,
     violationsLost: result.violationsLost,
+    bodyCountFailures: result.bodyCountFailures,
+    lateUnattributed: result.lateUnattributed,
     attributionMissing: result.attributionMissing,
     attributionForeign: result.attributionForeign,
     unrecognizedLines: result.unrecognizedLines,
@@ -254,7 +257,7 @@ export function createSeatbeltSandbox(): Sandbox {
         request.recipeCwd,
       );
       const [head, ...rest] = wrapped.argv;
-      if (head === undefined) throw new Error('srt вернул пустой argv');
+      if (head === undefined) throw new ExecError('spawn-failed', 'srt вернул пустой argv');
       return [head, ...rest];
     },
   };
@@ -285,7 +288,7 @@ export function makeSandbox(behaviour: ModeBehaviour): Sandbox {
   return {
     mode: behaviour.mode,
     run: async (request, onViolation, onEvent) => {
-      if (disposed) throw new Error(DISPOSED_MESSAGE);
+      if (disposed) throw new ExecError('disposed', DISPOSED_MESSAGE, { recipeName: request.recipeName, commandId: request.commandId });
       return runInMode(behaviour, request, onViolation, onEvent);
     },
     dispose: async () => {

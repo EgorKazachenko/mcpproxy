@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import type { NormalizedDefaults, RecipeName, SandboxMode, SandboxViolation } from '@mcpproxy/contracts';
+import { ExecError } from './errors.js';
 import type { EventSink } from './events.js';
 import { createNoneSandbox } from './modes/none.js';
 import { createSeatbeltSandbox } from './modes/seatbelt.js';
@@ -111,6 +112,21 @@ export interface ExecOutcome {
    */
   readonly consumerFailures: number;
   /**
+   * Сколько разрешённых запросов не удалось посчитать по байтам. Запись о самом запросе при
+   * этом **не теряется** — она едет с `bytes: 0`, иначе запрос, ради показа которого S5 и
+   * существует, исчезал бы из аудита ровно в момент сбоя счётчика.
+   */
+  readonly bodyCountFailures: number;
+  /**
+   * Нарушений, приехавших, когда ни один вызов не был активен, — то есть после drain-окна
+   * предыдущего. Считается на уровне синглтона и докладывается следующим вызовом.
+   *
+   * Ненуль означает, что `DRAIN_WINDOW_MS` мал для этой машины: нарушения вызова опоздали и
+   * не попали в его собственный набор, хотя он уже отчитался `violationsLost: 0`. Без этого
+   * счётчика недостаточное окно не наблюдаемо ничем.
+   */
+  readonly lateUnattributed: number;
+  /**
    * Хэш JCS применённой политики, **включая доменные списки** (R47). Материал для сверки
    * согласия в E5. Узко намеренно: он доказывает тождество нашего входа, а не итоговой
    * политики — srt при обёртке доливает `getDefaultWritePaths()`, mandatory-deny и пути
@@ -140,6 +156,18 @@ export interface Sandbox {
 }
 
 /**
+ * Поддержан ли режим на этой платформе — **вопросом**, а не броском.
+ *
+ * Бросок как способ ответить «поддерживается ли» заставляет UI строить `try/catch` вокруг
+ * проверки, которую делает чистая функция. E5 и E7 спрашивают именно так; `createSandbox`
+ * для этого не годится — он на первой строке берёт ссылку на синглтон.
+ */
+export function isModeSupported(mode: SandboxMode, platform: NodeJS.Platform = process.platform): boolean {
+  if (mode === 'container') return false;
+  return mode !== 'seatbelt' || platform === 'darwin';
+}
+
+/**
  * Проверка режима, отделённая от конструирования, чтобы её можно было утверждать без
  * поднятия прокси и seatbelt.
  *
@@ -152,13 +180,15 @@ export interface Sandbox {
  */
 export function assertModeSupported(mode: SandboxMode, platform: NodeJS.Platform = process.platform): void {
   if (mode === 'container') {
-    throw new Error(
+    throw new ExecError(
+      'mode-unsupported',
       'режим container не реализован: контейнерной песочницы в этой сборке нет, ' +
         'и притворяться, что она есть, опаснее, чем отказать (ADR-0002, D7)',
     );
   }
   if (mode === 'seatbelt' && platform !== 'darwin') {
-    throw new Error(
+    throw new ExecError(
+      'mode-unsupported',
       `режим seatbelt поддерживается только на macOS, а платформа — ${platform}; ` +
         'тихой деградации до none нет намеренно (10-honest-limitations.md:84)',
     );

@@ -14,6 +14,8 @@
  * Модуль чистый: ни ФС, ни процессов, ни сети, ни импорта вендора в рантайме.
  */
 
+import { ExecError } from './errors.js';
+
 /** Управляющие и форматирующие символы: домен с ними — не домен, а попытка. */
 const CONTROL_OR_FORMAT = /[\p{Cc}\p{Cf}\s]/u;
 
@@ -83,11 +85,30 @@ function isValidHostPattern(host: string): boolean {
   return isValidLabels(host, 2);
 }
 
+/**
+ * Метка домена: непустая, без дефиса по краям и без символов, которые доменом не бывают.
+ *
+ * ASCII-only здесь было **дефектом контракта**, а не строгостью. Схема манифеста объявляет
+ * `network.allow` как `{"type": "array", "items": {"type": "string"}}` — никакого формата, —
+ * и загрузчик доменный синтаксис не проверяет вовсе. Значит рецепт с `["пример.рф"]`
+ * сегодня грузится, хэшируется и **попадает в одобренный человеком `mcpproxy.lock`**, а
+ * дальше умирал бы на перепроверке перед принуждением — то есть отказ наступал бы после
+ * согласия, а не до него.
+ *
+ * Хуже: вендор такие домены **принимает** (проверено на `NetworkConfigSchema`:
+ * `пример.рф` и `münchen.de` проходят), то есть мы были строже него — при том что докстринг
+ * `isValidDomainPattern` обещает обратное. Отвергаем теперь только то, что доменом не
+ * является ни при каком чтении.
+ *
+ * Валидация доменного синтаксиса на **загрузке** — правильное место для этой проверки, но
+ * оно в `packages/contracts/src/validate/refine.ts`, а contracts в этом эпике не трогается
+ * (граница объявлена в `spec.md`). Остаток записан в границах как долг E1.
+ */
 function isValidLabels(domain: string, minLabels: number): boolean {
   if (domain.length === 0) return false;
   const labels = domain.split('.');
   if (labels.length < minLabels) return false;
-  return labels.every((label) => /^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?$/.test(label));
+  return labels.every((label) => label.length > 0 && !label.startsWith('-') && !label.endsWith('-'));
 }
 
 /**
@@ -137,12 +158,12 @@ export function isWeakened(allow: readonly string[]): boolean {
 export function assertDomainPatterns(allow: readonly string[], deny: readonly string[]): void {
   for (const pattern of allow) {
     if (!isValidDomainPattern(pattern)) {
-      throw new Error(`не доменный шаблон в network.allow: ${JSON.stringify(pattern)}`);
+      throw new ExecError('invalid-domain', `не доменный шаблон в network.allow: ${JSON.stringify(pattern)}`);
     }
   }
   for (const pattern of deny) {
     if (!isValidDomainPattern(pattern)) {
-      throw new Error(`не доменный шаблон в network.deny: ${JSON.stringify(pattern)}`);
+      throw new ExecError('invalid-domain', `не доменный шаблон в network.deny: ${JSON.stringify(pattern)}`);
     }
   }
 }

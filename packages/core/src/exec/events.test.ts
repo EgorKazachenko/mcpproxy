@@ -13,6 +13,20 @@ import { createSandbox, newCommandId } from './sandbox.js';
 import type { Sandbox, StreamOutcome } from './sandbox.js';
 
 const IS_MACOS = process.platform === 'darwin';
+const OPTED_OUT = process.env['MCPPROXY_SKIP_SANDBOX_TESTS'] === '1';
+
+/**
+ * Третий интеграционный набор ветки, и объявлять пропуск он обязан так же, как два
+ * остальных. Без этого блока на Linux исчезал бы весь контракт порядка полей события
+ * (R32/R33/R34) — семь утверждений, — а файл отчитывался бы зелёным.
+ */
+describe('громкость пропуска', () => {
+  it.skipIf(IS_MACOS)('на не-macOS набор не исполняется, и это объявлено, а не замолчано', () => {
+    expect(
+      OPTED_OUT ? 'пропуск объявлен переменной MCPPROXY_SKIP_SANDBOX_TESTS' : `платформа ${process.platform}`,
+    ).toBe('пропуск объявлен переменной MCPPROXY_SKIP_SANDBOX_TESTS');
+  });
+});
 
 const DEFAULTS: Defaults = {
   timeout: '30s',
@@ -37,7 +51,7 @@ describe('collapseOutput (R20)', () => {
 });
 
 describe('measure (R35)', () => {
-  it('меряет монотонными часами и отдаёт целые микросекунды', () => {
+  it('отдаёт целые микросекунды', () => {
     const { value, durationUs } = measure(() => {
       let sum = 0;
       for (let i = 0; i < 200_000; i += 1) sum += i;
@@ -46,6 +60,20 @@ describe('measure (R35)', () => {
     expect(value).toBeGreaterThan(0);
     expect(Number.isInteger(durationUs)).toBe(true);
     expect(durationUs).toBeGreaterThan(0);
+  });
+
+  /**
+   * Утверждается **разрешение**, которого миллисекундные часы дать не могут.
+   *
+   * Целочисленность и `> 0` часами не различают: реализация на `Date.now()` проходила их
+   * обе (замер: подмена `process.hrtime.bigint()` оставляла все четырнадцать тестов
+   * зелёными), то есть регрессия, ради которой R35 написан — «квантовано до миллисекунды и
+   * прыгает по NTP», — была ненаблюдаема. А ещё она посеяла бы флак: короткое тело чаще
+   * всего давало бы ровно ноль.
+   */
+  it('разрешение тоньше миллисекунды — то, чего часы стены не дают', () => {
+    const durations = Array.from({ length: 20 }, () => measure(() => Math.sqrt(12345)).durationUs);
+    expect(durations.some((one) => one % 1_000 !== 0)).toBe(true);
   });
 });
 

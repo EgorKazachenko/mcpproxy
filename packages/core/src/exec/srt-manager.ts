@@ -5,6 +5,7 @@ import type { SandboxViolationEvent } from '@anthropic-ai/sandbox-runtime/dist/s
 import type { SandboxViolation } from '@mcpproxy/contracts';
 import { parseAndClassify } from './violation.js';
 import type { ClassifyPolicy } from './violation.js';
+import { ExecError } from './errors.js';
 import type { CommandId } from './sandbox.js';
 
 /**
@@ -115,6 +116,32 @@ export function redactUrlForTarget(url: string): string {
   }
 }
 
+/** Результат попытки посчитать тело: либо число, либо признанный отказ счётчика. */
+export type BodyCount = { readonly ok: true; readonly bytes: number } | { readonly ok: false };
+
+/**
+ * Запись о разрешённом запросе строится **из результата счёта, а не вместо него**.
+ *
+ * Отдельной чистой функцией потому, что инвариант здесь ровно один и его нужно уметь
+ * утверждать: сбой счётчика байт уносит **байты**, а не запрос. Пока `collected.push` стоял
+ * внутри того же `try`, что и `countBody`, отказ счётчика (тело уже прочитано, клиент
+ * оборвал загрузку) уносил вместе с байтами и сам запрос — то есть в режиме `none` из
+ * аудита исчезал тот самый запрос эксфильтрации, ради показа которого S5 существует, и
+ * исчезал бесследно: `consumerFailures` документирован под другое.
+ */
+export function telemetryRecord(url: string, count: BodyCount): { violation: SandboxViolation; countFailed: boolean } {
+  return {
+    violation: {
+      type: 'network',
+      // Сведённый URL, а не сырой: сырой уехал бы с query-строкой в цепочку аудита.
+      target: redactUrlForTarget(url),
+      action: 'allowed',
+      bytes: count.ok ? count.bytes : 0,
+    },
+    countFailed: !count.ok,
+  };
+}
+
 export interface InvocationResult<T> {
   readonly value: T;
   readonly violations: readonly SandboxViolation[];
@@ -124,6 +151,8 @@ export interface InvocationResult<T> {
   readonly unrecognizedLines: number;
   readonly suppressedLines: number;
   readonly consumerFailures: number;
+  readonly bodyCountFailures: number;
+  readonly lateUnattributed: number;
 }
 
 export interface InvocationContext {
@@ -163,8 +192,6 @@ class Semaphore {
   }
 }
 
-export class SrtManagerError extends Error {}
-
 /**
  * Текст один на все точки отказа: после `dispose()` вызов пошёл бы со старым конфигом и
  * `getProxyPort() === undefined`, то есть прокси-переменные не эмитятся вовсе — сеть
@@ -185,6 +212,7 @@ interface ActiveInvocation {
   unrecognized: number;
   suppressed: number;
   consumerFailures: number;
+  bodyCountFailures: number;
 }
 
 class SrtSingleton {
@@ -208,6 +236,15 @@ class SrtSingleton {
 
   private readonly semaphore = new Semaphore();
   private lastSeen = 0;
+
+  /**
+   * Нарушения, приехавшие, когда активного вызова нет. Курсор их всё равно ретирует —
+   * иначе следующий вызов получил бы чужие, — но выбрасывать их молча нельзя: ровно так
+   * выглядит недостаточное `DRAIN_WINDOW_MS`, чьё собственное описание признаёт, что «ноль
+   * на одной машине не ноль всегда». Вызов, чьи нарушения опоздали, уже отчитался
+   * `violationsLost: 0`, то есть утверждает полный набор, которого у него нет.
+   */
+  private lateUnattributed = 0;
 
   /** Активный сборщик нарушений. Не `undefined` ровно тогда, когда семафор занят. */
   private active: ActiveInvocation | undefined;
@@ -257,7 +294,10 @@ class SrtSingleton {
     if (step.take === 0 && step.lost === 0) return;
 
     const active = this.active;
-    if (active === undefined) return;
+    if (active === undefined) {
+      this.lateUnattributed += step.take + step.lost;
+      return;
+    }
     active.lost += step.lost;
 
     for (const event of all.slice(all.length - step.take)) {
@@ -314,28 +354,30 @@ class SrtSingleton {
    */
   buildFilterRequest(): (request: Request) => Promise<{ action: 'allow' }> {
     return async (request: Request): Promise<{ action: 'allow' }> => {
+      // Счёт байт и ЗАПИСЬ о запросе разведены намеренно. Обоснование «ошибка даёт allow, а
+      // не deny» (R26) объясняет только решение: политика уже применена `updateConfig`, и
+      // бросок здесь резал бы разрешённый трафик. Оно не даёт права выронить саму запись —
+      // а именно это происходило, пока `collected.push` стоял внутри того же `try`: сбой
+      // `countBody` (тело уже прочитано, клиент оборвал загрузку) уносил вместе с байтами и
+      // запрос, ради показа которого S5 существует. Байт нет — пишем ноль и считаем сбой;
+      // записи нет — писать нечего никогда.
+      let count: BodyCount;
       try {
-        const bodyBytes = await countBody(request);
-        const active = this.active;
-        if (active !== undefined) {
-          const violation: SandboxViolation = {
-            type: 'network',
-            // Сведённый URL, а не сырой: сырой уехал бы с query-строкой в цепочку аудита.
-            target: redactUrlForTarget(request.url),
-            action: 'allowed',
-            bytes: bodyBytes,
-          };
-          active.collected.push(violation);
-          try {
-            active.onViolation(violation);
-          } catch {
-            active.consumerFailures += 1;
-          }
-        }
+        count = { ok: true, bytes: await countBody(request) };
       } catch {
-        // Тело в try/catch, и ошибка даёт `allow`, а не `deny` (R26): политика уже
-        // применена `updateConfig`, и бросок здесь резал бы разрешённый трафик — то есть
-        // дефект телеметрии превращался бы в отказ границы.
+        count = { ok: false };
+      }
+
+      const active = this.active;
+      if (active !== undefined) {
+        const { violation, countFailed } = telemetryRecord(request.url, count);
+        if (countFailed) active.bodyCountFailures += 1;
+        active.collected.push(violation);
+        try {
+          active.onViolation(violation);
+        } catch {
+          active.consumerFailures += 1;
+        }
       }
       return { action: 'allow' };
     };
@@ -354,10 +396,11 @@ class SrtSingleton {
    * падения тела, атрибутировались бы **следующему** вызову.
    */
   async withNetworkPolicy<T>(options: WithPolicyOptions<T>): Promise<InvocationResult<T>> {
-    if (this.poisoned !== undefined) throw new SrtManagerError(this.poisoned);
+    const context = { commandId: options.commandId };
+    if (this.poisoned !== undefined) throw new ExecError('poisoned', this.poisoned, context);
 
     const base = this.baseConfig;
-    if (base === undefined) throw new SrtManagerError('srt не инициализирован');
+    if (base === undefined) throw new ExecError('srt-uninitialized', 'srt не инициализирован', context);
 
     const release = await this.semaphore.acquire();
 
@@ -366,7 +409,7 @@ class SrtSingleton {
     // уже объявил, что новых вызовов не выдаёт.
     if (this.poisoned !== undefined) {
       release();
-      throw new SrtManagerError(this.poisoned);
+      throw new ExecError('poisoned', this.poisoned, context);
     }
 
     const active: ActiveInvocation = {
@@ -380,20 +423,33 @@ class SrtSingleton {
       unrecognized: 0,
       suppressed: 0,
       consumerFailures: 0,
+      bodyCountFailures: 0,
     };
+    const inheritedLate = this.lateUnattributed;
+    this.lateUnattributed = 0;
     this.active = active;
 
     try {
       applyNetwork(base, options.policy);
-      const outcome = await options.body({ commandId: options.commandId });
+      let outcome;
+      try {
+        outcome = await options.body({ commandId: options.commandId });
+      } catch (error) {
+        // Отказ тела тоже может оставить живую группу — `runProcess` сообщает об этом
+        // полем `groupDrained` в контексте ошибки. Без разбора здесь аварийный путь
+        // отпускал бы демон дальше с выжившим потомком, и не осталось бы ни записи, ни
+        // отравления: `outcome` не был бы присвоен, а ветка ниже — не исполнена.
+        if (error instanceof ExecError && error.context.groupDrained === false) {
+          this.poison(options.commandId, error.context.pid);
+        }
+        throw error;
+      }
 
       if (!outcome.groupDrained) {
         // Тихий проход здесь возвращает исходный дефект: фоновый потомок остаётся привязан
         // к порту прокси и попадает под СЛЕДУЮЩУЮ политику (R52).
-        this.poisoned =
-          'группа процессов не подтвердила пустоту: фоновый потомок пережил вызов и попал бы ' +
-          'под политику следующего. Демон не выдаёт новых вызовов до вмешательства (R52)';
-        throw new SrtManagerError(this.poisoned);
+        this.poison(options.commandId);
+        throw new ExecError('group-not-drained', this.poisoned ?? '', context);
       }
 
       return {
@@ -405,6 +461,8 @@ class SrtSingleton {
         unrecognizedLines: active.unrecognized,
         suppressedLines: active.suppressed,
         consumerFailures: active.consumerFailures,
+        bodyCountFailures: active.bodyCountFailures,
+        lateUnattributed: inheritedLate,
       };
     } finally {
       // Порядок внутри `finally` тот же, что был на успешном пути, и он несущий:
@@ -416,12 +474,26 @@ class SrtSingleton {
         applyNetwork(base, IDLE_NETWORK);
       } catch (error) {
         this.poisoned =
-          `не удалось вернуть allowlist в пустое состояние: ${String(error)}. ` +
-          'Демон не выдаёт новых вызовов до вмешательства (R52)';
+          `не удалось вернуть allowlist в пустое состояние после вызова ${options.commandId}: ` +
+          `${String(error)}. Демон не выдаёт новых вызовов до вмешательства (R52)`;
       }
       this.active = undefined;
       release();
     }
+  }
+
+  /**
+   * Отравление именует **вызов и pid**, а не только правило. Флаг терминальный, поэтому
+   * после него каждый следующий отказ несёт одинаковый текст: без идентификаторов оператор,
+   * читая аудит, не может сказать, какой рецепт оставил выжившего и какой процесс идти
+   * искать, — а R45 просит, чтобы атрибуция докладывалась громко.
+   */
+  private poison(commandId: CommandId, pid?: number): void {
+    const where = pid === undefined ? '' : `, лидер группы pid ${pid}`;
+    this.poisoned =
+      `группа процессов не подтвердила пустоту после вызова ${commandId}${where}: фоновый ` +
+      'потомок пережил вызов и попал бы под политику следующего. Демон не выдаёт новых ' +
+      'вызовов до вмешательства (R52)';
   }
 
   wrap(
@@ -515,7 +587,8 @@ function assertWildcardSurvived(policy: NetworkPolicy): void {
   if (!policy.allowedDomains.includes('*')) return;
   const applied = SandboxManager.getConfig();
   if (applied === undefined || !applied.network.allowedDomains.includes('*')) {
-    throw new SrtManagerError(
+    throw new ExecError(
+      'wildcard-dropped',
       'политика с allowedDomains: ["*"] не доехала до srt: вендор начал валидировать список, ' +
         'и режим none из «наблюдаем всё» стал «блокируем всё» (R54)',
     );

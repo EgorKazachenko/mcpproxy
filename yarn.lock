@@ -5,7 +5,7 @@ __metadata:
   version: 8
   cacheKey: 10
 
-"@anthropic-ai/sandbox-runtime@npm:^0.0.74":
+"@anthropic-ai/sandbox-runtime@npm:0.0.74":
   version: 0.0.74
   resolution: "@anthropic-ai/sandbox-runtime@npm:0.0.74"
   dependencies:
@@ -261,7 +261,7 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "@mcpproxy/core@workspace:packages/core"
   dependencies:
-    "@anthropic-ai/sandbox-runtime": "npm:^0.0.74"
+    "@anthropic-ai/sandbox-runtime": "npm:0.0.74"
     "@mcpproxy/contracts": "workspace:*"
     vitest: "npm:^3"
   languageName: unknown

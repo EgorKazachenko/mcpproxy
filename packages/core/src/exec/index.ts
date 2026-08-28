@@ -15,6 +15,19 @@
 
 /** E4 — единственный вход в исполнение; `newCommandId` он же зовёт на каждый вызов. */
 export { asCommandId, createSandbox, newCommandId } from './sandbox.js';
+/**
+ * E5 и E7 — «доступен ли seatbelt на этой машине». Спрашивать через `createSandbox` нельзя:
+ * он на первой строке берёт ссылку на синглтон, то есть проба режима либо течёт ссылкой,
+ * либо требует парного `dispose()` ради вопроса, на который отвечает чистая функция.
+ */
+export { assertModeSupported, isModeSupported } from './sandbox.js';
+/**
+ * E4 — различить отказ политики от сбоя прокси. Без экспортированного класса единственным
+ * дискриминатором осталась бы строка сообщения, и вызов, заблокированный политикой, лёг бы
+ * в лог как `verdict: 'error'` — ровно то, что запрещает D6.
+ */
+export { ExecError } from './errors.js';
+export type { ExecErrorCode, ExecErrorContext } from './errors.js';
 export type {
   CommandId,
   ExecOutcome,
@@ -35,6 +48,11 @@ export type { ResolvedSandboxPolicy } from './profile.js';
 /** E7 — бейдж «ослабленный режим» на рецепте (R14). */
 export { isWeakened } from './netpolicy.js';
 
-/** E8 — разбор корпуса атак: отличить «команду резали» от «команда отработала» (R41). */
-export { classify, parseAndClassify, parseLine } from './violation.js';
+/**
+ * E8 — разбор корпуса атак: отличить «команду резали» от «команда отработала» (R41).
+ *
+ * Тем, кому нужна только эта половина, лучше брать её из `@mcpproxy/core/policy`: корневой
+ * вход тянет за собой вендорский SDK, а `./policy` — нет.
+ */
+export { classify, parseAndClassify, parseLine, typeForOperation } from './violation.js';
 export type { ClassifyPolicy, ParsedLine, RawViolationRecord } from './violation.js';

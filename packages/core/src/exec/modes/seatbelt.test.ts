@@ -74,6 +74,22 @@ describe.skipIf(!IS_MACOS)('seatbelt под настоящей песочниц�
       );
     }
 
+    // Второе условие прогона, и оно объявляется так же громко. Без него блокированный
+    // egress, captive portal или заминка `example.com` всплывали бы как
+    // `expected '000' to be '200'` внутри теста про allowlist — то есть читались бы как
+    // «песочница отказала запросу, который обязана была пропустить», а на deny-ногах
+    // делали бы тест зелёным по неверной причине.
+    const reachable = await fetch(`https://${PUBLIC_HOST}/`, { signal: AbortSignal.timeout(20_000) })
+      .then((response) => response.status)
+      .catch(() => 0);
+    if (reachable !== 200) {
+      throw new Error(
+        `условие прогона не выполнено: ${PUBLIC_HOST} обязан отвечать 200 напрямую с ` +
+          `машины демона, а ответил ${reachable}. Сетевые утверждения набора без этого ` +
+          'читаются как отказ песочницы.',
+      );
+    }
+
     sandbox = createSeatbeltSandbox();
     fixture = mkdtempSync(join(tmpdir(), 'e3-seatbelt-'));
     for (const sub of ['.git/hooks', 'sub/.git/hooks']) mkdirSync(join(fixture, sub), { recursive: true });
@@ -313,28 +329,44 @@ describe.skipIf(!IS_MACOS)('seatbelt под настоящей песочниц�
       expect(violations.filter((one) => one.type === 'file-read')).not.toHaveLength(0);
     });
 
+    /**
+     * Ожидание перевёрнуто: не «подождём две секунды и понадеемся», а «ребёнок живёт ровно
+     * до тех пор, пока колбэк его не отпустит».
+     *
+     * Задержка доставки через `log stream` ничем не ограничена — это отдельный процесс,
+     * пишущий чанками, — поэтому фиксированное окно на загруженной машине закрывается
+     * раньше, чем нарушение приезжает, и тест краснеет по причине, не имеющей отношения к
+     * R29. Здесь же он не может упасть из-за пятидесяти лишних миллисекунд: ребёнок ждёт
+     * условия, а верхнюю границу держит `testTimeout`.
+     */
     it('нарушение доезжает до колбэка, пока процесс ещё жив (R29)', async () => {
-      const marker = join(fixture, 'alive-marker');
-      rmSync(marker, { force: true });
+      const release = join(fixture, 'release-marker');
+      rmSync(release, { force: true });
       let seenWhileAlive = false;
       const { effective } = normalizeRecipe(readDenied, DEFAULTS);
 
       await sandbox.run(
         {
           recipeName: asRecipeName('probe'),
-          command: ['/bin/sh', '-c', `cat '${join(fixture, 'secret.txt')}' 2>/dev/null; sleep 2; touch '${marker}'`],
+          command: [
+            '/bin/sh',
+            '-c',
+            `cat '${join(fixture, 'secret.txt')}' 2>/dev/null; while [ ! -f '${release}' ]; do sleep 0.05; done`,
+          ],
           recipeCwd: fixture,
           effective,
           commandId: newCommandId(),
         },
         () => {
-          // Маркер пишется последней строкой скрипта. Его отсутствие в момент колбэка и
-          // есть «строка появилась в таймлайне до выхода процесса».
-          if (!existsSync(marker)) seenWhileAlive = true;
+          // Колбэк сработал — значит процесс ещё крутится в ожидании файла, который сейчас
+          // и появится. Отсутствие файла В МОМЕНТ колбэка и есть «до выхода процесса».
+          if (!existsSync(release)) seenWhileAlive = true;
+          writeFileSync(release, '');
         },
       );
 
       expect(seenWhileAlive).toBe(true);
+      rmSync(release, { force: true });
     });
 
     /**
@@ -345,7 +377,31 @@ describe.skipIf(!IS_MACOS)('seatbelt под настоящей песочниц�
      * лог ещё не сказал.
      */
     it('spawn приезжает РАНЬШЕ первого violation, а не после выхода процесса', async () => {
-      const { events } = await run(readDenied, `cat '${join(fixture, 'secret.txt')}' 2>/dev/null; sleep 1`);
+      // Тот же приём, что и выше: ребёнок ждёт условия, а не фиксированной паузы, — иначе
+      // тест платит секунду на каждом прогоне и всё равно зависит от везения.
+      const release = join(fixture, 'stage-release');
+      rmSync(release, { force: true });
+      const { effective } = normalizeRecipe(readDenied, DEFAULTS);
+      const events: ExecEvent[] = [];
+
+      await sandbox.run(
+        {
+          recipeName: asRecipeName('probe'),
+          command: [
+            '/bin/sh',
+            '-c',
+            `cat '${join(fixture, 'secret.txt')}' 2>/dev/null; while [ ! -f '${release}' ]; do sleep 0.05; done`,
+          ],
+          recipeCwd: fixture,
+          effective,
+          commandId: newCommandId(),
+        },
+        () => {
+          writeFileSync(release, '');
+        },
+        (event) => events.push(event),
+      );
+      rmSync(release, { force: true });
       const stages = events.map((one) => one.stage);
 
       expect(stages).toContain('spawn');

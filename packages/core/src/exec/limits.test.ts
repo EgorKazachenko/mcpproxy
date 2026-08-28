@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
-import { DEFAULT_GRACE_MS, runProcess, truncateToBytes } from './limits.js';
+import { DEFAULT_GRACE_MS, isGroupGone, runProcess, truncateToBytes } from './limits.js';
 import type { ProcessLimits } from './limits.js';
 
 /**
@@ -10,8 +10,15 @@ import type { ProcessLimits } from './limits.js';
  * именно это число и обязан ловить первый тест.
  */
 
-/** Уникальная длительность вместо pid-группы: маркер виден в `ps` независимо от нашей же логики. */
-const MARKER_SECONDS = '29387';
+/**
+ * Уникальная длительность вместо pid-группы: маркер виден в `ps` независимо от нашей же
+ * логики. **Свой на процесс**, а не константа файла: `survivors()` грепает `ps` по всей
+ * машине, а `pkill` по всей машине и убивает — два чекаута этого репозитория, гоняющие
+ * тесты одновременно (обычное дело, пока ревью идёт в параллельных воркtree, и эта ветка
+ * сама воркtree), считали бы чужих потомков своими и убивали бы чужие живые фикстуры прямо
+ * посреди утверждения.
+ */
+const MARKER_SECONDS = String(20_000 + (process.pid % 9_000));
 
 const survivors = (): number => {
   const out = execFileSync('/bin/ps', ['-A', '-o', 'args='], { encoding: 'utf8' });
@@ -29,9 +36,21 @@ const LIMITS: ProcessLimits = {
 
 const sh = (script: string): readonly [string, ...string[]] => ['/bin/sh', '-c', script];
 
+/**
+ * `-9`, а не SIGTERM по умолчанию, и это не перестраховка.
+ *
+ * Набор намеренно порождает `trap '' TERM; sleep …` — фикстуру, которая **игнорирует
+ * SIGTERM**, — чтобы проверить эскалацию до SIGKILL. Уборка тем же SIGTERM бессильна ровно
+ * против той фикстуры, которая доказывает регрессию: когда путь убийства в продакшене
+ * ломается, сироты остаются, `beforeAll` следующего прогона их не убирает, и
+ * `expect(survivors()).toBe(0)` краснеет **навсегда**, указывая при этом не на тот код.
+ *
+ * И тихой сдачи нет: неубираемая сирота обязана назвать себя, а не всплыть загадочным
+ * красным внутри следующего теста.
+ */
 const cleanupMarkers = async (): Promise<void> => {
   try {
-    execFileSync('/usr/bin/pkill', ['-f', `sleep ${MARKER_SECONDS}`]);
+    execFileSync('/usr/bin/pkill', ['-9', '-f', `sleep ${MARKER_SECONDS}`]);
   } catch {
     // pkill выходит с 1, когда убивать нечего, — это норма после зелёного теста.
   }
@@ -39,6 +58,13 @@ const cleanupMarkers = async (): Promise<void> => {
   // ещё миллисекунды. Без ожидания предусловие следующего теста краснеет по гонке уборки.
   for (let attempt = 0; attempt < 40 && survivors() > 0; attempt += 1) {
     await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  if (survivors() > 0) {
+    const alive = execFileSync('/bin/ps', ['-A', '-o', 'pid=,args='], { encoding: 'utf8' })
+      .split('\n')
+      .filter((line) => line.includes(`sleep ${MARKER_SECONDS}`))
+      .join('; ');
+    throw new Error(`не удалось убрать маркерные процессы, они переживают SIGKILL: ${alive}`);
   }
 };
 
@@ -242,5 +268,29 @@ describe('truncateToBytes — байты, а не единицы UTF-16 (R19)', 
 
   it('короче потолка — не трогает', () => {
     expect(truncateToBytes('abc', 64).toString('utf8')).toBe('abc');
+  });
+});
+
+/**
+ * Единственная проба, решающая судьбу R52.
+ *
+ * `kill(-pid, 0)` бросает `ESRCH`, когда группы нет, но и `EPERM`, когда группа ЕСТЬ, а
+ * сигналить ей нам не разрешено, и `EINVAL` на неверный вопрос. Схлопнув всё в «группы
+ * нет», проба читала бы «мне не дали спросить» как «спрашивать не о ком»: `groupDrained`
+ * приехал бы `true`, отравление не сработало бы, выживший потомок ушёл бы под политику
+ * следующего вызова — и в записи не осталось бы ничего, что отличает это от чистого выхода.
+ */
+describe('isGroupGone (R52)', () => {
+  it('только ESRCH означает «группы нет»', () => {
+    expect(isGroupGone(Object.assign(new Error('no such process'), { code: 'ESRCH' }))).toBe(true);
+  });
+
+  it('EPERM означает «группа есть» — подтвердить пустоту не удалось', () => {
+    expect(isGroupGone(Object.assign(new Error('operation not permitted'), { code: 'EPERM' }))).toBe(false);
+  });
+
+  it('неизвестный код и отсутствие кода — «жива», а не «пуста»', () => {
+    expect(isGroupGone(Object.assign(new Error('bad argument'), { code: 'EINVAL' }))).toBe(false);
+    expect(isGroupGone(new Error('без кода'))).toBe(false);
   });
 });

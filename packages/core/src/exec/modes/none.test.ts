@@ -63,6 +63,22 @@ describe.skipIf(!IS_MACOS)('режим none — наблюдающий baseline'
       );
     }
 
+    // Второе условие прогона, и оно объявляется так же громко. Без него блокированный
+    // egress, captive portal или заминка `example.com` всплывали бы как
+    // `expected '000' to be '200'` внутри теста про allowlist — то есть читались бы как
+    // «песочница отказала запросу, который обязана была пропустить», а на deny-ногах
+    // делали бы тест зелёным по неверной причине.
+    const reachable = await fetch(`https://${PUBLIC_HOST}/`, { signal: AbortSignal.timeout(20_000) })
+      .then((response) => response.status)
+      .catch(() => 0);
+    if (reachable !== 200) {
+      throw new Error(
+        `условие прогона не выполнено: ${PUBLIC_HOST} обязан отвечать 200 напрямую с ` +
+          `машины демона, а ответил ${reachable}. Сетевые утверждения набора без этого ` +
+          'читаются как отказ песочницы.',
+      );
+    }
+
     sandbox = createNoneSandbox();
     fixture = mkdtempSync(join(tmpdir(), 'e3-none-'));
     writeFileSync(join(fixture, 'secret.txt'), 'верхний секрет');
@@ -226,8 +242,6 @@ describe.skipIf(!IS_MACOS)('режим none — наблюдающий baseline'
   });
 
   /**
-   * Последний тест набора намеренно: он освобождает обе песочницы.
-   *
    * R50 требует, чтобы `run()` бросал у **освобождённого экземпляра**: вызов после
    * `dispose()` пошёл бы со старым конфигом и `getProxyPort() === undefined` — сеть тихо
    * ОТКРЫТА в `none` и тихо МЕРТВА в `seatbelt`. Флаг поэтому живёт в самой песочнице.
@@ -238,6 +252,11 @@ describe.skipIf(!IS_MACOS)('режим none — наблюдающий baseline'
    * что `createSandbox` бросал бы до конца жизни процесса.
    */
   it('после dispose бросает ЭТА песочница, но процесс остаётся способен поднять новую (R50)', async () => {
+    // Обе ссылки — свои. Раньше одной из них была `sandbox` набора, и весь файл был зелёным
+    // только благодаря порядку объявления: под `--sequence.shuffle.tests` любой тест,
+    // объявленный после этого, падал с «песочница уже освобождена». Комментарий «последний
+    // тест набора намеренно» производил зелёный, а не документировал его.
+    const first = createNoneSandbox();
     const second = createNoneSandbox();
     const request = {
       recipeName: asRecipeName('baseline'),
@@ -248,7 +267,7 @@ describe.skipIf(!IS_MACOS)('режим none — наблюдающий baseline'
     };
 
     // Одна из двух ссылок отпущена — вторая песочница жива и работает.
-    await sandbox.dispose();
+    await first.dispose();
     await expect(second.run(request, () => undefined)).resolves.toMatchObject({ termination: 'exited' });
 
     await second.dispose();

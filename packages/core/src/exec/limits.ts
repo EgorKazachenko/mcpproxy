@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import type { ChildProcessByStdio } from 'node:child_process';
 import type { Readable } from 'node:stream';
+import { ExecError } from './errors.js';
 import type { StreamOutcome, Termination } from './sandbox.js';
 
 /**
@@ -113,7 +114,18 @@ export function toStreamOutcome(stream: RawStream): StreamOutcome {
 class StreamCollector {
   private readonly chunks: Buffer[] = [];
   private held = 0;
+  private errored = false;
   produced = 0;
+
+  /**
+   * Ошибка канала — это потеря байт, а не только повод не падать. Без этого флага после
+   * `EIO` коллектор просто перестаёт получать данные, `produced === held`, и `finish()`
+   * отдаёт `truncated: false` — то есть потребителю сообщают, что вывод полон, когда часть
+   * его пропала. А `truncated` — ровно то поле, на котором висят R19 и R20.
+   */
+  markErrored(): void {
+    this.errored = true;
+  }
 
   constructor(private readonly windowBytes: number) {}
 
@@ -140,7 +152,7 @@ class StreamCollector {
       buffer,
       producedBytes: this.produced,
       bytes: buffer.byteLength,
-      truncated: droppedAtRead || droppedAtCap,
+      truncated: droppedAtRead || droppedAtCap || this.errored,
     };
   }
 }
@@ -165,14 +177,35 @@ function killGroup(pid: number, signal: NodeJS.Signals): void {
   }
 }
 
-/** Есть ли ещё кто-нибудь в группе. Сигнал `0` ничего не шлёт, только проверяет. */
+/**
+ * Есть ли ещё кто-нибудь в группе. Сигнал `0` ничего не шлёт, только проверяет.
+ *
+ * Разбор errno **обязателен**, а не аккуратен: `ESRCH` означает «группы нет», но `EPERM`
+ * означает «группа есть, а сигналить ей нам не разрешено», и `EINVAL` — «вопрос задан
+ * неверно». Схлопнув всё в `false`, единственная проба, решающая судьбу R52, читала бы
+ * «мне не дали спросить» как «спрашивать не о ком»: `groupDrained` приехал бы `true`,
+ * отравление не сработало бы, а выживший потомок ушёл бы под политику следующего вызова —
+ * и в записи не осталось бы ничего, что отличает это от чистого выхода.
+ *
+ * Неизвестный код — «жива»: подтвердить пустоту не удалось, а R52 требует в этом случае
+ * громкого отказа, а не тихого прохода.
+ */
 function groupAlive(pid: number): boolean {
   try {
     process.kill(-pid, 0);
     return true;
-  } catch {
-    return false;
+  } catch (error) {
+    return !isGroupGone(error);
   }
+}
+
+/**
+ * Решение по errno — отдельной чистой функцией, потому что иначе оно не проверяемо: чтобы
+ * получить `EPERM` от `kill(0)`, нужна чужая группа процессов, а тест, который её заводит,
+ * зависит от прав машины больше, чем от нашего кода. Здесь же оба кода подаются литералом.
+ */
+export function isGroupGone(error: unknown): boolean {
+  return (error as NodeJS.ErrnoException).code === 'ESRCH';
 }
 
 async function confirmGroupEmpty(pid: number): Promise<boolean> {
@@ -193,7 +226,10 @@ const collectInto = (stream: Readable, collector: StreamCollector): void => {
   // слушателя `error` заставляет Node перебросить ошибку как необработанное исключение, и
   // демон падает ровно на том пути, ради которого таймаут и заведён.
   stream.on('error', () => {
-    // Обрыв канала уже наказан: процесс убит, и всё, что он успел сказать, посчитано.
+    // Обрыв канала помечает поток потерявшим: слушатель обязателен, чтобы Node не перебросил
+    // ошибку необработанным исключением, а флаг обязателен, чтобы «полный вывод» не был
+    // объявлен там, где часть байт пропала.
+    collector.markErrored();
   });
 };
 
@@ -228,44 +264,62 @@ export async function runProcess(
     stdio: ['ignore', 'pipe', 'pipe'],
   });
 
-  limits.onSpawn?.(child.pid);
-
+  const pid = child.pid;
   const windowBytes = windowFor(limits);
   const stdout = new StreamCollector(windowBytes);
   const stderr = new StreamCollector(windowBytes);
   collectInto(child.stdout, stdout);
   collectInto(child.stderr, stderr);
 
-  const pid = child.pid;
   let timedOut = false;
+  let timer: NodeJS.Timeout | undefined;
   let graceTimer: NodeJS.Timeout | undefined;
+  let exit: ExitRecord | undefined;
+  let failure: unknown;
 
-  const timer = setTimeout(() => {
-    timedOut = true;
-    if (pid === undefined) return;
-    killGroup(pid, 'SIGTERM');
-    graceTimer = setTimeout(() => {
-      killGroup(pid, 'SIGKILL');
-    }, limits.graceMs);
-  }, limits.timeoutMs);
-
-  let exit: ExitRecord;
   try {
+    // Всё, что ниже, живёт под `finally`, и это не гигиена, а R52. С момента, когда `spawn`
+    // вернул управление, существует ОТДЕЛЬНАЯ группа процессов, и убить её обязаны мы — на
+    // любом пути. Бросок отсюда (аудит-сток потребителя на стадии `spawn`, позднее событие
+    // `error` у ребёнка) без `finally` пропускал бы и убийство, и подтверждение пустоты:
+    // живая detached-группа уходила бы под политику следующего вызова, а `ExecOutcome` не
+    // порождался бы вовсе — то есть не осталось бы даже записи о том, что подтверждать
+    // было нечего.
+    limits.onSpawn?.(pid);
+
+    timer = setTimeout(() => {
+      timedOut = true;
+      if (pid === undefined) return;
+      killGroup(pid, 'SIGTERM');
+      graceTimer = setTimeout(() => {
+        killGroup(pid, 'SIGKILL');
+      }, limits.graceMs);
+    }, limits.timeoutMs);
+
     exit = await waitForExit(child);
+  } catch (error) {
+    failure = error;
   } finally {
-    clearTimeout(timer);
+    if (timer !== undefined) clearTimeout(timer);
     if (graceTimer !== undefined) clearTimeout(graceTimer);
   }
 
-  // Группа убивается на **каждом** пути выхода (R52), а не только по таймауту: фоновый
-  // потомок иначе переживает вызов, остаётся привязан к порту прокси и попадает под
-  // политику следующего вызова.
+  // Группа убивается и подтверждается на **каждом** пути выхода (R52), включая аварийный, —
+  // поэтому вне `try`, а не внутри его удачной ветки.
   const groupDrained = pid === undefined ? true : await confirmGroupEmpty(pid);
   await drainStreams(child);
 
+  if (failure !== undefined || exit === undefined) {
+    // Результат отказа несёт `groupDrained`: без него вызывающий не смог бы отравить демон
+    // на аварийном пути и живой потомок ушёл бы под следующую политику молча.
+    throw new ExecError('spawn-failed', `не удалось выполнить ${command[0]}: ${String(failure)}`, {
+      groupDrained,
+      ...(pid === undefined ? {} : { pid }),
+    });
+  }
+
   const outStream = stdout.finish(limits);
   const errStream = stderr.finish(limits);
-
   return {
     // Приоритет задан, а не выведен из порядка проверок (R49): сработали и потолок, и
     // таймаут — побеждает таймаут, он же определяет вердикт. Без правила поле одно, а
@@ -278,17 +332,6 @@ export async function runProcess(
   };
 }
 
-/**
- * Исход считается по **тому же свидетельству**, что и `truncated`, а не по числу
- * произведённых байт.
- *
- * Разные основания разошлись бы ровно тогда, когда E6 подключит непустой `redact` в
- * объявленный слот: вывод в 1010 байт при `maxBytes: 1000` и запасе 256 даёт
- * `produced > maxBytes`, но редакция, схлопнувшая 40 байт в 8, не отбросила ничего — ни при
- * чтении (1010 ≤ 1256), ни на потолке (978 ≤ 1000). Исход тогда утверждал бы «оборван по
- * потолку» на вызове, где не оборвано ничего, а `Termination` — дискриминатор, из которого
- * E4 по D6 выводит вердикт.
- */
 function terminationOf(timedOut: boolean, stdout: RawStream, stderr: RawStream): Termination {
   if (timedOut) return 'timeout';
   return stdout.truncated || stderr.truncated ? 'output-cap' : 'exited';

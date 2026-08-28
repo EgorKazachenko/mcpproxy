@@ -7,6 +7,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./policy": {
+      "types": "./dist/exec/policy.d.ts",
+      "default": "./dist/exec/policy.js"
     }
   },
   "files": [
@@ -22,7 +26,7 @@
     "vitest": "^3"
   },
   "dependencies": {
-    "@anthropic-ai/sandbox-runtime": "^0.0.74",
+    "@anthropic-ai/sandbox-runtime": "0.0.74",
     "@mcpproxy/contracts": "workspace:*"
   }
 }
