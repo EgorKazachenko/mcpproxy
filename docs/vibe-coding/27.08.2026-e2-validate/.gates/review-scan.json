@@ -2,10 +2,10 @@
   "gate": "review-scan",
   "status": "waived",
   "waived_by": "agent-recorded",
-  "reason": "владелец решил снять дрейф, а не гонять ревью заново. Ревью E2 прошло на 3a4cc88 и записано; слияние с main принесло 48 файлов E1 и E6, которых ревьюеры E2 не читали и читать не должны были — каждый прошёл своё ревью на своей ветке, квитанции в docs/vibe-coding/27.08.2026-e1-policy/.gates/ и 27.08.2026-e6-audit/.gates/. Код E2 после слияния зелен: core 492 теста, contracts 249.",
+  "reason": "решение владельца — слияние: 48 файлов E1/E6 отревьюены на своих ветках",
   "codeTree": "4a3a33d56d3e6b2dca2161df9efbf520295b1cf8",
   "codeDirty": false,
-  "headSha": "476e5a9ba455e520a13906329dbf8605ec35b328",
-  "startedAt": "2026-08-28T05:16:41.026Z",
+  "headSha": "5303f584b4df3de8eb3731c2f65c72358e522824",
+  "startedAt": "2026-08-28T05:17:20.550Z",
   "artifacts": []
 }

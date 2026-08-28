@@ -1,4 +1,7 @@
-> ⚠️ **Waived:** `review-internal` — владелец решил снять дрейф, а не гонять ревью заново. Ревью E2 прошло на 3a4cc88 и записано; слияние с main принесло 48 файлов E1 и E6, которых ревьюеры E2 не ч… (полностью — в status.md); `review-scan` — владелец решил снять дрейф, а не гонять ревью заново. Ревью E2 прошло на 3a4cc88 и записано; слияние с main принесло 48 файлов E1 и E6, которых ревьюеры E2 не ч… (полностью — в status.md) (+2 ещё — см. status.md)
+> ⚠️ **Waived:** `review-internal` — решение владельца — слияние: 48 файлов E1/E6 отревьюены на своих ветках; `review-scan` — решение владельца — слияние: 48 файлов E1/E6 отревьюены на своих ветках (+2 ещё — см. status.md)
+
+**Гейты @ `4a3a33d5`:** plan-approved ✓ · build-test ✓ · review-internal ⚠ · review-scan ⚠ · review-bc ⚠ · review-tests ⚠ · review-errors ✓
+Бандл: `docs/vibe-coding/27.08.2026-e2-validate`
 
 **Outstanding:**
 - [ ] OUTSTANDING — релиз-ноты: `bounds-satisfiable` ломает загрузку манифеста, отказ всеманифестный
@@ -12,9 +15,11 @@
 
 | измерение | статус |
 |---|---|
-| internal | снят: владелец решил снять дрейф, а не гонять ревью заново. Ревью E2 прошло на 3a4cc88 и записано; слияние с main принесло 48 файлов E1 и E6, которых ревьюеры E2 не ч
+| internal | снят: решение владельца — слияние: 48 файлов E1/E6 отревьюены на своих ветках |
+| scan | снят: решение владельца — слияние: 48 файлов E1/E6 отревьюены на своих ветках |
+| bc | снят: решение владельца — слияние: 48 файлов E1/E6 отревьюены на своих ветках |
+| tests | снят: решение владельца — слияние: 48 файлов E1/E6 отревьюены на своих ветках |
+| errors | прошла |
 
-**Гейты @ `4a3a33d5`:** plan-approved ✓ · build-test ✓ · review-internal ⚠ · review-scan ⚠ · review-bc ⚠ · review-tests ⚠ · review-errors ✓
-Бандл: `docs/vibe-coding/27.08.2026-e2-validate`
-
-_Truncated — see `docs/vibe-coding/27.08.2026-e2-validate/status.md` and `docs/vibe-coding/27.08.2026-e2-validate/review.md`._
+**Доказательства:** plan-approved (1 файл(ов))
+**Скриншоты:** `docs/vibe-coding/27.08.2026-e2-validate/.review`
