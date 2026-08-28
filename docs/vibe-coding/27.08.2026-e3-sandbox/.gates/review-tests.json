@@ -1,0 +1,12 @@
+{
+  "gate": "review-tests",
+  "status": "pass",
+  "exit_code": 0,
+  "codeTree": "769da6b0b4b23cded1b0b5c0bf7782ce500f47d8",
+  "codeDirty": false,
+  "headSha": "7a56442c50fdbff16fc538ee96fad32fa79f4891",
+  "startedAt": "2026-08-28T00:56:13.977Z",
+  "command": "node .claude/skills/vibe-code-developing-v2/scripts/review-verify.mjs --kind test-quality --feature docs/vibe-coding/27.08.2026-e3-sandbox",
+  "evidencePath": null,
+  "artifacts": []
+}

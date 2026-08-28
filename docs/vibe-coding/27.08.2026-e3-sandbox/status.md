@@ -4,7 +4,7 @@
 - branch: `v2/e3-sandbox`
 - mode: attended
 - track: full
-- codeTree: `f9e758fc1aa8`
+- codeTree: `769da6b0b4b2`
 - kill-review due: 2026-10-26
 - handoff: prompt recorded, no carrier spawned (attended) — SessionStart re-injects it after /clear
 
@@ -12,8 +12,8 @@
 |---|---|---|
 | plan-approved | pass | 1 file(s) |
 | build-test | pass | — |
-| review-internal | **NOT RUN** | — |
-| review-scan | **NOT RUN** | — |
-| review-bc | **NOT RUN** | — |
-| review-tests | **NOT RUN** | — |
-| review-errors | **NOT RUN** | — |
+| review-internal | pass | — |
+| review-scan | pass | — |
+| review-bc | pass | — |
+| review-tests | pass | — |
+| review-errors | pass | — |
