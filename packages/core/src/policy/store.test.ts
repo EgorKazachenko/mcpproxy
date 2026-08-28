@@ -240,3 +240,42 @@ describe('startStore: перечитка', () => {
     expect(disk.reads.slice(readsAfterStart)).toEqual([LOCK_PATH]);
   });
 });
+
+describe('startStore: параллельные перечитки', () => {
+  const tick = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+  it('обновление не теряется, когда две перечитки идут внахлёст', async () => {
+    // Номер поколения берётся ДО чтения, а порядок завершения чтений ему не подчинён. Пока
+    // перечитки не были выстроены в очередь, перечитка, стартовавшая позже и успевшая
+    // прочитать СТАРОЕ содержимое, побеждала ту, что прочитала новое, — и `current()`
+    // оставался старее диска навсегда. Найдено в E4 при подключении вотчера к демону.
+    let content = MANIFEST_YAML;
+    let manifestReads = 0;
+    const deps = {
+      statSize: async (path: string): Promise<number> =>
+        Buffer.byteLength(path === MANIFEST_PATH ? content : '', 'utf8'),
+      readFile: async (path: string): Promise<string> => {
+        if (path !== MANIFEST_PATH) throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+        manifestReads += 1;
+        // Перечитка A читает ПОСЛЕ правки файла, B — до неё.
+        if (manifestReads === 2) await tick(30);
+        return content;
+      },
+    };
+
+    const start = await startStore(MANIFEST_PATH, LOCK_PATH, deps);
+    expect(start.outcome).toBe('started');
+    if (start.outcome !== 'started') return;
+    const store = start.store;
+    const before = store.current().manifest.digest;
+
+    const a = store.reloadManifest();
+    await tick(5);
+    const b = store.reloadManifest();
+    await tick(5);
+    content = CHANGED_YAML;
+    await Promise.all([a, b]);
+
+    expect(store.current().manifest.digest).not.toBe(before);
+  });
+});

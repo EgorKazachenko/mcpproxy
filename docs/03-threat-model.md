@@ -52,7 +52,7 @@ as safe as `node_modules`.
 | A2 | Path traversal (`../../.ssh/id_rsa`) | baseline | 1 | realpath + root confinement |
 | A3 | Symlink escape from an allowed directory | baseline | 1+2 | realpath **after** resolution + seatbelt |
 | A4 | Running the wrong binary (PATH hijack) | baseline | 1 | resolution to an absolute path from the allowlist |
-| A5 | **IPC token theft → spawn via proxy** | [MCP spec](https://modelcontextprotocol.io/specification/draft/basic/security_best_practices) | arch. | peer-cred + 0600 socket + И5 (recipe names only) |
+| A5 | **IPC token theft → spawn via proxy** | [MCP spec](https://modelcontextprotocol.io/specification/draft/basic/security_best_practices) | arch. | 0700 directory + 0600 socket + handshake token + И5 (recipe names only) |
 | A6 | **Manifest rug pull between calls** | CVE-2025-54136 | 1 | `mcpproxy.lock` + diff-approve |
 | A7 | **Injection into a recipe's `description`** | tool poisoning / line jumping | 1 | sanitization when generating `tools/list` |
 | A8 | **Indirect injection via script output** | OWASP ASI01 | 1 | untrusted wrapper + scan + truncation |

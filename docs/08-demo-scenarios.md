@@ -54,9 +54,11 @@ next.
 
 **We show.** `run_tests` with parameter `pattern: "auth"`.
 
-**What the audience sees.** A timeline of 13 stages: `received → lock_check → validate →
-resolve_paths → build_argv → classify_risk → build_env → build_profile → spawn →
-redact → complete`. Each one shows exact data: the assembled argv, cwd, the list of allowed
+**What the audience sees.** The call timeline: `received → lock_check → validate →
+resolve_paths → build_argv → classify_risk → approval → build_env → build_profile → spawn →
+redact → complete` — twelve events. The thirteenth stage of `stageOrder`, `violation`, is not
+emitted on a clean run: the contract marks it as "may occur many times", and zero is a legal
+count. Each one shows exact data: the assembled argv, cwd, the list of allowed
 env variables, the sandbox profile. In the output, a secret redaction fires. At the bottom,
 proxy overhead in milliseconds.
 

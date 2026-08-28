@@ -295,6 +295,11 @@ __metadata:
   dependencies:
     "@mcpproxy/contracts": "workspace:*"
     "@mcpproxy/core": "workspace:*"
+    "@types/node": "npm:^22"
+    vitest: "npm:^3"
+  bin:
+    mcpproxy-shim: ./bin/mcpproxy-shim.mjs
+    mcpproxyd: ./bin/mcpproxyd.mjs
   languageName: unknown
   linkType: soft
 

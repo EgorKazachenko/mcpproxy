@@ -15,7 +15,7 @@ flowchart TD
     P["Child process<br/>in sandbox"]
 
     C -->|"stdio / JSON-RPC"| S
-    S -->|"unix socket<br/>0600 + peer-cred"| D
+    S -->|"unix socket<br/>0600 + dir 0700 + token"| D
     D -->|"event stream"| E
     E -->|"approval verdict"| D
     D -->|"spawn(argv[])<br/>no shell"| P
@@ -84,7 +84,10 @@ that describes our architecture almost literally: a proxy that spawns processes,
 proxy authentication token = RCE. Countermeasures:
 
 - a unix domain socket with `0600` permissions in the user's directory, not a TCP port;
-- peer credential verification on connect (`LOCAL_PEERCRED` on macOS) — the uid must match;
+- ~~peer credential verification on connect (`LOCAL_PEERCRED` on macOS)~~ — **not reachable
+  from plain Node**, probe П11; the property it would deliver ("only this user's processes may
+  connect") is instead held by the `0700` directory permissions, which the OS enforces during
+  path resolution. Discussed in `10-honest-limitations.md`;
 - a per-session token, never stored in config, never passed in the shim's argv;
 - and, most importantly — И5: even full control of the socket only allows invoking existing recipes
   with validated parameters, not arbitrary execution.
@@ -112,7 +115,7 @@ sequenceDiagram
     participant P as Process
 
     M->>S: tools/call run_tests {pattern:"auth"}
-    S->>D: {recipe, params} over unix socket
+    S->>D: {recipeName, params, sessionId} over unix socket
     D->>D: 1. manifest lock check (rug pull?)
     D->>D: 2. schema-based parameter validation
     D->>D: 3. path resolution (realpath + confinement)
@@ -133,8 +136,13 @@ sequenceDiagram
     S-->>M: tool result (wrapped as untrusted)
 ```
 
-Each of the nine steps is a separate event in the UI timeline. This step-by-step
+Each stage the call passes through is a separate event in the UI timeline. This step-by-step
 granularity is exactly what makes the demo legible: you can see at which step the call stopped.
+
+The frozen `stageOrder` has **thirteen** stages, not nine: the diagram above collapses
+`build_env`, `build_profile` and `violation` into neighbouring steps. A successful call
+produces twelve events — the contract marks `violation` as "may occur many times", and zero is
+a legal count. A stage the call never reached has no event at all.
 
 ## Sandbox permission model
 

@@ -96,3 +96,12 @@ export type {
   ResolvedValues,
   ValidatedValues,
 } from './denial.js';
+
+/**
+ * E4 — confinement рабочего каталога рецепта под каталог манифеста (A4 и R34). Поднят в
+ * поверхность именно затем, чтобы у границы был ОДИН вычислитель: в этом же репозитории уже
+ * записано границей, что копия предиката в `contracts` и копия в `core` ничем не сверяются,
+ * и третья копия в `mcp-server` продолжила бы ряд.
+ */
+export { confinementOf } from './confinement.js';
+export type { Confinement } from './confinement.js';

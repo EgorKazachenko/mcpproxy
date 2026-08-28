@@ -480,7 +480,7 @@ export { isWeakened } from './netpolicy.js';
  * E8 — разбор корпуса атак: отличить «команду резали» от «команда отработала» (R41).
  *
  * Тем, кому нужна только эта половина, лучше брать её из `@mcpproxy/core/exec-pure`: корневой
- * вход тянет за собой вендорский SDK, а `./policy` — нет.
+ * вход тянет за собой вендорский SDK, а `./exec-pure` — нет.
  */
 export { classify, parseAndClassify, parseLine, typeForOperation } from './violation.js';
 export type { ClassifyPolicy, ParsedLine, RawViolationRecord } from './violation.js';
@@ -1918,6 +1918,25 @@ import type { ResolvedValues } from './denial.js';
 import { type PreparedRecipe } from './prepare.js';
 export declare function buildArgv(prepared: PreparedRecipe, values: ResolvedValues): readonly string[];
 
+// ==== validate/confinement.d.ts ====
+export type Confinement = 'inside' | 'root-itself' | 'outside';
+/**
+ * Предикат confinement (R15). Строится на `path.relative`, а не на `startsWith`: голый
+ * `startsWith` считает `/logs-evil/a` лежащим внутри `/logs` (Ф3).
+ *
+ * `rel === '..'` проверяется отдельно от `startsWith('..' + sep)` по той же причине, по
+ * которой она стоит в `checkRootConfinement` (`packages/contracts/src/validate/refine.ts:223`):
+ * каталог `..cache` даёт `relative` = `..cache`, и голый `startsWith('..')` объявил бы законный
+ * подкаталог выходом за пределы. Обратная сторона той же клаузы — значение ровно `..`, то есть
+ * родительский каталог корня без хвоста: без неё он проходит границу целиком.
+ *
+ * Живёт отдельным модулем, а не внутри `paths.ts`, с E4: тот же вопрос задаётся дважды и о
+ * разных вещах — о резолвнутом значении параметра относительно его `root` (R13) и о рабочем
+ * каталоге рецепта относительно каталога манифеста (R34 E4). Две копии одной границы
+ * расходятся молча, и ровно это записано границей в спеке E2.
+ */
+export declare function confinementOf(root: string, candidate: string): Confinement;
+
 // ==== validate/denial.d.ts ====
 /**
  * Общие типы E2 и словарь отказов.
@@ -2122,6 +2141,14 @@ export type { ResolvePathsResult } from './paths.js';
 export { buildArgv } from './argv.js';
 export { DENIAL_CODES, DENIAL_STAGES, DENIALS_MAX, E2_STAGES, VALUE_MAX_CODE_POINTS } from './denial.js';
 export type { Denial, DenialCode, DenialStage, E2Stage, ParamValue, ResolvedValues, ValidatedValues, } from './denial.js';
+/**
+ * E4 — confinement рабочего каталога рецепта под каталог манифеста (A4 и R34). Поднят в
+ * поверхность именно затем, чтобы у границы был ОДИН вычислитель: в этом же репозитории уже
+ * записано границей, что копия предиката в `contracts` и копия в `core` ничем не сверяются,
+ * и третья копия в `mcp-server` продолжила бы ряд.
+ */
+export { confinementOf } from './confinement.js';
+export type { Confinement } from './confinement.js';
 
 // ==== validate/params.d.ts ====
 import { type Denial, type ValidatedValues } from './denial.js';

@@ -28,5 +28,6 @@ The `--require-ui` flag enables strict fail-closed mode ("no UI → no audit →
 - ✅ Approvals are possible outside the model's context
 - ⚠️ An IPC boundary appears, and it becomes an attack vector in its own right — see the ADR and
   invariant И6, and the MCP spec section "stdio Transport Security in Proxy Scenarios."
-  Mitigation: 0600 socket permissions, peer-cred check, per-session token, and most importantly —
-  the daemon only accepts `{recipe, params}`, never argv.
+  Mitigation: 0600 socket permissions, 0700 directory (peer-cred is not reachable from Node —
+  П11), a handshake token, and most importantly —
+  the daemon only accepts `{recipeName, params, sessionId}`, never argv.

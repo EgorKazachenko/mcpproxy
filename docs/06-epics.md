@@ -13,7 +13,7 @@ Scope — a vertical slice + red-team (not a full product).
 | **E1** | Policy engine: manifest loading and validation, `mcpproxy.lock`, diff-approve on change, `description` sanitization | E0 | ✅ |
 | **E2** | Parameter validator + argv-builder, path resolver (realpath + confinement), no-shell guarantee | E0 | ✅ |
 | **E3** | Executor + sandbox: wrapper over `@anthropic-ai/sandbox-runtime`, domain network allowlist, timeouts and SIGKILL by process group, output cap, violation forwarding | E0 | ✅ |
-| **E4** | MCP surface: `tools/list` from manifest with annotations, `tools/call`, shim + IPC hardening (peer-cred, 0600) | E1, E2 (on stubs) | ⚠️ partial |
+| **E4** | MCP surface: `tools/list` from manifest with annotations, `tools/call`, shim + IPC hardening (0700 directory, 0600 socket, token) | E1, E2 (on stubs) | ✅ except approvals (E5) |
 | **E5** | Approvals: risk tiers from annotations, broker, TTL/scope, dual-channel (elicitation + Electron), headless = deny | E4, E7 | ❌ late |
 | **E6** | Secrets and audit: env allowlist, bidirectional redaction (rules from Secrets-Patterns-DB + entropy), hash-chain JSONL, export | E0 | ✅ |
 | **E7** | Electron UI: timeline, call details, sandbox violations panel, policy viewer with annotation badges, approvals inbox | E0 (on mocked events) | ✅ |
@@ -72,7 +72,7 @@ that's the right order, since the UI matters more than the core for the demo.
 | **E1** | ⬆️ lock file promoted to mandatory; ➕ diff-approve; ➕ `description` sanitization | CVE-2025-54136, tool poisoning |
 | **E2** | no changes | already aligned with the industry here |
 | **E3** | ⬇️⬇️ **three times cheaper** — wrapper over `srt` instead of our own SBPL; ➕ domain network allowlist; ➕ violations into the event bus | ADR-0002, ADR-0007 |
-| **E4** | ➕ IPC socket hardening (peer-cred check) | attack from the MCP spec |
+| **E4** | ➕ IPC socket hardening (0700 directory + token; peer-cred not reachable in Node) | attack from the MCP spec |
 | **E5** | ➕ dual-channel: elicitation + authoritative Electron | ADR-0005, OWASP ASI09 |
 | **E6** | ⬇️ rules from Secrets-Patterns-DB; ➕ bidirectional scanning | Docker MCP Gateway, gitleaks |
 | **E7** | ➕ sandbox violations panel; ➕ annotation badges | srt violation store |

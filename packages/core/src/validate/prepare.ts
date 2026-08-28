@@ -1,5 +1,6 @@
 import { isAbsolute, relative, resolve, sep } from 'node:path';
 import { matcherKey, type PatternMatcher, type Recipe, type RecipeName } from '@mcpproxy/contracts';
+import { confinementOf } from './confinement.js';
 import { isCanonicalizable } from './denial.js';
 
 /**
@@ -150,6 +151,18 @@ export function prepareRecipe(
     if (slotCount(recipe.cwd) > 0) problems.push(`cwd содержит слот ${ARGV_SLOT}: ни один параметр в cwd не подставляется`);
   }
   const cwd = recipe.cwd === undefined ? dir : resolve(dir, recipe.cwd);
+  // Confinement `cwd` под каталог манифеста (R34 E4). До E4 это правило не принадлежало
+  // никому: E2 записала его границей и назвала владельцем E3, E3 его не взяла, — а `cwd`
+  // рецепта задаёт рабочий каталог дочернему процессу, то есть базу, от которой резолвятся
+  // относительные `read.allow` и `write.allow` профиля песочницы. Манифест с `cwd: '../../..'`
+  // грузился и давал процессу произвольный каталог.
+  //
+  // Проверка лексическая и на подготовке, а не после `realpath`: она про **объявление** в
+  // манифесте, а не про значение от модели, и обязана краснеть на загрузке, до того как
+  // рецепт попадёт в lock и будет одобрен человеком.
+  if (confinementOf(dir, cwd) === 'outside') {
+    problems.push(`cwd выходит за каталог манифеста: ${JSON.stringify(recipe.cwd)}`);
+  }
 
   const params: PreparedParam[] = [];
 
