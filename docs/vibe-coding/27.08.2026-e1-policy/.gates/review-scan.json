@@ -1,12 +1,12 @@
 {
-  "gate": "build-test",
+  "gate": "review-scan",
   "status": "pass",
   "exit_code": 0,
   "codeTree": "5cb79aae92b2de5e79f878688ff6b23501fbc1a8",
   "codeDirty": false,
   "headSha": "7a97f9cf1563f0f9ed8fdc0462e75aeb23931ffd",
-  "startedAt": "2026-08-28T00:11:49.783Z",
-  "command": "node .claude/skills/vibe-code-developing-v2/scripts/run-build-test.mjs --feature docs/vibe-coding/27.08.2026-e1-policy",
+  "startedAt": "2026-08-28T00:11:55.671Z",
+  "command": "node .claude/skills/vibe-code-developing-v2/scripts/review-verify.mjs --kind scan --feature docs/vibe-coding/27.08.2026-e1-policy",
   "evidencePath": null,
   "artifacts": []
 }

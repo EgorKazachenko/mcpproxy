@@ -164,3 +164,26 @@ builds the `lock_check` audit event. All five questions apply.
   `lock-tampered:`/`lock-drifted:`), a policy denial is `verdict: 'denied'` on stage `lock_check`
   and can never be confused with a transport error, and the conditional spread keeps the key out
   of `chain.self` on allow. Questions (c) and (d) are answered affirmatively for the audit path.
+
+---
+
+## Разрешение (владелец ветки), codeTree 5cb79aae92b2de5e79f878688ff6b23501fbc1a8
+
+Все пять находок приняты и закрыты в `7a97f9c`.
+
+- **Major, `watch.ts` уничтожает `ReloadResult`** — добавлен `WatchOptions.onReload`,
+  вызываемый на КАЖДОМ исходе обеих перезагрузок; туда же уезжают ошибки самого наблюдения
+  (`outcome: 'unreadable'`, код `EWATCH`). Это и есть шов, которого не хватало
+  `toLogRecords`. Два теста: сломанный манифест доезжает как `invalid` с непустыми
+  диагностиками, успешная перезагрузка — как `reloaded`.
+- **Major, отказ `writeLock` уходит необработанным отклонением** — добавлен исход
+  `write-failed` с кодом и сообщением, код выхода 3 (отличим от «человек отказал» = 1).
+- **Major, `fsync` каталога вне `try` после успешного `rename`** — теперь возвращается
+  `WriteResult.durable`; команда печатает предупреждение и выходит с нулём, потому что файл
+  на диске и корректен.
+- **Major, `confirmTty` не резолвится на EOF** — `answerOrEof`; измерено повторно: команда
+  выходит с кодом 1 и печатает «вы отказались», а не исчезает с кодом 13.
+- **Minor, отказы несут тег без улики** — `stale` несёт оба дайджеста, `reload-failed` —
+  диагностики, `expect-mismatch` — ожидавшийся и фактический.
+- **Minor, `errnoOf` разыменовывает не-объект** — проверка на объект добавлена, тест
+  инъектирует отклонение `null`.

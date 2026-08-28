@@ -157,3 +157,30 @@ On the daemon edge, the production watcher discards every reload result and offe
 the silent-broken-manifest state R2a exists to prevent. Those four Majors are fixable inside `core/policy` without
 touching the contract and without redesign; I would want all four closed, and the `--expect` fail-open in particular,
 before this lands, since E5 and E7 will be its callers.
+
+---
+
+## Разрешение (владелец ветки), codeTree 5cb79aae92b2de5e79f878688ff6b23501fbc1a8
+
+Все девять находок приняты и закрыты в `7a97f9c`. Премиса каждой проверена по коду до правки.
+
+- **[Major] рендер ветвей `first`/`unusable`** — принято. Спека говорит «список рецептов», но
+  предыдущим предложением требует «показывает то, что собирается закрепить»; выиграть обязано
+  второе, иначе R15b не закрывает собственную последовательность. `LockApprovalRequest` несёт
+  `PinnedRecipe[]`, рендер печатает нормализованный рецепт целиком тем же `show()`.
+- **[Major] `watchPolicy` теряет `ReloadResult`** — принято, добавлен `WatchOptions.onReload`.
+- **[Major] `stale` одним словом** — принято, отказы несут улику: `stale` → оба дайджеста,
+  `reload-failed` → диагностики; `mainLockCommand` их печатает.
+- **[Major] `--expect` фейлится открыто** — принято, `parseExpect` возвращает три исхода,
+  значение проверяется на 64 строчных hex, битый флаг даёт код 2 ДО загрузки.
+- **[Minor] `FSWatcher` без `error`** — принято, слушатель есть, ошибка едет в `onReload`.
+- **[Minor] `fsync` каталога вне `try`** — принято, теперь `WriteResult.durable`, а не отказ.
+- **[Minor] TOCTOU между `stat` и `read`** — принято, вопреки записанному в плане «в объём E1
+  не входит»: чтение ограничено на самом дескрипторе (`readBounded`), поэтому окно перестало
+  что-либо давать. Проверка порядка (R1a) сохранена.
+- **[Minor] диагностики мимо санитизирующего конструктора** — принято, оба конструктора зовут
+  `sanitizeDescription`.
+- **[Nit] тесты и фикстуры компилируются в `dist`** — принято к сведению, НЕ правится здесь:
+  ревьюер сам отмечает, что это репозиторный паттерн (`packages/contracts/dist` содержит те же
+  44 артефакта), а не регрессия E1. Правка `tsconfig.build.json` касается всех пакетов и не
+  входит в список путей R24 этой ветки.
