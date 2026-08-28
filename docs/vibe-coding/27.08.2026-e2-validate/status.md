@@ -16,4 +16,4 @@
 | review-scan | waived: решение владельца — слияние: 48 файлов E1/E6 отревьюены на своих ветках | — |
 | review-bc | waived: решение владельца — слияние: 48 файлов E1/E6 отревьюены на своих ветках | — |
 | review-tests | waived: решение владельца — слияние: 48 файлов E1/E6 отревьюены на своих ветках | — |
-| review-errors | **STALE** — the code changed after this gate ran (receipt 4a3a33d5, now a2fbcc7b). Re-run it. | — |
+| review-errors | fail | — |
