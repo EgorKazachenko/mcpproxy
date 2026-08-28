@@ -53,6 +53,23 @@ const LOOPBACK_NAME = '127-0-0-1.nip.io';
 /** Публичный хост для сетевых утверждений: у локального listener самоподписанный сертификат (R55). */
 const PUBLIC_HOST = 'example.com';
 
+/**
+ * Скрипт ребёнка для тестов живости: прочитать запрещённое, дождаться отмашки колбэка,
+ * отметиться завершением.
+ *
+ * Опрос **редкий и ограниченный**, и это не вкус. Прежняя редакция крутила
+ * `while [ ! -f release ]; do sleep 0.05; done` — двадцать спавнов `sleep` в секунду ВНУТРИ
+ * песочницы, каждый со своим шлейфом ядерных отказов. На загруженной машине этот шум
+ * отодвигал доставку настоящего нарушения через `log stream` за таймаут рецепта, и тест
+ * падал раз через раз: в полном прогоне он покраснел один раз из двух, изолированно —
+ * ни разу. Шестьдесят опросов по четверти секунды дают тот же потолок ожидания при десятой
+ * доле спавнов.
+ */
+const waitScript = (secret: string, release: string, done: string): string =>
+  `cat '${secret}' 2>/dev/null; ` +
+  `for i in $(seq 1 60); do [ -f '${release}' ] && break; sleep 0.25; done; ` +
+  `touch '${done}'`;
+
 interface RunResult {
   readonly outcome: ExecOutcome;
   readonly violations: SandboxViolation[];
@@ -341,32 +358,33 @@ describe.skipIf(!IS_MACOS)('seatbelt под настоящей песочниц�
      */
     it('нарушение доезжает до колбэка, пока процесс ещё жив (R29)', async () => {
       const release = join(fixture, 'release-marker');
+      const done = join(fixture, 'done-marker');
       rmSync(release, { force: true });
+      rmSync(done, { force: true });
       let seenWhileAlive = false;
       const { effective } = normalizeRecipe(readDenied, DEFAULTS);
 
       await sandbox.run(
         {
           recipeName: asRecipeName('probe'),
-          command: [
-            '/bin/sh',
-            '-c',
-            `cat '${join(fixture, 'secret.txt')}' 2>/dev/null; while [ ! -f '${release}' ]; do sleep 0.05; done`,
-          ],
+          command: ['/bin/sh', '-c', waitScript(join(fixture, 'secret.txt'), release, done)],
           recipeCwd: fixture,
           effective,
           commandId: newCommandId(),
         },
         () => {
-          // Колбэк сработал — значит процесс ещё крутится в ожидании файла, который сейчас
-          // и появится. Отсутствие файла В МОМЕНТ колбэка и есть «до выхода процесса».
-          if (!existsSync(release)) seenWhileAlive = true;
+          // Живость доказывает `done`, а не `release`: `done` пишется ПОСЛЕДНЕЙ строкой
+          // скрипта, поэтому его отсутствие в момент колбэка означает, что процесс ещё не
+          // закончил. Судить по `release` было бы неверно — колбэк, опоздавший к выходу
+          // ребёнка по ограничению опроса, тоже увидел бы его отсутствующим.
+          if (!existsSync(done)) seenWhileAlive = true;
           writeFileSync(release, '');
         },
       );
 
       expect(seenWhileAlive).toBe(true);
       rmSync(release, { force: true });
+      rmSync(done, { force: true });
     });
 
     /**
@@ -380,18 +398,16 @@ describe.skipIf(!IS_MACOS)('seatbelt под настоящей песочниц�
       // Тот же приём, что и выше: ребёнок ждёт условия, а не фиксированной паузы, — иначе
       // тест платит секунду на каждом прогоне и всё равно зависит от везения.
       const release = join(fixture, 'stage-release');
+      const done = join(fixture, 'stage-done');
       rmSync(release, { force: true });
+      rmSync(done, { force: true });
       const { effective } = normalizeRecipe(readDenied, DEFAULTS);
       const events: ExecEvent[] = [];
 
       await sandbox.run(
         {
           recipeName: asRecipeName('probe'),
-          command: [
-            '/bin/sh',
-            '-c',
-            `cat '${join(fixture, 'secret.txt')}' 2>/dev/null; while [ ! -f '${release}' ]; do sleep 0.05; done`,
-          ],
+          command: ['/bin/sh', '-c', waitScript(join(fixture, 'secret.txt'), release, done)],
           recipeCwd: fixture,
           effective,
           commandId: newCommandId(),
@@ -402,6 +418,7 @@ describe.skipIf(!IS_MACOS)('seatbelt под настоящей песочниц�
         (event) => events.push(event),
       );
       rmSync(release, { force: true });
+      rmSync(done, { force: true });
       const stages = events.map((one) => one.stage);
 
       expect(stages).toContain('spawn');
