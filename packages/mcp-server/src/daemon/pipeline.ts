@@ -236,7 +236,17 @@ export function createPipeline(deps: PipelineDeps): Pipeline {
       // В событие едет ОТРЕДАКТИРОВАННЫЙ argv, в песочницу — настоящий: секрет, приехавший
       // параметром, иначе лёг бы в append-only журнал дословно (R9 E6).
       const inbound = redactInbound(deps.redactor, { argv, env: {} });
-      const argvExtra = { ...lockExtra, cwd: validated.cwd, argv: inbound.argv, ...(inbound.redactions.length > 0 ? { redactions: inbound.redactions } : {}) };
+      // Происхождение элементов команды считает E2 и переносит СЮДА, а не пересчитывает по
+      // значениям: индексы указывают в отредактированный `argv` этого же события, и сверка по
+      // тексту разъехалась бы ровно там, где редакция вырезала секрет. Пустой список ключа не
+      // даёт вовсе — `R13` требует отсутствия ключа, а не пустого массива.
+      const argvExtra = {
+        ...lockExtra,
+        cwd: validated.cwd,
+        argv: inbound.argv,
+        ...(validated.argvFromParams.length > 0 ? { argvFromParams: validated.argvFromParams } : {}),
+        ...(inbound.redactions.length > 0 ? { redactions: inbound.redactions } : {}),
+      };
       emit('build_argv', 'allowed', argvExtra, timingOf('build_argv'));
 
       // ── 4. classify_risk ───────────────────────────────────────────────────────────────

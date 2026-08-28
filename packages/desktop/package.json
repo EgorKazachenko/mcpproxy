@@ -15,7 +15,7 @@
     "build:smoke": "MCPPROXY_OBSERVE=1 electron-vite build",
     "test:smoke": "vitest run --config vitest.smoke.config.ts",
     "clean": "rm -rf dist out *.tsbuildinfo",
-    "fixtures": "node scripts/build-fixtures.mjs"
+    "fixtures": "node ../../demo/record.mjs"
   },
   "dependencies": {
     "@mcpproxy/contracts": "workspace:*",

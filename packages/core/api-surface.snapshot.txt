@@ -1916,7 +1916,31 @@ export declare const SECRET_RULES: readonly SecretRule[];
 // ==== validate/argv.d.ts ====
 import type { ResolvedValues } from './denial.js';
 import { type PreparedRecipe } from './prepare.js';
+/**
+ * Команда вместе с происхождением её элементов.
+ *
+ * Происхождение считается **здесь**, а не восстанавливается потребителем по значениям: после
+ * стадии `redact` argv в событии несёт вырезанные секреты, и сверка «какой элемент похож на
+ * параметр» разъехалась бы ровно на том вызове, ради которого журнал и читают. Индексы же
+ * переживают редакцию: она заменяет текст элемента, но не их количество.
+ */
+export interface BuiltArgv {
+    readonly argv: readonly string[];
+    /**
+     * Позиции argv, ЗАНЯТЫЕ ЗНАЧЕНИЕМ параметра (`AuditEvent.argvFromParams`).
+     *
+     * Литеральные элементы шаблона в список не попадают, хотя и приехали вместе с параметром:
+     * `--filter` написан автором рецепта и лежит в манифесте под хэшем lock, а `auth` пришёл
+     * от модели. Потребитель подсвечивает человеку то, что пришло снаружи, и флаг в подсветке
+     * означал бы, что снаружи пришёл и он.
+     *
+     * Булев параметр тоже не даёт индексов: он раскрывается присутствием своих элементов, и
+     * текст этих элементов целиком из манифеста.
+     */
+    readonly fromParams: readonly number[];
+}
 export declare function buildArgv(prepared: PreparedRecipe, values: ResolvedValues): readonly string[];
+export declare function buildArgvWithOrigin(prepared: PreparedRecipe, values: ResolvedValues): BuiltArgv;
 
 // ==== validate/confinement.d.ts ====
 export type Confinement = 'inside' | 'root-itself' | 'outside';
@@ -2106,6 +2130,13 @@ export interface StageTiming {
 export type CallResult = {
     ok: true;
     argv: readonly string[];
+    /**
+     * Позиции `argv`, занятые значениями параметров (`AuditEvent.argvFromParams`). Считает
+     * их E2 — только здесь известно, какой элемент собран подстановкой, а какой приехал
+     * литералом из манифеста. Пустой список означает вызов без подстановок, и E4 обязан в
+     * этом случае НЕ писать ключ вовсе, а не писать пустой массив.
+     */
+    argvFromParams: readonly number[];
     cwd: string;
     /**
      * Проверенные значения ПОСЛЕ валидации и резолва — вход `argsHash` (R31). Без них E4
@@ -2138,7 +2169,8 @@ export { validateParams } from './params.js';
 export type { ValidateParamsResult } from './params.js';
 export { resolvePaths } from './paths.js';
 export type { ResolvePathsResult } from './paths.js';
-export { buildArgv } from './argv.js';
+export { buildArgv, buildArgvWithOrigin } from './argv.js';
+export type { BuiltArgv } from './argv.js';
 export { DENIAL_CODES, DENIAL_STAGES, DENIALS_MAX, E2_STAGES, VALUE_MAX_CODE_POINTS } from './denial.js';
 export type { Denial, DenialCode, DenialStage, E2Stage, ParamValue, ResolvedValues, ValidatedValues, } from './denial.js';
 /**

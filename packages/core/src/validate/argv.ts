@@ -41,9 +41,38 @@ function substitute(template: string, text: string): string {
   return parts.join(text);
 }
 
+/**
+ * Команда вместе с происхождением её элементов.
+ *
+ * Происхождение считается **здесь**, а не восстанавливается потребителем по значениям: после
+ * стадии `redact` argv в событии несёт вырезанные секреты, и сверка «какой элемент похож на
+ * параметр» разъехалась бы ровно на том вызове, ради которого журнал и читают. Индексы же
+ * переживают редакцию: она заменяет текст элемента, но не их количество.
+ */
+export interface BuiltArgv {
+  readonly argv: readonly string[];
+  /**
+   * Позиции argv, ЗАНЯТЫЕ ЗНАЧЕНИЕМ параметра (`AuditEvent.argvFromParams`).
+   *
+   * Литеральные элементы шаблона в список не попадают, хотя и приехали вместе с параметром:
+   * `--filter` написан автором рецепта и лежит в манифесте под хэшем lock, а `auth` пришёл
+   * от модели. Потребитель подсвечивает человеку то, что пришло снаружи, и флаг в подсветке
+   * означал бы, что снаружи пришёл и он.
+   *
+   * Булев параметр тоже не даёт индексов: он раскрывается присутствием своих элементов, и
+   * текст этих элементов целиком из манифеста.
+   */
+  readonly fromParams: readonly number[];
+}
+
 export function buildArgv(prepared: PreparedRecipe, values: ResolvedValues): readonly string[] {
+  return buildArgvWithOrigin(prepared, values).argv;
+}
+
+export function buildArgvWithOrigin(prepared: PreparedRecipe, values: ResolvedValues): BuiltArgv {
   // В `exec` НИЧЕГО не подставляется — ни одного вызова замены над его элементами (R22).
   const argv: string[] = [...prepared.exec];
+  const fromParams: number[] = [];
 
   // В порядке объявления (R19): порядок входит в нормализованную форму рецепта именно
   // потому, что из него собирается argv (ADR-0006).
@@ -65,9 +94,11 @@ export function buildArgv(prepared: PreparedRecipe, values: ResolvedValues): rea
       // Каждый элемент шаблона — ОТДЕЛЬНЫЙ элемент результата (R20). Для `path` в карте лежит
       // результат `realpath`: задача резолва вернула ровно одну карту и заменила значение в
       // ней, так что второго источника, из которого можно было бы взять сырую строку, нет.
-      argv.push(template.includes(ARGV_SLOT) ? substitute(template, argvText(value)) : template);
+      const substituted = template.includes(ARGV_SLOT);
+      if (substituted) fromParams.push(argv.length);
+      argv.push(substituted ? substitute(template, argvText(value)) : template);
     }
   }
 
-  return argv;
+  return { argv, fromParams };
 }
