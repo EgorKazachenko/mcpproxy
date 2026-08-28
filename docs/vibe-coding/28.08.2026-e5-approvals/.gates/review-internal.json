@@ -1,0 +1,11 @@
+{
+  "gate": "review-internal",
+  "status": "waived",
+  "waived_by": "agent-recorded",
+  "reason": "Ручной прогон E5 по прямому решению владельца (нехватка времени): пайплайн не запускался, ревью откладывается на PR. Реально проверено: yarn build чистый, все пакеты зелёные (core 691, mcp-server 127, desktop 149, contracts 262), снапшот публичной поверхности core обновлён явным скриптом и диф в ветке. Долг и границы записаны в docs/vibe-coding/28.08.2026-e5-approvals/status.md.",
+  "codeTree": "2df98b5154a3b00d0efb7e85f1d3d2e95a266397",
+  "codeDirty": false,
+  "headSha": "a1f82fd82395a3b5267e152fde032a8d7e01f02d",
+  "startedAt": "2026-08-28T07:22:52.636Z",
+  "artifacts": []
+}

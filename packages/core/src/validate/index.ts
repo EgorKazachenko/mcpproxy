@@ -1,4 +1,4 @@
-import { buildArgvWithOrigin } from './argv.js';
+import { buildArgv } from './argv.js';
 import type { Denial, E2Stage, ParamValue } from './denial.js';
 import { validateParams } from './params.js';
 import { resolvePaths } from './paths.js';
@@ -20,13 +20,6 @@ export type CallResult =
   | {
       ok: true;
       argv: readonly string[];
-      /**
-       * Позиции `argv`, занятые значениями параметров (`AuditEvent.argvFromParams`). Считает
-       * их E2 — только здесь известно, какой элемент собран подстановкой, а какой приехал
-       * литералом из манифеста. Пустой список означает вызов без подстановок, и E4 обязан в
-       * этом случае НЕ писать ключ вовсе, а не писать пустой массив.
-       */
-      argvFromParams: readonly number[];
       cwd: string;
       /**
        * Проверенные значения ПОСЛЕ валидации и резолва — вход `argsHash` (R31). Без них E4
@@ -34,6 +27,12 @@ export type CallResult =
        * `{file: '/abs/logs/a.log'}` перестали бы быть одним вызовом.
        */
       params: Readonly<Record<string, ParamValue>>;
+      /**
+       * Индексы элементов `argv`, подставленных из параметров, — ровно то, что посчитала
+       * стадия `build_argv`. E4 **переносит** их в событие и в `ApprovalRequest`, а не
+       * вычисляет заново: расписка `WORK.md` по `AuditEvent.argvFromParams` и `R63`.
+       */
+      argvFromParams: readonly number[];
       timings: readonly StageTiming[];
     }
   | {
@@ -79,7 +78,7 @@ export function validateCall(prepared: PreparedRecipe, params: Readonly<Record<s
   const resolved = timed('resolve_paths', timings, () => resolvePaths(prepared, validated.values));
   if (!resolved.ok) return { ok: false, denials: resolved.denials, cwd: prepared.cwd, timings };
 
-  const built = timed('build_argv', timings, () => buildArgvWithOrigin(prepared, resolved.values));
+  const built = timed('build_argv', timings, () => buildArgv(prepared, resolved.values));
 
   return {
     ok: true,
@@ -99,7 +98,7 @@ export { validateParams } from './params.js';
 export type { ValidateParamsResult } from './params.js';
 export { resolvePaths } from './paths.js';
 export type { ResolvePathsResult } from './paths.js';
-export { buildArgv, buildArgvWithOrigin } from './argv.js';
+export { buildArgv } from './argv.js';
 export type { BuiltArgv } from './argv.js';
 export { DENIAL_CODES, DENIAL_STAGES, DENIALS_MAX, E2_STAGES, VALUE_MAX_CODE_POINTS } from './denial.js';
 export type {

@@ -1,19 +1,25 @@
 import { randomBytes } from 'node:crypto';
 import {
+  asRequestId,
   deriveRiskTier,
   normalizeRecipe,
   overheadMs,
+  type ApprovalRequest,
   type AuditEvent,
   type ChainedEvent,
   type IpcRequest,
   type Recipe,
   type RecipeName,
+  type NormalizedRecipe,
+  type SandboxProfile,
   type SandboxViolation,
   type Stage,
   type Verdict,
 } from '@mcpproxy/contracts';
+import { argsHash } from '@mcpproxy/contracts/audit';
 import {
   ExecError,
+  createBroker,
   newCommandId,
   prepareRecipe,
   redactInbound,
@@ -21,6 +27,7 @@ import {
   validateCall,
   type ExecEvent,
   type PreparedRecipe,
+  type Broker,
   type Redactor,
   type Sandbox,
   type StartedStore,
@@ -47,6 +54,12 @@ export interface PipelineDeps {
   readonly sandbox: Sandbox;
   readonly config: DaemonConfig;
   readonly manifestDir: string;
+  /**
+   * Брокер подтверждений (E5). Отсутствие — **headless**: брокер без каналов, который
+   * отказывает любому `high` кодом `approval-unavailable`. Дефолт именно такой, а не
+   * «пропускать»: отсутствующий канал подтверждения есть отсутствующее подтверждение.
+   */
+  readonly approvals?: Broker;
   readonly clock?: () => Date;
   readonly monotonic?: () => bigint;
   readonly newId?: (bytes: number) => string;
@@ -88,11 +101,28 @@ export interface Pipeline {
   invalidate(): void;
 }
 
+/**
+ * Нормализованный профиль -> `SandboxProfile` формы подтверждения.
+ *
+ * Копия, а не ссылка, и **эффективный** профиль, а не собственный блок рецепта: ADR-0005
+ * требует показывать человеку то, под чем команда действительно пойдёт, а собственный блок
+ * рецепта молчит обо всём, что пришло из `defaults` — в том числе о запретах на `~/.ssh`.
+ * Сокращать показанное нельзя: спека MCP трактует усечение как обман.
+ */
+function profileOf(sandbox: NormalizedRecipe['effective']['sandbox']): SandboxProfile {
+  return {
+    read: { allow: [...sandbox.read.allow], deny: [...sandbox.read.deny] },
+    write: { allow: [...sandbox.write.allow], deny: [...sandbox.write.deny] },
+    network: { allow: [...sandbox.network.allow], deny: [...sandbox.network.deny] },
+  };
+}
+
 export function createPipeline(deps: PipelineDeps): Pipeline {
   const clock = deps.clock ?? ((): Date => new Date());
   const monotonic = deps.monotonic ?? ((): bigint => process.hrtime.bigint());
   const newId = deps.newId ?? ((bytes: number): string => randomBytes(bytes).toString('hex'));
   const cache = new Map<string, PreparedEntry>();
+  const approvals = deps.approvals ?? createBroker({ ports: [], clock });
 
   const prepared = (name: RecipeName, recipe: Recipe, digest: string): PreparedEntry | null => {
     const hit = cache.get(name);
@@ -111,7 +141,7 @@ export function createPipeline(deps: PipelineDeps): Pipeline {
     },
 
     async call(input: CallInput): Promise<CallOutcome> {
-      const { request, protocolVersion } = input;
+      const { request: request, protocolVersion } = input;
       const toolName = request.recipeName;
       const traceId = newId(16);
       const rootSpanId = newId(8);
@@ -236,15 +266,15 @@ export function createPipeline(deps: PipelineDeps): Pipeline {
       // В событие едет ОТРЕДАКТИРОВАННЫЙ argv, в песочницу — настоящий: секрет, приехавший
       // параметром, иначе лёг бы в append-only журнал дословно (R9 E6).
       const inbound = redactInbound(deps.redactor, { argv, env: {} });
-      // Происхождение элементов команды считает E2 и переносит СЮДА, а не пересчитывает по
-      // значениям: индексы указывают в отредактированный `argv` этого же события, и сверка по
-      // тексту разъехалась бы ровно там, где редакция вырезала секрет. Пустой список ключа не
-      // даёт вовсе — `R13` требует отсутствия ключа, а не пустого массива.
+      // Индексы приезжают из E2 ПЕРЕНОСОМ, а не пересчётом по значениям: расписка `WORK.md`
+      // и `R63`. Редакция заменяет текст внутри элемента и длины массива не меняет, поэтому
+      // индексы указывают в ту же безопасную копию, которая легла в событие.
+      const argvFromParams = validated.argvFromParams;
       const argvExtra = {
         ...lockExtra,
         cwd: validated.cwd,
         argv: inbound.argv,
-        ...(validated.argvFromParams.length > 0 ? { argvFromParams: validated.argvFromParams } : {}),
+        ...(argvFromParams.length > 0 ? { argvFromParams } : {}),
         ...(inbound.redactions.length > 0 ? { redactions: inbound.redactions } : {}),
       };
       emit('build_argv', 'allowed', argvExtra, timingOf('build_argv'));
@@ -260,12 +290,35 @@ export function createPipeline(deps: PipelineDeps): Pipeline {
       // Стадия эмитится ВСЕГДА, а не только при поднятой модалке: она фиксирует принятое
       // решение, и вызов, где решения «не требовалось», отличается от вызова, где его забыли
       // спросить, только этой записью.
-      if (tier === 'high') {
-        // Брокер апрувов — эпик E5. Пока его нет, high-risk вызов отказывается, а не
-        // пропускается: недостающий канал подтверждения — это отсутствующее подтверждение.
-        return refuse('approval', 'denied', 'approval-unavailable', 'high-risk требует out-of-band подтверждения, брокер апрувов не подключён', riskExtra);
+      const approvalRequest: ApprovalRequest = {
+        requestId: asRequestId(newId(16)),
+        sessionId: request.sessionId,
+        recipeName: toolName,
+        // Хэш по значениям ПОСЛЕ валидации и резолва: скоуп `recipe_and_args` обязан считать
+        // `./logs/a.log` и `/abs/logs/a.log` одним вызовом (`contracts/audit/args.ts`).
+        argsHash: argsHash(toolName, validated.params),
+        tier,
+        // В форму едет та же ОТРЕДАКТИРОВАННАЯ копия, что и в событие: человек не должен
+        // читать секрет в окне подтверждения, а индексы обязаны указывать в то, что он видит.
+        argv: inbound.argv,
+        ...(argvFromParams.length > 0 ? { argvFromParams } : {}),
+        cwd: validated.cwd,
+        profile: profileOf(normalized.effective.sandbox),
+      };
+
+      const decision = await approvals.decide(approvalRequest, tier);
+      if (decision.kind === 'refused') {
+        return refuse('approval', 'denied', decision.code, decision.reason, {
+          ...riskExtra,
+          ...(decision.record === undefined ? {} : { approval: decision.record }),
+        });
       }
-      emit('approval', 'allowed', riskExtra);
+      // Пройденная стадия БЕЗ `ApprovalRecord` означает «решения не требовалось». Вызов, где
+      // спрашивать было незачем, отличается от вызова, где спросить забыли, ровно этим.
+      emit('approval', 'allowed', {
+        ...riskExtra,
+        ...(decision.kind === 'granted' ? { approval: decision.record } : {}),
+      });
 
       // ── 6. build_env / build_profile / spawn / violation ───────────────────────────────
       const commandId = newCommandId();

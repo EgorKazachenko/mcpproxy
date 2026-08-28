@@ -348,7 +348,7 @@ body:not(.raw) #app{margin-top:45px}
 .overhead b{font-size:var(--text-xl);font-variant-numeric:tabular-nums;font-family:var(--font-mono)}
 .overhead span{font-size:var(--text-xs);color:var(--text-tertiary)}
 
-/* ═══ 7. Нарушения ══════════════════════════════════════════════════════ */
+/* ═══ 7. Violations ══════════════════════════════════════════════════════ */
 .vrow{display:grid;grid-template-columns:20px 108px 1fr auto;gap:var(--space-5);
   align-items:baseline;padding:var(--space-5) var(--space-7);
   border-bottom:1px solid var(--border-subtle);border-left:3px solid transparent}
@@ -367,7 +367,7 @@ body:not(.raw) #app{margin-top:45px}
 .vrow-meta{font-size:var(--text-xs);color:var(--text-secondary);text-align:right;
   font-variant-numeric:tabular-nums;white-space:nowrap}
 
-/* ═══ 8. Политика ═══════════════════════════════════════════════════════ */
+/* ═══ 8. Policy ═══════════════════════════════════════════════════════ */
 .tool{padding:var(--space-6) var(--space-7);border-bottom:1px solid var(--border-subtle)}
 .tool-top{display:flex;align-items:center;gap:var(--space-5);margin-bottom:var(--space-4)}
 .tool-name{font-family:var(--font-mono);font-weight:var(--weight-semibold);font-size:var(--text-md)}
@@ -388,7 +388,7 @@ body:not(.raw) #app{margin-top:45px}
   border:1px solid var(--state-warn);border-radius:var(--radius-sm);
   padding:0 var(--space-3);white-space:nowrap}
 
-/* ═══ 9. Аудит ══════════════════════════════════════════════════════════ */
+/* ═══ 9. Audit ══════════════════════════════════════════════════════════ */
 .chainbox{margin:var(--space-7);padding:var(--space-6) var(--space-7);
   border:1px solid var(--border-default);border-radius:var(--radius-lg);background:var(--bg-surface)}
 .chainbox.broken{border-color:var(--state-danger);background:var(--state-danger-subtle)}
@@ -524,16 +524,16 @@ const annotationLabel = { readOnlyHint:'только чтение', destructiveH
   idempotentHint:'идемпотентный', openWorldHint:'внешний мир' };
 
 /* Роль нарушения зависит и от типа, и от исхода. `network denied` — янтарь:
-   песочница отбила. Тот же `network` с `action: 'allowed'` — красный:
+   sandbox отбила. Тот же `network` с `action: 'allowed'` — красный:
    данные ушли. Отгруженный violationRole(type) этого различия не делает. */
 function violationRole(type, action) {
   if (type === 'mandatory-deny') return 'danger';
   return action === 'denied' ? 'warn' : 'danger';
 }
-/* «Отбито» и «прошло» — словарь самой дизайн-системы (янтарь = отбито,
+/* «Blocked» и «прошло» — словарь самой дизайн-системы (янтарь = отбито,
    защита сработала). Слово «отказано» занято вердиктом ВЫЗОВА: поставить его
    рядом с бейджем «разрешено» значит написать противоречие. */
-function violationVerb(action) { return action === 'denied' ? 'Отбито' : 'Прошло'; }
+function violationVerb(action) { return action === 'denied' ? 'Blocked' : 'Passed'; }
 
 /* Текстовые глифы, наследующие color. Эмодзи рисуется своим шрифтом и
    игнорирует роль: янтарные песочные часы на синей строке. */
@@ -635,7 +635,7 @@ const CALLS = [
       ['build_argv',250,'4 элемента, pattern отдельным элементом'],
       ['classify_risk',140,'не разрушительный, не внешний мир → средний'],
       ['build_env',470,'PATH HOME LANG CI'],
-      ['build_profile',0,'профиль не применяется — процесс запущен с вашими правами'],
+      ['build_profile',0,'profile not applied — process runs with your permissions'],
       ['spawn',11900000,'pnpm test --testPathPattern auth'],
       ['violation',0,'исходящее соединение на evil.io:443'],
       ['violation',0,'прочитан ~/.aws/credentials'],
@@ -767,11 +767,11 @@ function callRole(c) {
 function callLine(c) {
   const role = callRole(c);
   if (c.verdict === 'denied')
-    return { role:'warn', verb:'Отказано', rest:`${c.denyReason} · стадия «${stageLabel[c.stopAt]}»` };
+    return { role:'warn', verb:'Denied', rest:`${c.denyReason} · стадия «${stageLabel[c.stopAt]}»` };
   if (c.verdict === 'pending_approval')
-    return { role:'info', verb:'Ждёт подтверждения', rest:'высокий риск — окно вне контекста модели' };
+    return { role:'info', verb:'Awaiting Confirmation', rest:'высокий риск — окно вне контекста модели' };
   const v = c.violations || [];
-  if (!v.length) return { role:'ok', verb:'Выполнено', rest:`код выхода ${c.exit.code} · оверхед ${c.overheadMs} мс` };
+  if (!v.length) return { role:'ok', verb:'Completed', rest:`код выхода ${c.exit.code} · оверхед ${c.overheadMs} мс` };
   const worst = v.find((x) => violationRole(x.type, x.action) === 'danger') || v[0];
   const sent = worst.action === 'allowed' && worst.bytes > 0 ? ` — ${worst.bytes} байт` : '';
   return {
@@ -836,7 +836,7 @@ function renderCallList() {
     </div>`).join('');
   }
   if (S.empty) {
-    return `<div class="empty"><b>Вызовов пока не было</b>
+    return `<div class="empty"><b>No calls yet</b>
       Прокси запущен и слушает сокет. Здесь появится каждый вызов инструмента —
       и разрешённый, и отклонённый.</div>`;
   }
@@ -895,10 +895,9 @@ function renderDetail() {
         const fromModel = (c.paramSlots || []).includes(a);
         return `<span class="arg${fromModel ? ' arg-param' : ''}">${esc(a)}</span>`;
       }).join(' ')}</div>
-      ${(c.paramSlots || []).length ? `<p class="argv-legend">Подсвечено — подставлено из
-        параметров вызова; остальное задано манифестом и модели недоступно.</p>` : ''}`
-    : `<p class="argv-none">Команда не собиралась: вызов остановлен на стадии
-         «${stageLabel[c.stopAt]}», до сборки argv он не дошёл.</p>`;
+      ${(c.paramSlots || []).length ? `<p class="argv-legend">Highlighted — substituted from call parameters; rest is defined by the manifest and unavailable to the model.</p>` : ''}`
+    : `<p class="argv-none">Command was not built: call stopped at stage
+         "${stageLabel[c.stopAt]}", argv assembly was not reached.</p>`;
 
   let vi = -1;
   const stagesHtml = c.stages.map(([name, dur, detail]) => {
@@ -920,12 +919,12 @@ function renderDetail() {
         <dt>вердикт</dt><dd><span class="badge badge--${verdictRole[c.verdict]}">${verdictLabel[c.verdict]}</span></dd>
         ${c.risk ? `<dt>риск</dt><dd><span class="badge badge--${riskRole[c.risk.tier]}">${riskLabel[c.risk.tier]}</span></dd>` : ''}
         ${c.cwd ? `<dt>рабочий каталог</dt><dd><button class="chipfilter">${esc(c.cwd)}</button></dd>` : ''}
-        ${c.sandbox ? `<dt>песочница</dt><dd><span class="badge badge--${c.sandbox.mode === 'none' ? 'danger' : 'ok'}">${sandboxLabel[c.sandbox.mode]}</span></dd>` : ''}
+        ${c.sandbox ? `<dt>sandbox</dt><dd><span class="badge badge--${c.sandbox.mode === 'none' ? 'danger' : 'ok'}">${sandboxLabel[c.sandbox.mode]}</span></dd>` : ''}
       </dl>
     </div>
 
     ${c.denyReason ? `<div class="denybox">
-      <span class="deny-verb">Отказано на стадии «${stageLabel[c.stopAt]}»</span>
+      <span class="deny-verb">Denied на стадии «${stageLabel[c.stopAt]}»</span>
       <span class="deny-why">${machine(c.denyReason)}</span>
       <span class="deny-note">Вызов до стадии «запуск» не дошёл: процесс не создавался.</span>
     </div>` : ''}
@@ -1141,7 +1140,7 @@ function renderApprovalWindow() {
       <div class="dsec">
         <dl class="kv">
           <dt>рабочий каталог</dt><dd class="mono">/Users/y/work/demo-repo</dd>
-          <dt>песочница</dt><dd><span class="badge badge--ok">seatbelt</span></dd>
+          <dt>sandbox</dt><dd><span class="badge badge--ok">seatbelt</span></dd>
           <dt>сеть разрешена</dt><dd class="mono">registry.npmjs.org, api.github.com</dd>
           <dt>запись</dt><dd>не разрешена</dd>
           <dt>хэш аргументов</dt><dd class="mono">4c1e9a77b3…</dd>
@@ -1178,31 +1177,31 @@ function renderApprovalWindow() {
 
 const SCREENS = {
   timeline: () => `<div class="main">
-      <section class="pane pane-list" aria-label="Вызовы">
-        <div class="pane-head"><h2>Вызовы</h2>
+      <section class="pane pane-list" aria-label="Calls">
+        <div class="pane-head"><h2>Calls</h2>
           <span class="spacer"></span>
           ${S.filter ? `<span class="badge badge--muted">фильтр: ${esc(S.filter)}</span>` : ''}
           <span class="eyebrow">${S.loading ? 'загружаем…' : `${S.empty ? 0 : CALLS.length} за сессию`}</span></div>
         <div class="pane-scroll" role="listbox">${renderCallList()}</div>
       </section>
-      <section class="pane pane-detail" aria-label="Детали вызова">
-        <div class="pane-head"><h2>Детали вызова</h2></div>
+      <section class="pane pane-detail" aria-label="Call Details">
+        <div class="pane-head"><h2>Call Details</h2></div>
         ${S.loading ? renderDetailSkeleton()
           : S.empty ? `<div class="empty"><b>Вызов не выбран</b>
               Выберите строку слева, чтобы увидеть стадии, команду и профиль песочницы.</div>`
           : renderDetail()}
       </section>
     </div>`,
-  violations: () => `<div class="main"><section class="pane" style="flex:1" aria-label="Нарушения песочницы">
-      <div class="pane-head"><h2>Нарушения песочницы</h2><span class="spacer"></span>
+  violations: () => `<div class="main"><section class="pane" style="flex:1" aria-label="Violations песочницы">
+      <div class="pane-head"><h2>Violations песочницы</h2><span class="spacer"></span>
         <span class="eyebrow">янтарь — отбито · красный — прошло или попытка закрепиться</span></div>
       <div class="pane-scroll">${renderViolations()}</div></section></div>`,
-  policy: () => `<div class="main"><section class="pane" style="flex:1" aria-label="Политика">
-      <div class="pane-head"><h2>Политика</h2><span class="spacer"></span>
+  policy: () => `<div class="main"><section class="pane" style="flex:1" aria-label="Policy">
+      <div class="pane-head"><h2>Policy</h2><span class="spacer"></span>
         <span class="eyebrow">4 инструмента · строки команд модели не видны</span></div>
       <div class="pane-scroll">${renderPolicy()}</div></section></div>`,
-  approvals: () => `<div class="main"><section class="pane" style="flex:1" aria-label="Апрувы">
-      <div class="pane-head"><h2>Апрувы</h2><span class="spacer"></span>
+  approvals: () => `<div class="main"><section class="pane" style="flex:1" aria-label="Approvals">
+      <div class="pane-head"><h2>Approvals</h2><span class="spacer"></span>
         <span class="eyebrow">решение принимается в отдельном окне</span></div>
       <div class="pane-scroll">${
         S.empty || !PENDING.length
@@ -1224,8 +1223,8 @@ const SCREENS = {
               </div>
             </div>`).join('')
       }</div></section></div>`,
-  audit: () => `<div class="main"><section class="pane" style="flex:1" aria-label="Аудит">
-      <div class="pane-head"><h2>Аудит</h2><span class="spacer"></span>
+  audit: () => `<div class="main"><section class="pane" style="flex:1" aria-label="Audit">
+      <div class="pane-head"><h2>Audit</h2><span class="spacer"></span>
         <button class="btn-secondary" type="button" style="padding:4px 12px">Экспорт JSONL</button></div>
       <div class="pane-scroll">${renderAudit()}</div></section></div>`,
 };
@@ -1233,23 +1232,23 @@ const SCREENS = {
 /* Счётчик не имеет права утверждать «8 вызовов», пока список грузится или
    пуст: слева цифра, справа «вызовов пока не было» — это ошибка, а не деталь. */
 const NAV = [
-  ['timeline','Таймлайн', () => S.loading ? '—' : S.empty ? 0 : CALLS.length],
-  ['violations','Нарушения', () => S.loading ? '—' : S.empty ? 0
+  ['timeline','Timeline', () => S.loading ? '—' : S.empty ? 0 : CALLS.length],
+  ['violations','Violations', () => S.loading ? '—' : S.empty ? 0
       : CALLS.reduce((n,c) => n + (c.violations || []).length, 0)],
-  ['policy','Политика', () => TOOLS.length],
-  ['approvals','Апрувы', () => S.empty ? 0 : PENDING.length],
-  ['audit','Аудит', () => S.loading ? '—' : S.empty ? 0 : 1284],
+  ['policy','Policy', () => TOOLS.length],
+  ['approvals','Approvals', () => S.empty ? 0 : PENDING.length],
+  ['audit','Audit', () => S.loading ? '—' : S.empty ? 0 : 1284],
 ];
 
 function render() {
   const app = document.getElementById('app');
   app.innerHTML = `
     ${S.mode === 'none' ? `<div class="unsandboxed-banner">
-      Песочница выключена — baseline. Всё, что запустит вызов, выполняется с вашими правами.</div>` : ''}
+      Sandbox is disabled — baseline. Everything this call executes will run with your permissions.</div>` : ''}
     <header class="chrome">
       <span class="logo"><span class="mark"></span>mcpproxy</span>
       <span class="spacer"></span>
-      <span class="eyebrow">песочница</span>
+      <span class="eyebrow">sandbox</span>
       <div class="modeswitch" role="group" aria-label="Режим песочницы">
         <button type="button" data-mode="none" aria-pressed="${S.mode === 'none'}">без песочницы</button>
         <button type="button" data-mode="seatbelt" aria-pressed="${S.mode === 'seatbelt'}">seatbelt</button>
@@ -1314,22 +1313,22 @@ const STATES = {
   'approval-window-typed':   { screen:'timeline', mode:'seatbelt', sel:'c9', overlay:'approval', typed:'v2.4.0' },
 };
 const LABELS = {
-  'timeline-default':'Таймлайн · разрешено',
-  'timeline-baseline-none':'Таймлайн · baseline без песочницы',
-  'timeline-denied-validate':'Таймлайн · отказ на валидации',
-  'timeline-denied-paths':'Таймлайн · отказ на резолве путей',
-  'timeline-denied-lock':'Таймлайн · отказ на сверке lock',
-  'timeline-mandatory-deny':'Таймлайн · persistence',
-  'timeline-pending':'Таймлайн · ждёт апрува',
-  'timeline-loading':'Таймлайн · загрузка',
-  'timeline-empty':'Таймлайн · пусто',
-  'violations-default':'Нарушения',
-  'violations-empty':'Нарушения · пусто',
-  'policy-default':'Политика',
-  'approvals-default':'Апрувы · очередь',
-  'approvals-empty':'Апрувы · пусто',
-  'audit-selfconsistent':'Аудит · самосогласована',
-  'audit-broken':'Аудит · цепочка разошлась',
+  'timeline-default':'Timeline · разрешено',
+  'timeline-baseline-none':'Timeline · baseline без песочницы',
+  'timeline-denied-validate':'Timeline · отказ на валидации',
+  'timeline-denied-paths':'Timeline · отказ на резолве путей',
+  'timeline-denied-lock':'Timeline · отказ на сверке lock',
+  'timeline-mandatory-deny':'Timeline · persistence',
+  'timeline-pending':'Timeline · ждёт апрува',
+  'timeline-loading':'Timeline · загрузка',
+  'timeline-empty':'Timeline · пусто',
+  'violations-default':'Violations',
+  'violations-empty':'Violations · пусто',
+  'policy-default':'Policy',
+  'approvals-default':'Approvals · очередь',
+  'approvals-empty':'Approvals · пусто',
+  'audit-selfconsistent':'Audit · самосогласована',
+  'audit-broken':'Audit · цепочка разошлась',
   'lock-diff-modal':'Модалка диффа lock',
   'approval-window':'Окно апрува',
   'approval-window-typed':'Окно апрува · тег набран',

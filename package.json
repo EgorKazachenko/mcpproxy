@@ -13,7 +13,8 @@
     "build": "yarn workspaces foreach -Apt run build",
     "typecheck": "yarn workspaces foreach -Ap run typecheck",
     "test": "yarn workspaces foreach -Apt run test",
-    "clean": "yarn workspaces foreach -Ap run clean"
+    "clean": "yarn workspaces foreach -Ap run clean",
+    "bench": "yarn workspace @mcpproxy/bench run bench"
   },
   "devDependencies": {
     "@types/node": "^22",

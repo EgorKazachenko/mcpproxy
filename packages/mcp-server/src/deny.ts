@@ -1,4 +1,4 @@
-import { DENIAL_CODES, type DenialCode } from '@mcpproxy/core';
+import { APPROVAL_DENY_CODES, DENIAL_CODES, type ApprovalDenyCode, type DenialCode } from '@mcpproxy/core';
 import type { AuditLogErrorCode } from '@mcpproxy/core/audit';
 import type { ExecErrorCode, LockDenyCode } from '@mcpproxy/core';
 import type { Verdict } from '@mcpproxy/contracts';
@@ -23,14 +23,13 @@ export const E4_DENY_CODES = [
   'recipe-unprepared',
   'binary-unresolved',
   'binary-not-allowed',
-  'approval-unavailable',
   'audit-unavailable',
   'bad-request',
 ] as const;
 
 export type E4DenyCode = (typeof E4_DENY_CODES)[number];
 
-export type DenyCode = LockDenyCode | DenialCode | ExecErrorCode | AuditLogErrorCode | E4DenyCode;
+export type DenyCode = LockDenyCode | DenialCode | ExecErrorCode | AuditLogErrorCode | ApprovalDenyCode | E4DenyCode;
 
 /**
  * Исчерпывающие свидетели словарей соседей. Смысл именно в типе `Record<Union, true>`: он
@@ -58,6 +57,19 @@ const EXEC_ERROR_CODES: Record<ExecErrorCode, true> = {
   'srt-uninitialized': true,
 };
 
+/**
+ * Шестой словарь — E5. `approval-unavailable` переехал сюда из словаря E4 целиком: до брокера
+ * стадию отказывал сам конвейер, теперь коды принадлежат тому, кто их порождает, и словарь у
+ * каждого один. Разбор `denyReason` от переезда не меняется — код тот же литерал.
+ */
+const APPROVAL_CODES: Record<ApprovalDenyCode, true> = {
+  'approval-unavailable': true,
+  'approval-denied': true,
+  'approval-no-verdict': true,
+  'approval-mismatched': true,
+  'approval-expired': true,
+};
+
 const AUDIT_LOG_ERROR_CODES: Record<AuditLogErrorCode, true> = {
   corrupt: true,
   closed: true,
@@ -71,6 +83,7 @@ export const ALL_DENY_CODES: readonly DenyCode[] = [
   ...DENIAL_CODES,
   ...Object.keys(EXEC_ERROR_CODES),
   ...Object.keys(AUDIT_LOG_ERROR_CODES),
+  ...APPROVAL_DENY_CODES,
   ...E4_DENY_CODES,
 ] as readonly DenyCode[];
 
