@@ -1,213 +1,213 @@
-# 02 — Архитектура
+# 02 — Architecture
 
-## Топология
+## Topology
 
-Electron **не является** хостом MCP-сервера. Клиент (Claude Code) спавнит MCP-сервер
-как subprocess по stdio; спавнить Electron на каждую сессию — неприемлемо
-(множественные окна, тяжёлый старт, нет единого аудита). Поэтому три части:
+Electron **is not** the host of the MCP server. The client (Claude Code) spawns the MCP server
+as a subprocess over stdio; spawning Electron for every session would be unacceptable
+(multiple windows, heavy startup, no unified audit trail). Hence three components:
 
 ```mermaid
 flowchart TD
-    C["MCP-клиент<br/>(Claude Code, Cursor, …)"]
-    S["mcpproxy-shim<br/>тонкий stdio-мост, ~200 строк"]
-    D["mcpproxyd<br/>ЯДРО"]
+    C["MCP client<br/>(Claude Code, Cursor, …)"]
+    S["mcpproxy-shim<br/>thin stdio bridge, ~200 lines"]
+    D["mcpproxyd<br/>CORE"]
     E["Electron UI"]
-    P["Дочерний процесс<br/>в песочнице"]
+    P["Child process<br/>in sandbox"]
 
     C -->|"stdio / JSON-RPC"| S
-    S -->|"unix socket<br/>0600 + каталог 0700 + токен"| D
-    D -->|"поток событий"| E
-    E -->|"вердикт по апруву"| D
-    D -->|"spawn(argv[])<br/>без shell"| P
+    S -->|"unix socket<br/>0600 + dir 0700 + token"| D
+    D -->|"event stream"| E
+    E -->|"approval verdict"| D
+    D -->|"spawn(argv[])<br/>no shell"| P
     P -->|"stdout/stderr<br/>+ sandbox violations"| D
 ```
 
-### Почему именно так
+### Why it's built this way
 
-| Компонент | Ответственность | Почему отдельно |
+| Component | Responsibility | Why separate |
 |---|---|---|
-| `mcpproxy-shim` | Пробросить JSON-RPC от клиента к демону и обратно | Клиент требует stdio-subprocess; должен быть дешёвым и одноразовым |
-| `mcpproxyd` | Политика, валидация, песочница, аудит, апрувы | Одна точка истины на все сессии; переживает перезапуск клиента |
-| `packages/core` | Вся логика демона как библиотека **без единого импорта Electron** | Тестируемость, переиспользование, CI без дисплея |
-| Electron UI | Наблюдение и authoritative-подтверждения | Подтверждения обязаны быть вне контекста модели |
+| `mcpproxy-shim` | Forward JSON-RPC from the client to the daemon and back | The client requires a stdio subprocess; it must be cheap and disposable |
+| `mcpproxyd` | Policy, validation, sandbox, audit, approvals | A single source of truth across all sessions; survives client restarts |
+| `packages/core` | All daemon logic as a library **with zero Electron imports** | Testability, reuse, CI without a display |
+| Electron UI | Observation and authoritative confirmations | Confirmations must happen outside the model's context |
 
-Демон встраивает `core`. Если приложение не запущено — shim его поднимает.
-Альтернатива fail-closed («нет UI → нет аудита → нет исполнения») архитектурно
-красивее и является сильным тезисом для демо, но в повседневности раздражает.
-Решение: авто-запуск, с флагом `--require-ui` для строгого режима.
+The daemon embeds `core`. If the app isn't running, the shim starts it.
+The alternative — fail-closed ("no UI → no audit → no execution") — is architecturally
+cleaner and makes a strong demo thesis, but is annoying in everyday use.
+Solution: auto-start, with a `--require-ui` flag for strict mode.
 
-## Инварианты
+## Invariants
 
-Это то, что фиксируется в коде и в тестах и не подлежит обсуждению в рамках фич.
+These are fixed in code and tests and are not up for debate within individual features.
 
-### И1. Нет shell. Никогда.
+### И1. No shell. Ever.
 
-Только `spawn(argv[])`. Никогда `shell: true`, никогда `exec`, никогда конкатенация
-строки команды. Инъекция убивается не проверками, а конструкцией: если строки команды
-не существует, в неё нечего инжектить.
+Only `spawn(argv[])`. Never `shell: true`, never `exec`, never string concatenation of
+a command. Injection is killed not by checks but by construction: if a command string
+doesn't exist, there's nothing to inject into.
 
-### И2. Параметры не склеиваются, а занимают слоты
+### И2. Parameters aren't concatenated, they occupy slots
 
-Каждый параметр в манифесте объявляет, в какие позиции argv он раскрывается.
-Значение попадает туда как отдельный элемент массива.
+Each parameter in the manifest declares which argv positions it expands into.
+The value lands there as a separate array element.
 
 ```yaml
 params:
   pattern:
     type: string
     pattern: "^[\\w./-]{0,64}$"
-    argv: ["--testPathPattern", "{}"]   # два отдельных элемента argv
+    argv: ["--testPathPattern", "{}"]   # two separate argv elements
 ```
 
-### И3. Пути — только через realpath + root confinement
+### И3. Paths — only via realpath + root confinement
 
-Проверка выполняется **после** разрешения симлинков. Проверка «строка не содержит `..`»
-обходится симлинком за десять секунд и не является защитой.
+The check is performed **after** symlinks are resolved. A check that "the string doesn't contain `..`"
+can be bypassed with a symlink in ten seconds and is not a real defense.
 
-### И4. Секреты не попадают в процесс
+### И4. Secrets never enter the process
 
-Env-allowlist на входе: дочерний процесс получает только явно перечисленные переменные
-плюс минимальный `PATH`. Всё остальное вырезается. Это **настоящая** защита.
-Редакция вывода — страховочная сетка, а не основной механизм.
+Env allowlist on input: the child process receives only explicitly listed variables
+plus a minimal `PATH`. Everything else is stripped. This is the **real** protection.
+Output redaction is a safety net, not the primary mechanism.
 
-### И5. Демон не принимает команды, только имена рецептов
+### И5. The daemon accepts no commands, only recipe names
 
-По IPC приходит `{recipeName: "run_tests", params: {...}, sessionId: "…"}`. Никогда — argv,
-никогда — путь к бинарю. Это прямое следствие атаки из спеки MCP (см. И6). Форма заморожена
-как `IpcRequest` в `packages/contracts`: поле называется `recipeName`, потому что слово
-`recipe` в контракте означает объект рецепта, а не его имя.
+Over IPC it receives `{recipeName: "run_tests", params: {...}, sessionId: "…"}`. Never argv,
+never a path to a binary. This is a direct consequence of the attack described in the MCP spec (see И6). The shape is frozen
+as `IpcRequest` in `packages/contracts`: the field is called `recipeName` because the word
+`recipe` in the contract refers to the recipe object, not its name.
 
-### И6. IPC-сокет — граница безопасности
+### И6. The IPC socket is a security boundary
 
-Спецификация MCP описывает атаку [«stdio Transport Security in Proxy Scenarios»](https://modelcontextprotocol.io/specification/draft/basic/security_best_practices)
-буквально про нашу архитектуру: прокси, который спавнит процессы, плюс украденный токен
-аутентификации прокси = RCE. Меры:
+The MCP specification describes an attack — [«stdio Transport Security in Proxy Scenarios»](https://modelcontextprotocol.io/specification/draft/basic/security_best_practices) —
+that describes our architecture almost literally: a proxy that spawns processes, plus a stolen
+proxy authentication token = RCE. Countermeasures:
 
-- unix domain socket с правами `0600` в каталоге пользователя, не TCP-порт;
-- ~~проверка peer credentials на соединении (`LOCAL_PEERCRED` на macOS)~~ — **в чистом Node
-  недостижима**, проба П11; свойство «пройдёт только процесс этого пользователя» вместо неё
-  держат права каталога `0700`, которые ОС проверяет на резолве пути. Разбор — в
-  `10-honest-limitations.md`;
-- per-session токен, не хранится в конфиге, не попадает в argv shim'а;
-- и главное — И5: даже полный контроль над сокетом даёт только вызов существующих рецептов
-  с валидируемыми параметрами, а не произвольное исполнение.
+- a unix domain socket with `0600` permissions in the user's directory, not a TCP port;
+- ~~peer credential verification on connect (`LOCAL_PEERCRED` on macOS)~~ — **not reachable
+  from plain Node**, probe П11; the property it would deliver ("only this user's processes may
+  connect") is instead held by the `0700` directory permissions, which the OS enforces during
+  path resolution. Discussed in `10-honest-limitations.md`;
+- a per-session token, never stored in config, never passed in the shim's argv;
+- and, most importantly — И5: even full control of the socket only allows invoking existing recipes
+  with validated parameters, not arbitrary execution.
 
-### И7. Вывод скрипта — недоверенные данные
+### И7. Script output is untrusted data
 
-Вывод попадает в контекст модели и является каналом indirect prompt injection (OWASP ASI01).
-Оборачивается явным маркером недоверенности, сканируется на injection-паттерны и секреты,
-обрезается по размеру.
+Output flows into the model's context and is a channel for indirect prompt injection (OWASP ASI01).
+It is wrapped with an explicit untrusted marker, scanned for injection patterns and secrets,
+and truncated by size.
 
-### И8. Electron IPC — тоже граница безопасности
+### И8. Electron IPC is also a security boundary
 
-`contextIsolation: true`, `sandbox: true`, `nodeIntegration: false`, жёсткий CSP.
-Каждое сообщение из renderer валидируется как недоверенный HTTP-запрос.
-Инструменту безопасности провалиться здесь — значит провалить всё.
+`contextIsolation: true`, `sandbox: true`, `nodeIntegration: false`, a strict CSP.
+Every message from the renderer is validated as an untrusted HTTP request.
+For a security tool to fail here would mean failing everything.
 
-## Путь вызова
+## Call path
 
 ```mermaid
 sequenceDiagram
-    participant M as Модель
+    participant M as Model
     participant S as shim
     participant D as mcpproxyd
     participant U as Electron
-    participant P as Процесс
+    participant P as Process
 
     M->>S: tools/call run_tests {pattern:"auth"}
-    S->>D: {recipeName, params, sessionId} по unix socket
-    D->>D: 1. lock-check манифеста (rug pull?)
-    D->>D: 2. валидация параметров по схеме
-    D->>D: 3. резолв путей (realpath + confinement)
-    D->>D: 4. сборка argv из слотов
-    D->>D: 5. классификация риска по аннотациям
-    alt риск high
-        D->>U: запрос апрува (argv, cwd, профиль)
-        U->>D: разрешено / запрещено / TTL
+    S->>D: {recipeName, params, sessionId} over unix socket
+    D->>D: 1. manifest lock check (rug pull?)
+    D->>D: 2. schema-based parameter validation
+    D->>D: 3. path resolution (realpath + confinement)
+    D->>D: 4. building argv from slots
+    D->>D: 5. risk classification from annotations
+    alt risk high
+        D->>U: request approval (argv, cwd, profile)
+        U->>D: allowed / denied / TTL
     end
-    D->>D: 6. сборка env (allowlist)
-    D->>D: 7. сборка профиля песочницы
-    D->>P: spawn(argv) под sandbox-exec
+    D->>D: 6. building env (allowlist)
+    D->>D: 7. building sandbox profile
+    D->>P: spawn(argv) under sandbox-exec
     P-->>D: stdout / stderr / violations
-    D->>D: 8. редакция секретов, обрезка
-    D->>D: 9. запись в hash-chain аудит
-    D-->>U: события в таймлайн
-    D-->>S: результат
-    S-->>M: tool result (обёрнут как untrusted)
+    D->>D: 8. secret redaction, truncation
+    D->>D: 9. write to hash-chain audit log
+    D-->>U: events to timeline
+    D-->>S: result
+    S-->>M: tool result (wrapped as untrusted)
 ```
 
-Каждая пройденная стадия — отдельное событие в таймлайне UI. Именно эта пошаговость
-делает демо наглядным: видно, на каком шаге вызов остановился.
+Each stage the call passes through is a separate event in the UI timeline. This step-by-step
+granularity is exactly what makes the demo legible: you can see at which step the call stopped.
 
-Стадий в замороженном `stageOrder` **тринадцать**, а не девять: диаграмма выше сворачивает
-`build_env`, `build_profile` и `violation` в соседние шаги. Событий у одного успешного вызова
-получается двенадцать — `violation` контракт помечает как «может быть много», то есть и ноль.
-Стадия, до которой вызов не дошёл, события не имеет вовсе.
+The frozen `stageOrder` has **thirteen** stages, not nine: the diagram above collapses
+`build_env`, `build_profile` and `violation` into neighbouring steps. A successful call
+produces twelve events — the contract marks `violation` as "may occur many times", and zero is
+a legal count. A stage the call never reached has no event at all.
 
-## Модель прав песочницы
+## Sandbox permission model
 
-Асимметричная, взята у `@anthropic-ai/sandbox-runtime` (см. [ADR-0002](adr/0002-sandbox-runtime.md)):
+Asymmetric, borrowed from `@anthropic-ai/sandbox-runtime` (see [ADR-0002](adr/0002-sandbox-runtime.md)):
 
-| Операция | По умолчанию | Приоритет |
+| Operation | Default | Priority |
 |---|---|---|
-| Чтение | разрешено | `allowRead` бьёт `denyRead` — вырезаем читаемые островки внутри запрещённых зон |
-| Запись | запрещено | `denyWrite` бьёт `allowWrite` — вырезаем защищённые островки внутри разрешённых |
-| Сеть | запрещена | доменный allowlist через HTTP/SOCKS5-прокси на хосте |
+| Read | allowed | `allowRead` beats `denyRead` — carve out readable islands within denied zones |
+| Write | denied | `denyWrite` beats `allowWrite` — carve out protected islands within allowed zones |
+| Network | denied | domain allowlist via an HTTP/SOCKS5 proxy on the host |
 
-**Mandatory deny paths** — write-блокировка, которую нельзя снять даже явным `allowWrite`:
+**Mandatory deny paths** — a write block that cannot be lifted even by an explicit `allowWrite`:
 `.bashrc`, `.zshrc`, `.profile`, `.gitconfig`, `.git/hooks/`, `.vscode/`, `.idea/`,
-`.claude/commands/`. Это persistence-векторы: запись туда даёт исполнение кода позже,
-уже вне песочницы.
+`.claude/commands/`. These are persistence vectors: writing there enables code execution later,
+already outside the sandbox.
 
-## Уровни песочницы
+## Sandbox tiers
 
-| Реализация | Статус | Назначение |
+| Implementation | Status | Purpose |
 |---|---|---|
-| `none` | реализуем | **Baseline для демо.** Без контраста цифра «100% заблокировано» ничего не значит. Режим **наблюдающий, а не слепой**: те же HTTP/SOCKS5-прокси srt отдаются ребёнку через proxy-переменные, поэтому эксфильтрация видна и посчитана в байтах — просто не запрещена |
-| `seatbelt` | основная | `sandbox-exec` + прокси-фильтрация сети через `srt` |
-| `container` | заглушка | Интерфейс есть, реализация вне текущего среза |
+| `none` | implementing | **Baseline for the demo.** Without a contrast, a "100% blocked" number means nothing. This mode is **observing, not blind**: the same HTTP/SOCKS5 proxy from `srt` is handed to the child via proxy env vars, so exfiltration is visible and counted in bytes — it's just not blocked |
+| `seatbelt` | primary | `sandbox-exec` + network proxy filtering via `srt` |
+| `container` | stub | Interface exists, implementation is out of scope for this slice |
 
-Docker сознательно не берём: требует Docker у зрителя демо, добавляет 300–800 мс
-на вызов (портит метрику оверхеда), а изоляции для нашего сценария даёт немногим больше.
+Docker is deliberately not used: it requires the demo viewer to have Docker, adds 300–800 ms
+per call (hurting the overhead metric), and provides little extra isolation for our scenario.
 
-## Аудит
+## Audit
 
-Append-only JSONL, hash-chain: каждая запись включает хэш предыдущей.
+Append-only JSONL, hash-chain: each entry includes the hash of the previous one.
 
-Формула заморожена в `packages/contracts` (`chainHash`), и она не поле-за-полем:
+The formula is frozen in `packages/contracts` (`chainHash`), and it is not field-by-field:
 
 ```
 self = sha256(utf8(canonicalizeJcs({ prev, event })))
 ```
 
-Хэшируется **всё событие целиком** вместе со ссылкой на предыдущую запись. Перечисление
-полей было бы дырой: каждое поле, добавленное в событие после заморозки, тихо выпадало бы
-из хэша и становилось подделываемым, и ни один тест бы не покраснел. Каноничная форма —
-RFC 8785 (JCS). Дайджест — 64 строчных hex-символа **без префикса `sha256:`**; префикс,
-который встречается в примерах ниже, это приём отображения, а не часть строки.
+**The entire event** is hashed together with the reference to the previous entry. Enumerating
+fields would be a hole: any field added to the event after freezing would silently drop
+out of the hash and become forgeable, and no test would catch it. The canonical form is
+RFC 8785 (JCS). The digest is 64 lowercase hex characters **without a `sha256:` prefix**; the prefix
+that appears in the examples below is a display convention, not part of the string.
 
-Проверяется не только дайджест, но и **связь**: `verifyChain` требует, чтобы `prev` каждой
-записи совпадал с `self` предыдущей. Без этого условия проверка «каждая запись
-самосогласована» даёт ноль доказательной силы — формула публична, и атакующий, правящий
-запись, пересчитывает её `self` сам.
+Not only the digest is verified, but also the **linkage**: `verifyChain` requires that `prev` of each
+entry match `self` of the previous one. Without this condition, checking "each entry is
+internally consistent" has zero evidentiary value — the formula is public, and an attacker
+editing an entry can just recompute its `self`.
 
-Изменение любой прошлой записи ломает все последующие хэши. В UI — бейдж
-«цепочка верифицирована» с пересчётом на лету. Периодическая публикация Merkle-корня —
-дешёвое расширение, даёт проверяемую консистентность в стиле Certificate Transparency.
+Modifying any past entry breaks all subsequent hashes. The UI shows a
+"chain verified" badge, recomputed on the fly. Periodic publication of a Merkle root is a
+cheap extension that provides Certificate-Transparency-style verifiable consistency.
 
-**Чего цепочка не ловит:** обрезание хвоста лога. Удалив последние записи целиком, атакующий
-оставляет цепочку согласованной. Для этого нужен внешний якорь — тот же Merkle-корень или
-внешняя метка времени; в E0 этого нет, и выдавать одно за другое нельзя.
+**What the chain doesn't catch:** truncating the tail of the log. By deleting the last entries entirely, an attacker
+leaves the chain consistent. This requires an external anchor — the same Merkle root or
+an external timestamp; in E0 there is none, and this must not be represented otherwise.
 
-## Схема репозитория
+## Repository layout
 
 ```
 packages/
-  contracts/     # E0: JSON Schema манифеста, схема событий, TS-типы. Заморожен.
-  core/          # E1-E3, E6: политика, валидация, executor, аудит. Без Electron.
-  mcp-server/    # E4: MCP-поверхность + shim
+  contracts/     # E0: manifest JSON Schema, event schema, TS types. Frozen.
+  core/          # E1-E3, E6: policy, validation, executor, audit. No Electron.
+  mcp-server/    # E4: MCP surface + shim
   desktop/       # E7: Electron
-  bench/         # E8: red-team корпус и метрики
-docs/            # эта документация
-.claude/skills/  # mcpproxy-deck — генератор презентаций
+  bench/         # E8: red-team corpus and metrics
+docs/            # this documentation
+.claude/skills/  # mcpproxy-deck — slide-deck generator
 ```

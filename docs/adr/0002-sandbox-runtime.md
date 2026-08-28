@@ -1,38 +1,38 @@
-# ADR-0002 — Песочница через `@anthropic-ai/sandbox-runtime`
+# ADR-0002 — Sandboxing via `@anthropic-ai/sandbox-runtime`
 
-**Статус:** принято · 2026-08-27
+**Status:** accepted · 2026-08-27
 
-## Контекст
+## Context
 
-Нужна ОС-изоляция ФС и сети на macOS. Исходно планировалось писать SBPL-профили
-для `sandbox-exec` вручную — самая муторная часть эпика E3.
+OS-level filesystem and network isolation is needed on macOS. The original plan was to hand-write
+SBPL profiles for `sandbox-exec` — the most tedious part of epic E3.
 
-## Варианты
+## Options
 
-1. Свои SBPL-профили. Полный контроль, 1–2 дня отладки, свои баги, нет фильтрации сети.
-2. Docker-контейнер. Кроссплатформенно, но требует Docker у зрителя демо,
-   +300–800 мс на вызов (портит метрику оверхеда), сложнее write-политики через монтирование.
-3. **`@anthropic-ai/sandbox-runtime` (srt).** Выбран.
+1. Our own SBPL profiles. Full control, 1–2 days of debugging, our own bugs, no network filtering.
+2. A Docker container. Cross-platform, but requires Docker on the demo viewer's machine,
+   +300–800 ms per call (hurts the overhead metric), and write policy via mounts is more complex.
+3. **`@anthropic-ai/sandbox-runtime` (srt).** Chosen.
 
-## Решение
+## Decision
 
-Обёртка над `srt`. Наш манифест маппится в его конфиг; `getViolationsForCommand`
-пробрасывается в шину событий и в таймлайн UI.
+A wrapper around `srt`. Our manifest maps onto its config; `getViolationsForCommand`
+is forwarded to the event bus and to the UI timeline.
 
-Реализуем три режима: `none` (baseline для демо), `seatbelt` (основной), `container` (заглушка).
+We implement three modes: `none` (demo baseline), `seatbelt` (primary), `container` (stub).
 
-## Что получаем даром
+## What we get for free
 
-- Генерация seatbelt-профилей, bubblewrap на Linux, WFP на Windows
-- HTTP + SOCKS5 прокси для доменной фильтрации сети
-- Асимметричная модель прав: чтение deny-then-allow, запись allow-only
-- Mandatory deny paths (`.bashrc`, `.git/hooks/`, `.claude/commands/` и др.)
-- **Структурированный поток нарушений песочницы** — готовый контент для UI
+- Generation of seatbelt profiles, bubblewrap on Linux, WFP on Windows
+- HTTP + SOCKS5 proxy for domain-based network filtering
+- Asymmetric permission model: reads are deny-then-allow, writes are allow-only
+- Mandatory deny paths (`.bashrc`, `.git/hooks/`, `.claude/commands/`, etc.)
+- **A structured stream of sandbox violations** — ready-made content for the UI
 
-## Последствия
+## Consequences
 
-- ✅ E3 дешевле примерно втрое
-- ✅ Та же основа, что у нативного сандбокса Claude Code
-- ⚠️ Наследуем его ограничения (домены вместо содержимого, domain fronting,
-  `allowUnixSockets`, `allowAppleEvents`) — задокументированы в 10-honest-limitations.md
-- ⚠️ Research preview: API может меняться. Изолируем за своим интерфейсом `Sandbox`
+- ✅ E3 is roughly three times cheaper
+- ✅ Same foundation as Claude Code's native sandbox
+- ⚠️ We inherit its limitations (domains rather than content, domain fronting,
+  `allowUnixSockets`, `allowAppleEvents`) — documented in 10-honest-limitations.md
+- ⚠️ Research preview: the API may change. We isolate it behind our own `Sandbox` interface

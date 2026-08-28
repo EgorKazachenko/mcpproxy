@@ -1,58 +1,58 @@
-# ADR-0005 — Двухканальные подтверждения
+# ADR-0005 — Dual-channel approvals
 
-**Статус:** принято · 2026-08-27
+**Status:** accepted · 2026-08-27
 
-## Контекст
+## Context
 
-В спеке MCP 2025-06-18 есть штатный механизм подтверждений — **elicitation**:
-сервер шлёт `elicitation/create` со схемой, клиент показывает пользователю.
-Соблазн — использовать только его и не писать модалку в Electron.
+The MCP 2025-06-18 spec has a built-in confirmation mechanism — **elicitation**:
+the server sends `elicitation/create` with a schema, the client shows it to the user.
+The temptation is to use only that and skip writing a modal in Electron.
 
-## Проблема
+## Problem
 
-Elicitation идёт **через клиент и модель**. То есть подтверждение живёт в том же канале,
-который мы по модели угроз считаем скомпрометированным. Это OWASP ASI09
-(Human-Agent Trust Exploitation) в чистом виде: атакующий, контролирующий контекст,
-может имитировать или обойти подтверждение.
+Elicitation goes **through the client and the model**. That means the confirmation lives in the
+same channel that our threat model considers compromised. This is OWASP ASI09
+(Human-Agent Trust Exploitation) in its pure form: an attacker who controls the context
+can simulate or bypass the confirmation.
 
-## Решение
+## Decision
 
-Два канала, разные роли:
+Two channels, different roles:
 
-| Канал | Тир | Роль |
+| Channel | Tier | Role |
 |---|---|---|
-| `elicitation/create` | low, medium | Мягкий путь, удобный, работает в любом клиенте |
-| Модалка Electron (отдельный процесс) | **high** | **Единственный authoritative канал** |
+| `elicitation/create` | low, medium | Soft path, convenient, works in any client |
+| Electron modal (separate process) | **high** | **The sole authoritative channel** |
 
-При high-risk прокси отвечает на попытку elicitation: «этот рецепт требует
-out-of-band подтверждения», и поднимает окно.
+On high risk, the proxy responds to any elicitation attempt with "this recipe requires
+out-of-band confirmation" and raises the window.
 
-Модалка показывает **без усечения**: точный argv, cwd, профиль песочницы, домены.
-Спека MCP требует показывать команду целиком — усечение приравнивается к обману.
+The modal shows things **unabridged**: the exact argv, cwd, sandbox profile, domains.
+The MCP spec requires showing the full command; truncation is treated as deception.
 
-Варианты решения — `ApprovalScope` в замороженном контракте: `once` (только этот вызов),
-`until` (до **абсолютного** `expiresAt`), `recipe_and_args` (для этого рецепта с этим же
-`argsHash`). Headless-режим (CI, нет UI) = **deny** по умолчанию.
+Decision options — `ApprovalScope` in the frozen contract: `once` (this call only),
+`until` (until an **absolute** `expiresAt`), `recipe_and_args` (for this recipe with this
+`argsHash`). Headless mode (CI, no UI) defaults to **deny**.
 
-**Время — абсолютное, а не TTL.** Прежняя формулировка «на 10 минут» не годится для
-append-only записи: её читают через месяцы, и относительный TTL в ней уже ничего не означает.
-`expiresAt` — ISO-время, `decidedAt` отдельным полем не нужен: момент решения — это метка
-стадии `approval` в событии.
+**Time is absolute, not a TTL.** The earlier phrasing "for 10 minutes" doesn't work for an
+append-only record: it gets read months later, and by then a relative TTL means nothing.
+`expiresAt` is an ISO timestamp; a separate `decidedAt` field isn't needed — the moment of
+decision is the timestamp of the `approval` stage in the event.
 
-**Скоуп действует внутри сессии.** `ApprovalRequest` и `ApprovalVerdict` несут и непрозрачный
-`requestId`, и `sessionId`. Без `requestId` сообщение из рендерера может одобрить не тот
-ожидающий вызов, который человеку показали. Без `sessionId` подтверждение со скоупом `until`
-или `recipe_and_args` ключуется только по `(recipeName, argsHash, expiresAt)` и оказывается
-неявно действительным во всех сессиях — включая ту, которую человеку никогда не показывали.
-Ключевание — дело E5; E0 обязан сделать сессионную атрибуцию выразимой, потому что после
-заморозки поле не добавить.
+**Scope is scoped to the session.** `ApprovalRequest` and `ApprovalVerdict` both carry an
+opaque `requestId` and a `sessionId`. Without `requestId`, a message from the renderer could
+approve the wrong pending call — not the one shown to the human. Without `sessionId`, a
+confirmation scoped to `until` or `recipe_and_args` is keyed only on `(recipeName, argsHash,
+expiresAt)` and ends up implicitly valid across every session — including one the human was
+never shown. Keying is E5's job; E0 must make session attribution expressible, because the
+field can't be added after the freeze.
 
-Решение — `approved` или `denied`. Третьего члена нет: истечение и отмена выражаются
-**отсутствием** вердикта, а не значением внутри него.
+The decision is `approved` or `denied`. There is no third member: expiry and cancellation are
+expressed by the **absence** of a verdict, not by a value inside one.
 
-## Последствия
+## Consequences
 
-- ✅ Подтверждение не подделывается контентом
-- ✅ Понятный демо-момент: «модель сказала, что ты согласился» vs «ты нажал кнопку»
-- ⚠️ Не защищает от усталости от подтверждений. Митигация — high-risk должен быть редким,
-  тир выводится автоматически
+- ✅ The confirmation can't be forged by content
+- ✅ A clear demo moment: "the model said you agreed" vs. "you clicked the button"
+- ⚠️ Doesn't protect against approval fatigue. Mitigation — high risk should be rare,
+  since the tier is derived automatically

