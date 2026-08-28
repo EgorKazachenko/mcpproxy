@@ -42,6 +42,14 @@ tools:
       openWorldHint: false
 `;
 
+/**
+ * Строка ФОРМЫ секрета собирается в памяти, а не лежит литералом на диске. Так требует E6, и
+ * его страж `redact/repo-clean.test.ts` применяет детектор к своему же репозиторию: литерал
+ * такой формы — не ложняк сканера, а наша проблема, потому что красная проверка на каждом
+ * пуше становится шумом. `ghp_` плюс 36 символов класса `[A-Za-z0-9]` — правило `github-pat`.
+ */
+const FAKE_PAT = ['ghp', '_', 'A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8'].join('');
+
 const daemons: Daemon[] = [];
 afterEach(async () => {
   await Promise.all(daemons.splice(0).map((one) => one.close()));
@@ -64,7 +72,7 @@ async function rig(sandboxMode: 'none' | 'seatbelt' = 'none'): Promise<Rig> {
     join(dir, 'scripts/run-tests.sh'),
     // `sleep` здесь несущий: он делает время РАБОТЫ команды заметно больше всего, что
     // прокси тратит на себя, и потому отличает верный подсчёт оверхеда от неверного.
-    '#!/bin/sh\nsleep 0.4\necho "тесты зелены $*"\necho "token=ghp_0123456789abcdefghijklmnopqrstuvwxyzA"\n',
+    `#!/bin/sh\nsleep 0.4\necho "тесты зелены $*"\necho "token=${FAKE_PAT}"\n`,
   );
   chmodSync(join(dir, 'scripts/run-tests.sh'), 0o755);
 
@@ -127,7 +135,7 @@ describe('e2e — один рецепт проходит весь путь', () 
     expect(text).toContain('тесты зелены --filter auth');
     expect(text).toMatch(/^<untrusted-output id="[0-9a-f]{16}"/u);
     // Редакция сработала на настоящем пути: токен в лог и в контекст модели не уехал.
-    expect(text).not.toContain('ghp_0123456789abcdefghijklmnopqrstuvwxyzA');
+    expect(text).not.toContain(FAKE_PAT);
     expect(text).toContain('[redacted:');
 
     r.close();
