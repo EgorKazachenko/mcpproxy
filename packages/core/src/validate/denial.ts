@@ -71,39 +71,50 @@ export type ResolvedValues = ReadonlyMap<string, ParamValue> & { readonly [resol
  * которому `CHECK_IDS` объявлен массивом (`packages/contracts/src/validate/branch-checks.ts:10`):
  * перепись «код ↔ вектор» в `corpus.test.ts` иначе была бы односторонней, и код, переставший
  * производиться, не уронил бы ничего.
+ *
+ * Таблица кодов стоит ЗДЕСЬ, а не построчным JSDoc внутри массива, и причина исполняемая.
+ * Снапшот публичной поверхности сверяется побайтово, а declaration emit не детерминирован:
+ * одна пересборка переиспользует исходные узлы и печатает массив многострочно вместе с JSDoc,
+ * другая синтезирует его одной строкой. Замерено на этом дереве — два прогона при неизменном
+ * исходнике дали разный `.d.ts`, и гейт `api-surface` флакал. `api-surface.ts` по этой же
+ * причине уже нормализует кавычки; вынос документации из массива убирает вторую половину той
+ * же непостоянности в источнике, а не ещё одной нормализацией.
+ *
+ * | код | когда |
+ * |---|---|
+ * | `bad-params-container` | `params` — не объект: `null`, массив, строка, число. Претензия к запросу, не к параметру. |
+ * | `unknown-param` | Ключ запроса, которого нет в `recipe.params`. |
+ * | `missing-required` | Обязательный параметр не передан. |
+ * | `wrong-type` | `typeof` значения не тот, что объявлен веткой параметра. |
+ * | `not-canonicalizable` | Строка не переживёт `canonicalizeJcs` — одиночный суррогат. |
+ * | `value-oversized` | Строка длиннее `VALUE_MAX_CODE_POINTS`, независимо от `maxLength` манифеста. |
+ * | `pattern-mismatch` | `matcher.test` вернул `false`. |
+ * | `too-long` | Строка длиннее `maxLength` манифеста, в кодовых точках. |
+ * | `not-in-enum` | Значения нет в `values`. |
+ * | `not-finite` | Число не конечно: `1e400` из JSON даёт `Infinity`. |
+ * | `out-of-range` | Число вне `min`/`max`. |
+ * | `not-integer` | `integer: true`, а значение дробное. |
+ * | `path-not-found` | `realpath` бросил `ENOENT`: пути нет. |
+ * | `path-escapes-root` | Резолвнутый путь лежит вне `root` (И3). |
+ * | `path-unusable` | Путь непригоден: нулевой байт, нерезолвимый `root`, не-строка. |
+ * | `denials-truncated` | Список отказов усечён по `DENIALS_MAX`; общее число — в тексте причины. |
  */
 export const DENIAL_CODES = [
-  /** `params` — не объект: `null`, массив, строка, число. Претензия к запросу, не к параметру. */
   'bad-params-container',
-  /** Ключ запроса, которого нет в `recipe.params`. */
   'unknown-param',
-  /** Обязательный параметр не передан. */
   'missing-required',
-  /** `typeof` значения не тот, что объявлен веткой параметра. */
   'wrong-type',
-  /** Строка не переживёт `canonicalizeJcs` — одиночный суррогат. */
   'not-canonicalizable',
-  /** Строка длиннее `VALUE_MAX_CODE_POINTS`, независимо от `maxLength` манифеста. */
   'value-oversized',
-  /** `matcher.test` вернул `false`. */
   'pattern-mismatch',
-  /** Строка длиннее `maxLength` манифеста, в кодовых точках. */
   'too-long',
-  /** Значения нет в `values`. */
   'not-in-enum',
-  /** Число не конечно: `1e400` из JSON даёт `Infinity`. */
   'not-finite',
-  /** Число вне `min`/`max`. */
   'out-of-range',
-  /** `integer: true`, а значение дробное. */
   'not-integer',
-  /** `realpath` бросил `ENOENT`: пути нет. */
   'path-not-found',
-  /** Резолвнутый путь лежит вне `root` (И3). */
   'path-escapes-root',
-  /** Путь непригоден: нулевой байт, нерезолвимый `root`, не-строка. */
   'path-unusable',
-  /** Список отказов усечён по `DENIALS_MAX`; общее число — в тексте причины. */
   'denials-truncated',
 ] as const;
 

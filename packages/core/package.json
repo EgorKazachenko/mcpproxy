@@ -7,23 +7,37 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./audit": {
+      "types": "./dist/audit/index.d.ts",
+      "default": "./dist/audit/index.js"
+    },
+    "./pure": {
+      "types": "./dist/policy/pure.d.ts",
+      "default": "./dist/policy/pure.js"
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "bin"
   ],
   "scripts": {
     "build": "tsc -b",
     "typecheck": "tsc -b --noEmit false --emitDeclarationOnly",
+    "clean": "rm -rf dist *.tsbuildinfo",
     "test": "tsc -b && node scripts/check-test-include.mjs && vitest run",
-    "clean": "rm -rf dist *.tsbuildinfo"
+    "update:api-surface": "tsc -b && node scripts/update-api-surface.mjs"
   },
   "dependencies": {
-    "@mcpproxy/contracts": "workspace:*"
+    "@mcpproxy/contracts": "workspace:*",
+    "re2": "1.26.1"
   },
   "devDependencies": {
     "@types/node": "^22",
-    "es-module-lexer": "^2",
+    "es-module-lexer": "^2.3.2",
     "vitest": "^3"
+  },
+  "bin": {
+    "mcpproxy-lock": "./bin/mcpproxy-lock.mjs"
   }
 }
