@@ -1,6 +1,11 @@
+import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { app } from 'electron';
-import { ok, type Result } from '../shared/result.js';
+import { denied, ok, type Result } from '../shared/result.js';
 import type { UiReply, UiRequest } from '../shared/channel.js';
+import type { TrackMarks } from './player.js';
+import { createPlayer, type Player } from './player.js';
+import { readTrace } from './trace.js';
 import { cspModeFrom } from './csp.js';
 import { createDispatch } from './dispatch.js';
 import { registerIpc } from './ipc.js';
@@ -32,15 +37,40 @@ app.on('web-contents-created', (_event, contents) => {
   contents.setWindowOpenHandler(() => ({ action: 'deny' }));
 });
 
-/** Пока проигрывателя нет, обработчик подтверждает приём. Он появится следующей задачей. */
+let player: Player | null = null;
+
+/**
+ * Обработчик запросов рендерера.
+ *
+ * `hello` отвечает состоянием и повторяет уже отданные события: рендерер подписывается
+ * позже, чем main начинает работу, и без повтора первая отрисовка показала бы пустой список
+ * при непустом трейсе.
+ */
 const run = (request: UiRequest): Result<UiReply> => {
-  void request;
+  if (player === null) return denied('bad-payload', 'проигрыватель ещё не готов');
+
+  if (request.kind === 'hello') {
+    player.replay();
+    return ok({ kind: 'state', state: player.state() });
+  }
+
+  player.apply(request.command);
   return ok({ kind: 'accepted' });
 };
 
-app.whenReady().then(() => {
+async function loadPlayer(): Promise<void> {
+  const fixtures = join(app.getAppPath(), 'fixtures');
+  const trace = readTrace(await readFile(join(fixtures, 'demo.jsonl'), 'utf8'));
+  if (!trace.ok) throw new Error(`демо-трейс не читается: ${trace.error.message}`);
+
+  const marks = JSON.parse(await readFile(join(fixtures, 'marks.json'), 'utf8')) as TrackMarks;
+  player = createPlayer(trace.value, marks, (event) => dispatch.send(event));
+}
+
+app.whenReady().then(async () => {
   handleAppScheme(bundleRootFor(app.getAppPath()), mode);
   registerIpc(run, allowedOrigins);
+  await loadPlayer();
 
   const window = createWindow('main', devUrl ?? APP_ORIGIN);
   dispatch.register(window.webContents);
