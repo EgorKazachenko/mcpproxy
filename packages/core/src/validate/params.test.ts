@@ -258,8 +258,27 @@ describe('validateParams — потолок на список отказов (R3
     // «сто тысяч мусорных плюс один настоящий отказ», а именно это и надо знать по записи.
     const reason = result.denials.at(-1)?.reason ?? '';
     expect(reason).toContain(`всего ${DENIALS_MAX + 50}`);
-    expect(reason).toContain(`показаны первые ${DENIALS_MAX}`);
-    expect(reason).toContain('не показаны ещё 50');
+    expect(reason).toContain(`показано ${DENIALS_MAX}`);
+    expect(reason).toContain('не показано ещё 50');
+  });
+
+  it('потолок держится и когда все отказы — по ОБЪЯВЛЕННЫМ параметрам', () => {
+    // Регрессия, которую внесла перестановка порядка: обрыв стоял только на цикле неизвестных
+    // ключей, а отказы по объявленным параметрам в потолок не упирались вовсе — 40 отказов
+    // при `DENIALS_MAX = 32` и БЕЗ маркера усечения. Схема не ограничивает число параметров
+    // рецепта ничем, то есть «их число ограничено манифестом» — доверие, а не контракт.
+    const many = Object.fromEntries(
+      Array.from({ length: DENIALS_MAX + 8 }, (_unused, i) => [`b${String(i).padStart(3, '0')}`, { type: 'boolean' } as Param]),
+    );
+    const wide = prepare({ description: 'о', exec: ['/usr/bin/true'], params: many }, new Map());
+    const hostile = Object.fromEntries(Object.keys(many).map((key) => [key, 'не булево']));
+
+    const result = validateParams(wide, hostile);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.denials).toHaveLength(DENIALS_MAX + 1);
+    expect(result.denials.at(-1)?.code).toBe('denials-truncated');
+    expect(result.denials.at(-1)?.reason).toContain('не показано ещё 8');
   });
 
   it('отказы по ОБЪЯВЛЕННЫМ параметрам не вытесняются неизвестными ключами', () => {

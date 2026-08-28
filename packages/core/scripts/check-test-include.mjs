@@ -15,9 +15,24 @@ import { fileURLToPath } from 'node:url';
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const IGNORED = new Set(['node_modules', 'dist', '.git', 'scripts']);
 
+// Разделитель `/` жёсткий — как и всюду в этом дереве. Спека Windows не обещает, но здесь
+// цена ограничения выше: падение этой проверки роняет команду `test` целиком, а не один тест.
+
 const config = readFileSync(resolve(packageRoot, 'vitest.config.ts'), 'utf8');
-const block = /include:\s*\[([^\]]*)\]/.exec(config);
-const patterns = block === null ? [] : [...block[1].matchAll(/'([^']+)'/g)].map((one) => one[1]);
+
+// Обе формы кавычек: одинарные — стиль этого дерева, но конфиг с двойными валиден, и падение
+// сторожа на нём выглядело бы как падение тестов. Замерено — так и было.
+const listOf = (key) => {
+  const block = new RegExp(`${key}:\\s*\\[([^\\]]*)\\]`).exec(config);
+  return block === null ? null : [...block[1].matchAll(/['"]([^'"]+)['"]/g)].map((one) => one[1]);
+};
+
+const patterns = listOf('include') ?? [];
+// `exclude` читается по той же причине, по которой читается `include`: замерено, что одна
+// строка `exclude: ['src/deps.test.ts', 'src/harness.test.ts']` при неизменном `include`
+// уносит весь гейт границ пакета — 7 файлов вместо 9, код возврата 0 и у сторожа, и у vitest.
+// Сторож, закрывающий одну дверь из двух, обещает больше, чем даёт.
+const excluded = listOf('exclude') ?? [];
 
 const testFiles = readdirSync(packageRoot, { recursive: true, encoding: 'utf8' })
   .map((entry) => entry.split('/'))
@@ -43,9 +58,15 @@ if (testFiles.length === 0) problems.push('на диске не найдено �
 const uncovered = testFiles.filter((path) => !patterns.some((pattern) => matches(pattern, path)));
 for (const path of uncovered) problems.push(`${path} не попадает ни под один шаблон include — тест исчез бы молча`);
 
+const dropped = testFiles.filter((path) => excluded.some((pattern) => matches(pattern, path)));
+for (const path of dropped) problems.push(`${path} отсекается шаблоном exclude — тест исчез бы молча`);
+
 if (problems.length > 0) {
   console.error('check-test-include: прогон неполон');
   for (const one of problems) console.error(`  - ${one}`);
   process.exit(1);
 }
-console.log(`check-test-include: ${testFiles.length} файл(ов) покрыты шаблонами [${patterns.join(', ')}]`);
+console.log(
+  `check-test-include: ${testFiles.length} файл(ов) покрыты шаблонами [${patterns.join(', ')}]` +
+    (excluded.length > 0 ? `, ни один не отсекается exclude [${excluded.join(', ')}]` : ''),
+);

@@ -193,6 +193,10 @@ describe('scrub — потеря не бывает молчаливой', () => 
       reason: '/root/a  b\tc.log',
     });
     expect(distorted.reason).toContain('зачистка изменила текст');
+    // Пометка приписывается ВНУТРИ потолка: наивное `clean + MARK` снимало гарантию
+    // `<= DESCRIPTION_MAX_LENGTH`, и причина из 2000 символов приезжала длиной 1050.
+    const overlong = denial({ stage: 'validate', code: 'wrong-type', paramName: 'p', reason: 'я'.repeat(2000) });
+    expect(codePointLength(overlong.reason)).toBeLessThanOrEqual(1024);
 
     const intact = denial({
       stage: 'validate',
@@ -203,12 +207,30 @@ describe('scrub — потеря не бывает молчаливой', () => 
     expect(intact.reason).toBe('ожидалась строка (type: string)');
   });
 
+  it('пустой ключ и съеденный зачисткой — разные состояния, а не один плейсхолдер', () => {
+    // `{"": 1}` — валидный JSON-объект, достижимый по И6, и зачистка в нём ничего не вырезала.
+    // Один текст на два случая дал бы разбирающему запись объяснение, которого не было.
+    const empty = denial({ stage: 'validate', code: 'unknown-param', paramName: '', reason: 'ключ не объявлен' });
+    const erased = denial({ stage: 'validate', code: 'unknown-param', paramName: ZWSP, reason: 'ключ не объявлен' });
+    expect(empty.paramName).not.toBe(erased.paramName);
+    expect(empty.paramName).not.toBe('');
+  });
+
+  it('усечённое имя помечается так же, как причина', () => {
+    // Принцип «потеря не бывает молчаливой» — свойство обоих полей, а не одного: без пометки
+    // ключ из 4096 эмодзи и ключ из 32 млн единиц приезжают одинаковыми 1024 точками.
+    const long = denial({ stage: 'validate', code: 'unknown-param', paramName: 'k'.repeat(8192), reason: 'ключ не объявлен' });
+    expect(long.paramName).toContain('зачистка изменила текст');
+    expect(codePointLength(long.paramName ?? '')).toBeLessThanOrEqual(1024);
+  });
+
   it('имя, съеденное зачисткой целиком, не превращается в пустую строку', () => {
     // `''` — третье, неописанное состояние: `null` по контракту значит «претензия к самому
     // запросу», и потребитель, рисующий `paramName ?? 'запрос'`, показал бы пустую метку.
     const erased = denial({ stage: 'validate', code: 'unknown-param', paramName: ZWSP + ZWSP, reason: 'ключ не объявлен' });
     expect(erased.paramName).not.toBe('');
     expect(erased.paramName).not.toBeNull();
+    expect(erased.paramName).toContain('вырезано');
   });
 });
 

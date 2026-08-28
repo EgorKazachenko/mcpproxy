@@ -26,35 +26,10 @@ describe('раннер', () => {
     expect(outside).toEqual([]);
   });
 
-  it('каждый файл на диске попадает хотя бы под один шаблон include из vitest.config.ts', () => {
-    // Утверждение выше ловит только перенос файла ВЫШЕ `src/`. Сужение самого шаблона внутри
-    // `src/` оно не видит, потому что строка `src/` вписана в тест руками: замерено, что
-    // `include: ['src/validate/**/*.test.ts']` даёт 7 файлов и 87 тестов, код возврата 0, —
-    // молча исчезают и этот сторож, и `deps.test.ts`, то есть весь гейт границ пакета.
-    // Поэтому граница берётся из самого конфига, а не дублируется здесь.
-    //
-    // Конфиг читается как текст, а не импортируется: он лежит вне `rootDir: src`, и импорт
-    // вынес бы его в сборку пакета.
-    const config = readFileSync(new URL('../vitest.config.ts', import.meta.url), 'utf8');
-    const includeBlock = /include:\s*\[([^\]]*)\]/.exec(config);
-    expect(includeBlock, 'в vitest.config.ts не найден include').not.toBeNull();
-
-    const patterns = [...(includeBlock?.[1] ?? '').matchAll(/'([^']+)'/g)].map((one) => one[1] ?? '');
-    expect(patterns.length).toBeGreaterThan(0);
-
-    // Достаточный для этих шаблонов перевод глоба в регулярку: `**/` — любой префикс каталогов,
-    // `*` — сегмент без разделителя.
-    const matches = (pattern: string, path: string): boolean => {
-      const source = pattern
-        .split('**/')
-        .map((part) => part.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '[^/]*'))
-        .join('(?:.*/)?');
-      return new RegExp(`^${source}$`).test(path);
-    };
-
-    const uncovered = testFiles
-      .map((parts) => parts.join('/'))
-      .filter((path) => !patterns.some((pattern) => matches(pattern, path)));
-    expect(uncovered).toEqual([]);
-  });
+  // Третье утверждение — про то, что каждый файл на диске попадает под шаблон `include`, —
+  // здесь НЕ живёт, и это не упущение. Сужение `include` первым делом уносит сам файл со
+  // сторожем: замерено, что `include: ['src/validate/**/*.test.ts']` даёт 7 файлов, 99 тестов
+  // и код возврата 0, унося и `harness.test.ts`, и `deps.test.ts`. Поэтому проверка стоит в
+  // `scripts/check-test-include.mjs` — ДО vitest, в самой команде `test`, где сужением
+  // шаблона её не достать. Дублировать её здесь значило бы держать строго более слабую копию.
 });

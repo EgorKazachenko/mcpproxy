@@ -110,7 +110,7 @@ const slotCount = (text: string): number => text.split(ARGV_SLOT).length - 1;
  * `Recipe` минует загрузчик, то есть имя параметра может нести одиночный суррогат, а
  * `problems` показывается человеку и, вероятно, ложится в диагностику загрузки E1.
  */
-const label = (name: string): string => JSON.stringify(name);
+const quoted = (name: string): string => JSON.stringify(name);
 
 export function prepareRecipe(
   recipeName: RecipeName,
@@ -162,9 +162,9 @@ export function prepareRecipe(
     // всех пяти типов, и, закрыв ветку один раз на подготовке, `buildArgv` избавляется от неё.
     const argv = [...(param.argv ?? [])];
     argv.forEach((element, index) => {
-      requireCanonicalizable(`${label(name)}.argv[${index}]`, element);
+      requireCanonicalizable(`${quoted(name)}.argv[${index}]`, element);
       if (slotCount(element) > 1) {
-        problems.push(`${label(name)}.argv[${index}] содержит слот ${ARGV_SLOT} больше одного раза`);
+        problems.push(`${quoted(name)}.argv[${index}] содержит слот ${ARGV_SLOT} больше одного раза`);
       }
     });
 
@@ -179,14 +179,14 @@ export function prepareRecipe(
         if (matcher === undefined) {
           // Ошибка подготовки, а не пер-вызовная развилка (R4): развилка «матчер не найден»
           // на горячем пути возвращает тот самый выбор, запасной путь в котором — `new RegExp`.
-          problems.push(`${label(name)}: нет скомпилированного матчера для параметра type: string`);
+          problems.push(`${quoted(name)}: нет скомпилированного матчера для параметра type: string`);
           break;
         }
         params.push({ kind: 'string', ...head, matcher, maxLength: param.maxLength ?? null });
         break;
       }
       case 'enum': {
-        for (const value of param.values) requireCanonicalizable(`${label(name)}.values`, value);
+        for (const value of param.values) requireCanonicalizable(`${quoted(name)}.values`, value);
         params.push({ kind: 'enum', ...head, values: [...param.values] });
         break;
       }
@@ -207,21 +207,21 @@ export function prepareRecipe(
         // двух проверок счёта слотов его не ловит — обе смотрят только `> 1`.
         for (const [index, element] of argv.entries()) {
           if (slotCount(element) > 0) {
-            problems.push(`${label(name)}.argv[${index}]: слот ${ARGV_SLOT} в boolean-параметре не подставляется`);
+            problems.push(`${quoted(name)}.argv[${index}]: слот ${ARGV_SLOT} в boolean-параметре не подставляется`);
           }
         }
         params.push({ kind: 'boolean', ...head });
         break;
       }
       case 'path': {
-        requireCanonicalizable(`${label(name)}.root`, param.root);
+        requireCanonicalizable(`${quoted(name)}.root`, param.root);
         const root = isAbsolute(param.root) ? resolve(param.root) : resolve(dir, param.root);
 
         // Две половины одной проверки, и вторую нельзя опускать, взяв только первую: они
         // стоят рядом в `refine.ts:213` и `:223`, а программный `Recipe` с `root: '../..'`
         // проходит первую и выходит за каталог манифеста.
         if (root === resolve('/')) {
-          problems.push(`${label(name)}.root: "/" не ограничивает ничего`);
+          problems.push(`${quoted(name)}.root: "/" не ограничивает ничего`);
           break;
         }
         if (!isAbsolute(param.root)) {
@@ -229,7 +229,7 @@ export function prepareRecipe(
           // `relative` = `"..cache"` — это законный ПОДкаталог.
           const outside = relative(dir, root);
           if (outside === '..' || outside.startsWith(`..${sep}`)) {
-            problems.push(`${label(name)}.root: относительный root не может выходить за каталог манифеста`);
+            problems.push(`${quoted(name)}.root: относительный root не может выходить за каталог манифеста`);
             break;
           }
         }
@@ -242,14 +242,25 @@ export function prepareRecipe(
         // `Param` — генерируемый из схемы тип: шестая ветка приедет сама, и без этой строки
         // параметр молча не попал бы в `prepared.params`, то есть запрос с ним стал бы
         // `unknown-param`, а его элементы argv не появились бы никогда.
+        // Гейт компиляции здесь уместен, но отказа он не заменяет: вся функция —
+        // перепроверка на входе, который МИНУЕТ загрузчик, а `Param` генерируется из схемы.
+        // Замерено: без этой строки параметр с неизвестным `type` исчезал молча, и запрос с
+        // ним получал `unknown-param` — след утверждал, что параметр не объявлен, хотя он
+        // объявлен. Все семь остальных инвариантов этой функции пишут `problems`; эта ветка
+        // была единственной, которая не писала ничего.
         const unreachable: never = param;
-        void unreachable;
+        problems.push(`${quoted(name)}: неизвестный тип параметра ${quoted(String((unreachable as { type?: unknown }).type ?? ''))}`);
         break;
       }
     }
   }
 
   if (problems.length > 0) return { ok: false, problems };
-  // Единственная точка чеканки бренда; двойной каст по той же причине, что у карт значений.
-  return { ok: true, prepared: { recipeName, params, cwd, exec } as unknown as PreparedRecipe };
+
+  // Единственная точка чеканки бренда. `satisfies` стоит ДО каста намеренно: голый
+  // `as unknown as` снимает структурную проверку литерала целиком, и замерено, что под ним
+  // молча компилируются `cwd: 42`, пропуск `exec` и подмена поля полем. Раньше эту проверку
+  // обеспечивал возвращаемый тип; бренд её забрал, `satisfies` возвращает.
+  const minted = { recipeName, params, cwd, exec } satisfies Omit<PreparedRecipe, typeof prepared>;
+  return { ok: true, prepared: minted as unknown as PreparedRecipe };
 }

@@ -1,5 +1,6 @@
-import { asRecipeName, matcherKey, type PatternMatcher, type Recipe } from '@mcpproxy/contracts';
+import { asRecipeName, matcherKey, type Param, type PatternMatcher, type Recipe } from '@mcpproxy/contracts';
 import { describe, expect, it } from 'vitest';
+import { isCanonicalizable } from './denial.js';
 import { prepareRecipe, type PreparedParam } from './prepare.js';
 
 const NAME = asRecipeName('run_tests');
@@ -126,6 +127,31 @@ describe('prepareRecipe — канонизируемость строк реце
     // строку, а бренд — утверждение компилятора, не рантайм-проверка.
     const hostile = `run${LONE_HIGH}` as unknown as typeof NAME;
     expect(prepareRecipe(hostile, recipeOf({}), matchersFor(), DIR).ok).toBe(false);
+  });
+});
+
+describe('prepareRecipe — текст проблем и неизвестный тип', () => {
+  it('имя параметра в тексте проблемы экранировано: сырой суррогат до человека не доезжает', () => {
+    // Единственное правило дельты, которое снималось при 110/110 зелёных: замена `quoted`
+    // на identity не красила ничего, потому что на текст `problems` не смотрел ни один трейс.
+    const recipe = recipeOf({ params: { [`f${LONE_HIGH}`]: { type: 'path', root: '/' } } });
+    const result = prepareRecipe(NAME, recipe, matchersFor(), DIR);
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    // Утверждается свойство, а не формулировка: весь текст обязан переживать канонизацию,
+    // потому что E1 показывает его человеку и, вероятно, кладёт в диагностику загрузки.
+    expect(isCanonicalizable(result.problems.join(' '))).toBe(true);
+  });
+
+  it('неизвестный тип параметра — отказ подготовки, а не молчаливое исчезновение', () => {
+    // Замерено до правки: параметр с чужим `type` не попадал в `prepared.params`, подготовка
+    // проходила, и запрос с ним получал `unknown-param` — след утверждал, что параметр не
+    // объявлен, хотя он объявлен. Гейт компиляции этого не закрывает: `Recipe`, собранный
+    // программно, минует загрузчик, а `Param` генерируется из схемы.
+    const recipe = recipeOf({ params: { f: { type: 'weird' } as unknown as Param, ok: { type: 'boolean' } } });
+    const result = prepareRecipe(NAME, recipe, matchersFor(), DIR);
+    expect(result.ok).toBe(false);
   });
 });
 

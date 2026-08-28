@@ -1,4 +1,4 @@
-import { sanitizeDescription, type Stage } from '@mcpproxy/contracts';
+import { DESCRIPTION_MAX_LENGTH, sanitizeDescription, type Stage } from '@mcpproxy/contracts';
 
 /**
  * Общие типы E2 и словарь отказов.
@@ -127,11 +127,21 @@ export interface Denial {
  */
 const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
 
-/** Приписывается к причине, когда зачистка изменила текст: молчаливая потеря — сама по себе дефект. */
+/** Приписывается, когда зачистка изменила текст: молчаливая потеря — сама по себе дефект. */
 const SCRUBBED_MARK = ' [зачистка изменила текст]';
 
-/** Ставится вместо имени, которое зачистка съела целиком: `''` не должно путаться с `null`. */
+/**
+ * Ставится вместо имени, которое зачистка съела целиком: `''` не должно путаться с `null`,
+ * который по контракту значит «претензия к самому запросу, а не к параметру».
+ */
 const NAME_ERASED = '<имя вырезано зачисткой>';
+
+/**
+ * И отдельно — ключ, который **пришёл** пустым. `{"": 1}` — валидный JSON-объект, достижимый
+ * по И6, и зачистка в нём ничего не вырезала. Один плейсхолдер на два разных случая дал бы
+ * разбирающему запись объяснение, которого не было.
+ */
+const NAME_EMPTY = '<пустой ключ запроса>';
 
 /**
  * Две зачистки подряд, и обе обязательны, потому что каждая закрывает то, что пропускает
@@ -150,10 +160,20 @@ function scrubbed(text: string): string {
   return sanitizeDescription(text).text.replace(LONE_SURROGATE, '');
 }
 
+/**
+ * Пометка приписывается ВНУТРИ потолка, а не сверх него: `sanitizeDescription` гарантирует
+ * `<= DESCRIPTION_MAX_LENGTH` кодовых точек, и наивное `clean + MARK` эту гарантию тихо
+ * снимало бы — замерено, причина из 2000 символов приезжала длиной 1050.
+ */
+function marked(clean: string, original: string): string {
+  if (clean === original) return clean;
+  const room = DESCRIPTION_MAX_LENGTH - [...SCRUBBED_MARK].length;
+  return `${[...clean].slice(0, room).join('')}${SCRUBBED_MARK}`;
+}
+
 /** Причина: изменённый текст помечается, чтобы искажённый путь не читался как факт. */
 function scrubReason(text: string): string {
-  const clean = scrubbed(text);
-  return clean === text ? clean : `${clean}${SCRUBBED_MARK}`;
+  return marked(scrubbed(text), text);
 }
 
 /**
@@ -165,9 +185,17 @@ function scrubReason(text: string): string {
  * единиц, поэтому срез по единицам — корректная верхняя граница.
  */
 function scrubName(name: string): string {
+  if (name === '') return NAME_EMPTY;
+
   const clamped = name.length > VALUE_MAX_CODE_POINTS ? name.slice(0, VALUE_MAX_CODE_POINTS) : name;
   const clean = scrubbed(clamped);
-  return clean === '' ? NAME_ERASED : clean;
+  if (clean === '') return NAME_ERASED;
+
+  // Имя помечается по тому же правилу, что и причина: «потеря не бывает молчаливой» — принцип,
+  // а не свойство одного поля. Замерено, что без пометки ключ из 4096 эмодзи, ключ из 32 млн
+  // единиц и ключ из 2048 эмодзи с хвостом приезжают одинаковыми 1024 точками, и различить их
+  // по записи нельзя.
+  return marked(clean, name);
 }
 
 /**

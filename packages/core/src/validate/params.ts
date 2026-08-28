@@ -152,15 +152,23 @@ export function validateParams(prepared: PreparedRecipe, params: Readonly<Record
   // атакующему, полностью контролирующему сокет (И6), право вытеснить из усечённого списка
   // единственный отказ, называющий параметр с полезной нагрузкой. Вердикт «отвергнут» от
   // порядка не зависел бы, а предмет разбора — исчезал.
+  // Потолок держится для ВСЕГО списка, а не для одной его половины. Схема не ограничивает
+  // число параметров рецепта ничем (`maxProperties` в ней нет), поэтому «их число ограничено
+  // манифестом» — доверие к автору манифеста, а не контракт; а E4 сериализует этот список в
+  // append-only лог. Отказ, не поместившийся в потолок, считается, но не строится.
+  let omitted = 0;
+  const record = (input: Parameters<typeof denial>[0]): void => {
+    if (denials.length < DENIALS_MAX) denials.push(denial(input));
+    else omitted += 1;
+  };
+
   for (const param of prepared.params) {
     // `Object.hasOwn`, а не `params[name] !== undefined`: иначе `constructor` из запроса
     // читался бы с прототипа (R6). Схема запрещает `__proto__` в именах МАНИФЕСТА, но не в
     // ключах ЗАПРОСА.
     if (!Object.hasOwn(params, param.name)) {
       if (param.required) {
-        denials.push(
-          denial({ stage: 'validate', code: 'missing-required', paramName: param.name, reason: 'обязательный параметр не передан' }),
-        );
+        record({ stage: 'validate', code: 'missing-required', paramName: param.name, reason: 'обязательный параметр не передан' });
       }
       // Необязательный и не переданный — пропуск без значения и без элементов argv (R7).
       continue;
@@ -171,7 +179,7 @@ export function validateParams(prepared: PreparedRecipe, params: Readonly<Record
       values.set(param.name, checked.value);
       continue;
     }
-    denials.push(denial({ stage: 'validate', code: checked.code, paramName: param.name, reason: checked.reason }));
+    record({ stage: 'validate', code: checked.code, paramName: param.name, reason: checked.reason });
   }
 
   // Отсортировано по имени: иначе порядок списка задаёт атакующий порядком ключей в своём
@@ -180,19 +188,17 @@ export function validateParams(prepared: PreparedRecipe, params: Readonly<Record
     .filter((key) => !declared.has(key))
     .sort();
 
-  // Цикл обрывается на потолке, а не срезается после (R30а). Потолок, ограничивающий вывод,
-  // но не работу, — не потолок: замерено, что двадцать тысяч неизвестных ключей давали 313 мс
-  // построения отказов, каждый через две зачистки, ради тридцати двух строк на выходе. Это
-  // шестикратное превышение оверхед-бюджета ≤50 мс p95 на стадии, которая всё равно откажет.
-  let shown = 0;
+  // Отказы не строятся сверх потолка, а не срезаются после (R30а). Потолок, ограничивающий
+  // вывод, но не работу, — не потолок: замерено, что двадцать тысяч неизвестных ключей давали
+  // 313 мс построения отказов, каждый через две зачистки, ради тридцати двух строк на выходе.
+  // Это шестикратное превышение оверхед-бюджета ≤50 мс p95 на стадии, которая всё равно откажет.
   for (const key of unknown) {
-    if (denials.length >= DENIALS_MAX) break;
-    denials.push(
-      denial({ stage: 'validate', code: 'unknown-param', paramName: key, reason: 'ключ не объявлен в рецепте' }),
-    );
-    shown += 1;
+    if (denials.length >= DENIALS_MAX) {
+      omitted += unknown.length - unknown.indexOf(key);
+      break;
+    }
+    record({ stage: 'validate', code: 'unknown-param', paramName: key, reason: 'ключ не объявлен в рецепте' });
   }
-  const omitted = unknown.length - shown;
 
   if (denials.length === 0) {
     // Двойной каст: одинарный отвергается как недостаточно перекрывающийся. Чеканка бренда
@@ -212,7 +218,9 @@ export function validateParams(prepared: PreparedRecipe, params: Readonly<Record
         stage: 'validate',
         code: 'denials-truncated',
         paramName: null,
-        reason: `список отказов усечён: всего ${denials.length + omitted}, показаны первые ${denials.length}, не показаны ещё ${omitted} с кодом unknown-param`,
+        // «Показано», а не «первые»: внутренний порядок сбора не совпадает с порядком, в
+        // котором ключи прислал вызывающий, и по записи это неразличимо.
+        reason: `список отказов усечён: всего ${denials.length + omitted}, показано ${denials.length}, не показано ещё ${omitted}`,
       }),
     );
   }
