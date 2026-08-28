@@ -33,6 +33,8 @@ export const CHECK_IDS = [
   'output-floor',
   /** Значение длительности не превышает максимум таймера платформы. */
   'duration-executable',
+  /** Границы `number` выполнимы: существует хотя бы одно значение, проходящее `min`, `max` и `integer`. */
+  'bounds-satisfiable',
 ] as const;
 
 export type CheckId = (typeof CHECK_IDS)[number];
@@ -62,7 +64,10 @@ export const branchChecks: Readonly<Record<BranchName, readonly CheckId[]>> = {
   Param: [],
   StringParam: ['pattern-re2'],
   EnumParam: [],
-  NumberParam: [],
+  // Схема выражает каждое поле по отдельности, но не отношение между `min`, `max` и
+  // `integer`. Невыполнимые границы — не ошибка формы, поэтому загрузка их пропускала, а
+  // отвергал уже валидатор вызова, на каждом значении и без объяснения причины.
+  NumberParam: ['bounds-satisfiable'],
   BooleanParam: [],
   PathParam: ['root-confinement'],
   ArgvTemplate: ['argv-slot-count'],

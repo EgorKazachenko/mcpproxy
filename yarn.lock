@@ -263,6 +263,7 @@ __metadata:
   dependencies:
     "@anthropic-ai/sandbox-runtime": "npm:0.0.74"
     "@mcpproxy/contracts": "workspace:*"
+    "@types/node": "npm:^22"
     es-module-lexer: "npm:^2.3.2"
     re2: "npm:1.26.1"
     vitest: "npm:^3"
