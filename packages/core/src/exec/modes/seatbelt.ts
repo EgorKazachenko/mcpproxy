@@ -1,7 +1,7 @@
 import { realpathSync } from 'node:fs';
 import type { FilesystemConfig, SandboxRuntimeConfig } from '@anthropic-ai/sandbox-runtime';
 import type { NormalizedDefaults, SandboxMode, SandboxViolation } from '@mcpproxy/contracts';
-import { buildEnv } from '../env.js';
+import { buildEnv } from '../../env/build.js';
 import type { ExecEvent, EventSink } from '../events.js';
 import { measure } from '../events.js';
 import { DEFAULT_GRACE_MS, runProcess, toStreamOutcome } from '../limits.js';
@@ -136,7 +136,11 @@ export async function runInMode(
   // Стадия 1 — окружение. Событие несёт только ИМЕНА (R25): форма `AuditEvent.env` это и
   // позволяет, а значения не покидают процесс демона.
   const env = measure(() => buildEnv(effective.env.allow, process.env, behaviour.injectedEnv(request)));
-  emit({ stage: 'build_env', durationUs: env.durationUs, env: { allowed: [...effective.env.allow] } });
+  // Имена берутся из того, что процесс ПОЛУЧИЛ, а не из того, что рецепт запросил:
+  // разрешённое, но не заданное имя переменной у ребёнка отсутствует, и запись аудита,
+  // утверждающая обратное, врёт о состоянии процесса. Запрошенную политику восстанавливают
+  // из снапшота рецепта в lock, который хранит её целиком именно для этого.
+  emit({ stage: 'build_env', durationUs: env.durationUs, env: { allowed: env.value.allowed } });
 
   // Стадия 2 — профиль. `sandbox.profile` — **сырой** `SandboxProfile` манифеста (R36), а
   // `mode` обязателен всегда, когда присутствует `sandbox` (R33).
@@ -205,7 +209,7 @@ export async function runInMode(
       try {
         const argv = await behaviour.toArgv(request, profile.value);
         const raw = await runProcess(argv, {
-          ...limitsFor(effective, env.value, request.recipeCwd),
+          ...limitsFor(effective, env.value.env, request.recipeCwd),
           onSpawn: () => {
             spawnEmitted = true;
             emitSpawn();

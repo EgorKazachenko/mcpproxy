@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { asRecipeName, normalizeRecipe } from '@mcpproxy/contracts';
 import type { Defaults, Recipe } from '@mcpproxy/contracts';
-import { buildEnv } from './env.js';
+import { buildEnv } from '../env/build.js';
 import { EXEC_STAGES, collapseOutput, measure } from './events.js';
 import type { ExecEvent } from './events.js';
 import { buildProfile } from './profile.js';
@@ -259,7 +259,10 @@ describe.skipIf(!IS_MACOS)('порядок появления полей в со
   });
 
   it('env — только имена, значение секрета не сериализуется (R25)', () => {
-    expect(at('build_env').env?.allowed).toEqual(['E3_EVENT_SECRET']);
+    // `PATH` в списке потому, что список — это то, что процесс ПОЛУЧИЛ, а не то, что рецепт
+    // запросил: `PATH` ребёнку выдаётся всегда, минимальный. Запрошенную политику
+    // восстанавливают из снапшота рецепта в lock, который хранит её целиком.
+    expect(at('build_env').env?.allowed).toEqual(['E3_EVENT_SECRET', 'PATH']);
     expect(JSON.stringify(at('build_env'))).not.toContain(SECRET_VALUE);
   });
 
