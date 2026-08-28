@@ -38,10 +38,12 @@ export function webPreferencesFor(role: WindowRole, preload: string): Electron.W
  */
 export function createWindow(role: WindowRole, url: string): BrowserWindow {
   const preload = join(__dirname, '../preload/index.cjs');
+  const icon = join(__dirname, '../../assets/logo.svg');
   const window = new BrowserWindow({
     width: 1400,
     height: 900,
     show: false,
+    icon,
     webPreferences: webPreferencesFor(role, preload),
   });
   window.once('ready-to-show', () => window.show());
